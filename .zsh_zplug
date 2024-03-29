@@ -26,7 +26,15 @@ theme="lukerandall"
 # zplug 'carloscuesta/materialshell', use:materialshell, from:github, as:theme
 # zplug "themes/clean", from:oh-my-zsh, as:theme
 # zplug 'themes/linuxonly', from:oh-my-zsh, as:theme, use:"linuxonly.zsh-theme"
-zplug "themes/$theme", from:oh-my-zsh
+# zplug "themes/$theme", from:oh-my-zsh
+zplug "agnoster/agnoster-zsh-theme", use:agnoster.zsh-theme
+# Show virtualenv name in prompt
+function virtualenv_info() {
+    [ $VIRTUAL_ENV ] && echo "(`basename $VIRTUAL_ENV`)"
+}
+# Add virtualenv info to prompt
+PROMPT='$(virtualenv_info)'$PROMPT
+
 
 # oh-my-zsh plugins
 zplug "plugins/git", from:oh-my-zsh
