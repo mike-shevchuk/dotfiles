@@ -6,7 +6,7 @@
 # fi
 #
 
-DOTFILES=$HOME
+DOTFILES=$HOME/dotfiles
 ZPLUGRC=$DOTFILES/.zsh_zplug
 
 source $ZPLUGRC
