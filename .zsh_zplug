@@ -1,4 +1,6 @@
-ZSHPlUGINS=$DOTFILES/zsh_plug
+DOTFILES=$HOME/dotfiles
+
+ZSHPlUGINS=$HOME/$DOTFILES/zsh_plug
 # zplug
 if [[ ! -d $ZSHPlUGINS ]]; then
 	git clone https://github.com/zplug/zplug $ZSHPlUGINS
@@ -19,6 +21,10 @@ zplug "zsh-users/zsh-history-substring-search", defer:3
 # oh-my-zsh base config
 # This is a selection of the available libs
 # zplug "robbyrussell/oh-my-zsh", use:"lib/{completion,correction,git,grep,history,key-bindings,termsupport}.zsh"
+# oh-my-zsh plugins
+zplug 'carloscuesta/materialshell', use:materialshell, from:github, as:theme
+
+
 # oh-my-zsh plugins
 zplug "plugins/git", from:oh-my-zsh
 zplug "plugins/docker", from:oh-my-zsh

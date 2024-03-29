@@ -7,13 +7,15 @@
 #
 
 DOTFILES=$HOME
-ZPLUGRC=$DOTFILES/zsh_zplug
-ZSHPlUGINS=$DOTFILES/.zsh_plug
+ZPLUGRC=$DOTFILES/.zsh_zplug
 
 source $ZPLUGRC
 
 alias szsh='source ~/.zshrc'
 alias nv='nvim'
+alias l='ls'
+alias la='ls -ah'
+alias ll='ls -lh'
 
 
 
