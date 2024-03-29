@@ -22,8 +22,11 @@ zplug "zsh-users/zsh-history-substring-search", defer:3
 # This is a selection of the available libs
 # zplug "robbyrussell/oh-my-zsh", use:"lib/{completion,correction,git,grep,history,key-bindings,termsupport}.zsh"
 # oh-my-zsh plugins
-zplug 'carloscuesta/materialshell', use:materialshell, from:github, as:theme
-
+theme="lukerandall"
+# zplug 'carloscuesta/materialshell', use:materialshell, from:github, as:theme
+# zplug "themes/clean", from:oh-my-zsh, as:theme
+# zplug 'themes/linuxonly', from:oh-my-zsh, as:theme, use:"linuxonly.zsh-theme"
+zplug "themes/$theme", from:oh-my-zsh
 
 # oh-my-zsh plugins
 zplug "plugins/git", from:oh-my-zsh
@@ -54,7 +57,7 @@ zplug "rupa/z", use:z.sh
 #source ~/.zsh/themes/spaceship.zsh
 # source ~/.zsh/themes/powerlevel10k.zsh
 
-Install plugins if there are plugins that have not been installed
+# Install plugins if there are plugins that have not been installed
 if ! zplug check --verbose; then
    printf "Install? [y/N]: "
    if read -q; then
