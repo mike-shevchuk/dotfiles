@@ -29,7 +29,7 @@ alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
 
 
-alias stow="/home/mike/.local/src/stow-2.4.0/bin/stow"
+alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
 
 # alias ll='exa -l --color=always --group-directories-first --icons'
 # alias ls='exa --color=always --group-directories-first --icons'
