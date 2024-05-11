@@ -28,6 +28,7 @@ alias ll='ls -lh'
 alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
 
+alias git_dog="git log --all --decorate --oneline --graph"
 
 alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
 
