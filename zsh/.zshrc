@@ -15,8 +15,7 @@ eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
 
-DOTFILES=$HOME/dotfiles
-ZPLUGRC=$DOTFILES/.zsh_zplug
+ZPLUGRC=$HOME/.zsh_zplug
 
 ############ INFO: ZPLUG
 source $ZPLUGRC
@@ -29,14 +28,19 @@ alias ll='ls -lh'
 alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
 
+
+alias stow="/home/mike/.local/src/stow-2.4.0/bin/stow"
+
 # alias ll='exa -l --color=always --group-directories-first --icons'
 # alias ls='exa --color=always --group-directories-first --icons'
 # alias cat='bat --style header --style snip --style changes --style header'
 
 alias bwu="bw unlock | sed -n 4p | cut -d ' ' -f 2-3 | xargs -o echo | xclip -sel c"
 alias bw_gpt4_token="bw list items | jq -r '.[] | select(.login.username==\"yuriy@znovyak.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"Token\") | .value'"
+alias btuith="bluetuith"
 
-alias nvim-lazy="NVIM_APPNAME=LazyVim nvim"
+
+alias lz="NVIM_APPNAME=LazyVim nvim"
 alias nvim-kick="NVIM_APPNAME=kickstart nvim"
 alias nvim-chad="NVIM_APPNAME=NvChad nvim"
 alias nv="NVIM_APPNAME=AstroNvim nvim"
