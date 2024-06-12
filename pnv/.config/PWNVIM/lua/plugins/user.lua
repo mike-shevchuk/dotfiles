@@ -120,9 +120,9 @@ return {
 
         groups = { -- table: default groups
         'Normal', 'NormalNC', 'Comment', 'Constant', 'Special', 'Identifier',
-        'Statement', 'PreProc', 'Type', 'Underlined', 'Todo', 'String', 'Function',
-        'Conditional', 'Repeat', 'Operator', 'Structure', 'LineNr', 'NonText',
-        'SignColumn', 'CursorLine', 'CursorLineNr', 'StatusLine', 'StatusLineNC',
+        'statement', 'PreProc', 'Type', 'Underlined', 'Todo', 'string', 'Function',
+        'Conditional', 'Repeat', 'Operator', 'structure', 'LineNr', 'NonText',
+        'SignColumn', 'CursorLine', 'CursorLineNr', 'statusLine', 'statusLineNC',
         'EndOfBuffer',
       },
       extra_groups = {}, -- table: additional groups that should be cleared
