@@ -37,6 +37,19 @@ return {
     end,
   },
 
+  {
+    "kevinhwang91/rnvimr",
+    event = { "BufReadPost", "BufNewFile" },
+    keys = { { "<leader>R", "<cmd>RnvimrToggle<cr>", desc = "Ranger file manager" } },
+    init = function()
+      vim.g.rnvimr_enable_picker = 1
+      vim.g.rnvimr_border_attr = { fg = 3, bg = -1 }
+      vim.g.rnvimr_shadow_winblend = 90
+    end,
+  },
+
+
+
 
 
   { "goolord/alpha-nvim", enabled = true },
@@ -219,7 +232,9 @@ return {
           print(new_dir .. " was opened")
         end },
       })
+    -- TODO: add hiden files like find files 
     vim.api.nvim_set_keymap('n', '<Leader>fd', ":Telescope opener<CR>", { noremap = true })
+          
     end
   }, 
 
