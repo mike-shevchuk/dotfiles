@@ -12,5 +12,7 @@ end
 vim.opt.rtp:prepend(lazypath)
 
 require("configs/options")
-require("configs/mapping")
 require("lazy").setup("plugins")
+
+require("configs/mapping")
+vim.cmd("colorscheme nightfox")
