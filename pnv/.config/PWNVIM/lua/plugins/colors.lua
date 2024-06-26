@@ -2,10 +2,14 @@ return {
   {
     'kristijanhusak/vim-hybrid-material',
   },
+
+
+  { "lukas-reineke/indent-blankline.nvim", main = "ibl", opts = {} },
   {
     "neanias/everforest-nvim",
   },
-  { "catppuccin/nvim", name = "catppuccin", priority = 1000 },
+  { "EdenEast/nightfox.nvim", name= "nightfox", priority=1000 },
+  { "catppuccin/nvim", name = "catppuccin", priority = 800 },
   {  "rebelot/kanagawa.nvim"},
   { "folke/lsp-colors.nvim"},
   {
