@@ -1,10 +1,12 @@
 local st=vim.keymap.set
 
-vim.keymap.set('n', 'ee', '<cmd>Neotree Toogle<CR>', { desc = "Neotree" })
+vim.keymap.set('n', 'e', '<cmd>Neotree Toogle<CR>', { desc = "Neotree" })
 
 st("n", "<leader>ff", '<cmd>Telescope find_files<cr>', { desc="Find files"})
 st('n', '<leader>fh', '<cmd>Telescope find_files hidden=true no_ignore=true<cr>', { desc="Find_files"})
-st('n', '<C-p>', '<cmd>Telescope commands<cr>', { desc='Command Pallete'})
+-- st('n', '<C-p>', '<cmd>Telescope commands<cr>', { desc='Command Pallete'})
+
+st('n', '<C-p>', '<cmd>Legendary<cr>', { desc='Command Pallete'})
 st('n', '<leader>fb', '<cmd>Telescope buffers<cr>', { desc="Find_buffers"})
 st('n', '<leader>ft', '<cmd>Telescope themes<cr>', { desc="colorscheme" })
 --
@@ -12,10 +14,6 @@ st('n', '<leader>ft', '<cmd>Telescope themes<cr>', { desc="colorscheme" })
 -- ["<leader>3"] = { ":Neotree left reveal<cr>", desc = "Change directory", silent = true, noremap = true },
 -- st('n', "<leader>ee", "<cmd>Neotree toggle<cr>", {desc="Neovim"})
 -- st('n', "<leader>3", "<cr>Neotree left reveal<cr>", {desk="Change directory", silent = true, noremap = true})
-
-
-
-
 
 
 
@@ -36,7 +34,7 @@ st('t', '<C-o>', '<C-\\><C-n><cmd>ToggleTermToggleAll<CR>', {desc= 'Term toggle'
 
 
 
-st('i', "<C-f>", "<cmd>HopChar1<cr>", {desc = "Find char"})
+-- st('i', "<C-f>", "<cmd>HopChar1<cr>", {desc = "Find char"})
 st('i', "<C-e>", "<esc>A", {desc = "The end of the line" })
 st('i', "<C-a>", "<esc>I", {desc = "The beginning of the line" })
 
