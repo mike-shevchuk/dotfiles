@@ -4,6 +4,18 @@ return {
   },
 
 
+  {
+    "scottmckendry/cyberdream.nvim",
+    lazy = false,
+    -- priority = 1000,
+  },
+
+
+  {
+    "tjdevries/colorbuddy.nvim",
+  },
+
+
   { "lukas-reineke/indent-blankline.nvim", main = "ibl", opts = {} },
   {
     "neanias/everforest-nvim",
