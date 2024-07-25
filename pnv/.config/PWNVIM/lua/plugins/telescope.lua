@@ -35,7 +35,7 @@ return {
     dependencies = { 
       "nvim-lua/plenary.nvim",
       'andrew-george/telescope-themes',
-      "nvim-telescope/telescope-frecency.nvim",
+      -- "nvim-telescope/telescope-frecency.nvim",
     }, 
     keys = {
       {
@@ -89,7 +89,8 @@ return {
 
       require("telescope").load_extension("ui-select")
       require("telescope").load_extension('themes')
-      require("telescope").load_extension("frecency")
+      --  Has some bugs
+      -- require("telescope").load_extension("frecency")
     end,
   },
 }
