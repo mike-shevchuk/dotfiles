@@ -70,4 +70,13 @@ return {
     vim.keymap.set("n", "<leader>xl", function() require("trouble").toggle("loclist") end)
     vim.keymap.set("n", "gR", function() require("trouble").toggle("lsp_references") end)
   end,
+  keys = {
+    desc = 'TroubleToggle',
+    {'<leader>xx', '<cmd>TroubleToggle<cr>', desc = "Toggle trouble", mode="n"},
+    {'<leader>xw', '<cmd>TroubleToggle workspace_diagnostics<cr>', desc = "Toggle trouble workspace_diagnostics", mode="n"},
+    {'<leader>xd', '<cmd>TroubleToggle document_diagnostics<cr>', desc = "Toggle trouble document_diagnostics", mode="n"},
+    {'<leader>xq', '<cmd>TroubleToggle quickfix<cr>', desc = "Toggle trouble quickfix", mode="n"},
+    {'<leader>xl', '<cmd>TroubleToggle loclist<cr>', desc = "Toggle trouble loclist", mode="n"},
+    {'gR', '<cmd>TroubleToggle lsp_references<cr>', desc = "Toggle trouble lsp_references", mode="n"},
+  }
 }
