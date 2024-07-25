@@ -3,6 +3,31 @@ return {
     'kristijanhusak/vim-hybrid-material',
   },
 
+  -- {
+  --   'fei6409/log-highlight.nvim',
+  --   enable=false,
+  --   config = function()
+  --     require('log-highlight').setup {
+  --       filename = {
+  --         'messages',
+  --         'name',
+  --       },
+  --     }
+  --   end,
+  -- },
+
+  -- Not work propperly
+  -- {
+  --   "icedman/nvim-textmate",
+  --   config = function()
+  --     require("nvim-textmate").setup({
+  --       quick_load = true,
+  --       theme_name = 'Dracula',
+  --       -- override_colorscheme = false
+  --     })
+  --   end,
+  -- },
+
 
   {
     "scottmckendry/cyberdream.nvim",
@@ -51,6 +76,7 @@ return {
     },
 
 
+    --  don't use (((
     { 
       'xiyaowong/transparent.nvim',
       config = function()

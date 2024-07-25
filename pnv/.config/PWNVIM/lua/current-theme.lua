@@ -1,1 +1,1 @@
-vim.cmd("colorscheme hybrid_material")
+vim.cmd("colorscheme cyberdream")
