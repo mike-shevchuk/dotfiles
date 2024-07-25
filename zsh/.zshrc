@@ -20,6 +20,14 @@ ZPLUGRC=$HOME/.zsh_zplug
 ############ INFO: ZPLUG
 source $ZPLUGRC
 
+############# ARCH
+alias syu='sudo pacman -Syu'
+#
+#
+#
+#
+###############
+
 alias szsh='source ~/.zshrc'
 alias nv='nvim'
 alias l='ls'
@@ -37,13 +45,24 @@ alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
 # alias cat='bat --style header --style snip --style changes --style header'
 
 alias bwu="bw unlock | sed -n 4p | cut -d ' ' -f 2-3 | xargs -o echo | xclip -sel c"
+
+alias bw_gpt_mike="bw_gpt_token 'mshevchukmofficial@gmail.com'"
+alias bw_gpt_yuiriy="bw_gpt_token 'yuriy@znovyak.com'"
+alias bw_gpt_lwi="bw_gpt_token 'wiai@sexeducation.com.ua'"
+
+export GPT_TOKEN="$(bw_gpt_token 'wiai@sexeducation.com.ua' || echo '')"
+
+
+alias bw_lb_gpt4="bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
 alias bw_gpt3_token="bw list items | jq -r '.[] | select(.login.username==\"mshevchukmofficial@gmail.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-alias bw_gpt4_token="bw list items | jq -r '.[] | select(.login.username==\"yuriy@znovyak.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-alias btuith="bluetuith"
+# alias bw_gpt4_token="bw list items | jq -r '.[] | select(.login.username==\"yuriy@znovyak.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
+# alias bw_gpt4_token = 
+# alias btuith="bluetuith"
+# export GPT4_TOKEN=$(bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value')
 
 
 alias lz="NVIM_APPNAME=LazyVim nvim"
-alias nvim-kick="NVIM_APPNAME=kickstart nvim"
+alias kck="NVIM_APPNAME=kickstart nvim"
 alias nvim-chad="NVIM_APPNAME=NvChad nvim"
 alias nv="NVIM_APPNAME=AstroNvim nvim"
 alias pnv="NVIM_APPNAME=PWNVIM nvim"
@@ -60,6 +79,11 @@ function nvims() {
     config=""
   fi
   NVIM_APPNAME=$config nvim $@
+}
+
+bw_gpt_token() {
+  local email="$1"
+  bw list items | jq -r --arg email "$email" '.[] | select(.login.username==$email and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value'
 }
 
 
