@@ -1,31 +1,28 @@
-return {
-  {
-    'rmagatti/auto-session',
-    dependencies = {
-      'nvim-telescope/telescope.nvim', -- Only needed if you want to use sesssion lens
-    },
-    enable = true,
-
-    config = function()
-      require('legendary').setup({ extensions = { lazy_nvim = true } })
-      require('auto-session').setup({
-        auto_session_enable_last_session = true,
-        auto_session_suppress_dirs = { '~/', '~/Projects', '~/Downloads', '/', '~/dotfiles' },
-        session_lens = {
-          buftypes_to_ignore = {},
-          load_on_setup = true,
-          theme_conf = {border = true},
-          previewer = false,
-        },
-        keymaps = {
-          {
-            "<leader>fs",
-            '<cmd>Telescope commander<cr>',
-            desc = 'FCK Find session',
-            mode = {"n"},
-          },
-        },
-      })
-    end,
-  },
+local tmux_session = {
+  "sanathks/workspace.nvim",
+  dependencies = {"nvim-telescope/telescope.nvim"}, 
+  config = function()
+  local workspace = require("workspace")
+  local commander = require("commander")
+    workspace.setup({
+      workspaces = {
+        { name = "Dotfiles", path = "~/dotfiles", keymap = {"<leader>sd"} }, 
+        { name = "Hobby",     path = "~/myword",  keymap = { "<leader>sh" } },
+        { name = "Work",    path = "~/JOB/LAB325", keymap = { "<leader>sw" } },
+      }
+    })
+    commander.add({
+      { keys = {"n", "<leader>ss"}, cmd = workspace.tmux_sessions, desc = "Tmux session" },
+    })
+  end,
 }
+
+
+
+
+
+
+
+return {
+  tmux_session,
+} 

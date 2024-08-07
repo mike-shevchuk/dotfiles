@@ -2,6 +2,13 @@ return {
   {
     "nvim-telescope/telescope-ui-select.nvim",
   },
+
+
+  {
+  "nvim-telescope/telescope-z.nvim",
+  -- config = function()
+  -- end,
+  },
   {
     'gelguy/wilder.nvim',
     config = function()
@@ -89,6 +96,8 @@ return {
 
       require("telescope").load_extension("ui-select")
       require("telescope").load_extension('themes')
+      require("telescope").load_extension("z")
+
       --  Has some bugs
       -- require("telescope").load_extension("frecency")
     end,

@@ -44,8 +44,6 @@ local rngr = {
 
 
 local other = {
-
-
   -- NOTE: perfect
   {
     "yorickpeterse/nvim-window",
@@ -149,17 +147,31 @@ local other = {
     }
   },
 
-
-
-
 }
 
 
 local alpha = { "goolord/alpha-nvim", enabled = true }
 
 
+local fold = {
+	"chrisgrieser/nvim-origami",
+	event = "BufReadPost", -- later or on keypress would prevent saving folds
+  config = function()
+    local folder = require('origami')
+    folder.setup({
+      keepFoldsAcrossSessions = true,
+      pauseFoldsOnSearch = true,
+      setupFoldKeymaps = true,
+      hOnlyOpensOnFirstColumn = false,
+      
+    })
+
+  end,
+}
+
 
 return {
+  fold,
   rng,
   rngr,
   alpha,

@@ -22,6 +22,7 @@ commander =  {
         "KEYS",
         "CAT",
         "CMD",
+        -- "SET",
       },
       sort_by = {
         "DESC",
@@ -52,9 +53,12 @@ legendary = {
   config = function()
     local leg = require("legendary")
     require("legendary").setup { include_builtin = true, auto_register_which_key = true }
+    local commander = require("commander")
     leg.keymap(keymap)
     leg.setup({
       keymaps = {
+          -- vim.g.legendary_keymaps,
+
         -- map keys to a command
         -- { '<leader>ff', ':Telescope find_files<cr>', description = 'Telescope Find files' },
         { '<leader>fc', ':Telescope commands<cr>', description = 'Telescope commands pallete'},

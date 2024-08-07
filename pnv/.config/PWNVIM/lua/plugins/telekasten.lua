@@ -2,15 +2,15 @@ return {
   'renerocksai/telekasten.nvim',
   dependencies = {'nvim-telescope/telescope.nvim'},
   keys = {
-    { "<leader>z", "<cmd>Telekasten panel<CR>", desc="FUCK Telekasten Panel", mode={'n'}},
+    -- { "<leader>z", "<cmd>Telekasten panel<CR>", desc="Telekasten Panel", mode={'n'}},
     { "<leader>zt", "<cmd>Telekasten show_tags<CR>", desc="Telekasten show tags", mode={'n'}},
-    { "<leader>zg", "<cmd>Telekasten search_notes<CR>", desc="FUCK Telekasten search notes", mode={'n'}},
-    { "<leader>zd", "<cmd>Telekasten goto_today<CR>", desc="FUCK Telekasten go today notes", mode={'n'}},
-    { "<leader>zz", "<cmd>Telekasten folow_links<CR>", desc="FUCK Telekasten follow links", mode={'n'}},
-    { "<leader>zn", "<cmd>Telekasten new_note<CR>", desc="FUCK Telekasten create new note", mode={'n'}},
-    { "<leader>zc", "<cmd>Telekasten show_calendar<CR>", desc="FUCK Telekasten calendar", mode={'n'}},
-    { "<leader>zb", "<cmd>Telekasten show_backlinks<CR>", desc="FUCK Telekasten backlinks", mode={'n'}},
-    { "<leader>zI", "<cmd>Telekasten insert_img_link<CR>", desc="FUCK Telekasten insert image", mode={'n'}},
+    { "<leader>zg", "<cmd>Telekasten search_notes<CR>", desc="Telekasten search notes", mode={'n'}},
+    { "<leader>zd", "<cmd>Telekasten goto_today<CR>", desc="Telekasten go today notes", mode={'n'}},
+    { "<leader>zz", "<cmd>Telekasten folow_links<CR>", desc="Telekasten follow links", mode={'n'}},
+    { "<leader>zn", "<cmd>Telekasten new_note<CR>", desc="Telekasten create new note", mode={'n'}},
+    { "<leader>zc", "<cmd>Telekasten show_calendar<CR>", desc="Telekasten calendar", mode={'n'}},
+    { "<leader>zb", "<cmd>Telekasten show_backlinks<CR>", desc="Telekasten backlinks", mode={'n'}},
+    { "<leader>zI", "<cmd>Telekasten insert_img_link<CR>", desc="Telekasten insert image", mode={'n'}},
   },
 
   config = function()
