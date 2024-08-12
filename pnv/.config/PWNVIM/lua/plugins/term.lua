@@ -10,9 +10,13 @@ local tterm =   {
       })
     end,
     keys = {
-      { "<Leader>at", "<cmd>ToggleTerm direction=float<CR>", desc = "terminal float" },
+      { "<leader>ta", "<cmd>ToggleTerm direction=float<CR>", desc = "terminal float" },
+      { "<leader>tv", "<cmd>ToggleTerm direction=vertical<CR>", desc = "terminal vertical" },
+      { "<leader>th", "<cmd>ToggleTerm direction=horizontal<CR>", desc = "terminal horizontal" },
     },
 }
+
+
 
 local tmanager = {
   "ryanmsnyder/toggleterm-manager.nvim",
@@ -63,7 +67,7 @@ local tmanager = {
 
 return {
   tterm,
-  tmanager
+  tmanager,
 }
 
 
