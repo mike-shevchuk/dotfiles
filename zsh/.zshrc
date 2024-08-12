@@ -36,7 +36,7 @@ alias la='ls -ah'
 alias ll='ls -lh'
 alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
-
+alias open="xdg-open"
 alias git_dog="git log --all --decorate --oneline --graph"
 
 alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
@@ -109,3 +109,5 @@ bindkey "^[[1;5C" forward-word
 # unset __conda_setup
 # # <<< conda initialize <<<
 #
+
+[ ! -f "$HOME/.x-cmd.root/X" ] || . "$HOME/.x-cmd.root/X" # boot up x-cmd.
