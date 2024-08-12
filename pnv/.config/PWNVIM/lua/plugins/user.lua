@@ -81,7 +81,7 @@ return {
   -- Plugin to diff different versions of a file
   {'will133/vim-dirdiff'},
 
-  { 
+  {
     'anuvyklack/pretty-fold.nvim',
     config = function()
       require('pretty-fold').setup({
@@ -100,7 +100,17 @@ return {
     end
   },
 
-  { 
+  {
+    "m4xshen/hardtime.nvim",
+    dependencies = { "MunifTanjim/nui.nvim", "nvim-lua/plenary.nvim" },
+    config = function ()
+      require("hardtime").setup({
+        enabled = false,
+      })
+    end
+  },
+
+  {
     'xiyaowong/transparent.nvim',
     config = function()
       require('transparent').setup({
@@ -138,7 +148,17 @@ return {
   },
 
   { "CRAG666/code_runner.nvim", config = true },
-  
+
+
+  {
+    "Praczet/encrypt-text.nvim",
+        config = function()
+            require("encrypt-text").setup({
+            dir_path = '~/zettelkasten'
+        })
+        end
+  },
+
    -- NOTE: perfetct, automatically highlighting other uses of the word under the cursor
   {
     "RRethy/vim-illuminate",
@@ -159,7 +179,7 @@ return {
     end,
   },
 
- 
+
 
   { "https://github.com/itchyny/calendar.vim.git"},
 
