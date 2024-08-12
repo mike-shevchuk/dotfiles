@@ -8,7 +8,8 @@ local tmux_session = {
       workspaces = {
         { name = "Dotfiles", path = "~/dotfiles", keymap = {"<leader>sd"} }, 
         { name = "Hobby",     path = "~/myword",  keymap = { "<leader>sh" } },
-        { name = "Work",    path = "~/JOB/LAB325", keymap = { "<leader>sw" } },
+        { name = "Work",    path = "~/JOB/LAB325/", keymap = { "<leader>sw" } },
+        { name = "LWI",     path = "~/JOB/LAB325/LWI/", keymap = {"<leader>sl" } }, 
       }
     })
     commander.add({
