@@ -12,7 +12,7 @@ source $ZSHPlUGINS/init.zsh
 zplug "zplug/zplug", hook-build:'zplug --self-manage'
 # Warn you when you run a command that you've got an alias for
 # zplug "djui/alias-tips"
-
+zplug "Aloxaf/fzf-tab"
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-autosuggestions"
 zplug "zsh-users/zsh-completions"
@@ -31,8 +31,13 @@ zplug "agnoster/agnoster-zsh-theme", as:theme, use:agnoster.zsh-theme
 # PROMPT='env:$env $PROMPT'
 
 
+# git plugins Not tested
+# zplug "czocher/gpg-crypt"
+
 # oh-my-zsh plugins
 zplug "plugins/git", from:oh-my-zsh
+# Not tested
+# zplug "plugins/gpg-agent", from:oh-my-zsh
 zplug "plugins/docker", from:oh-my-zsh
 zplug "plugins/docker-compose", from:oh-my-zsh
 zplug "plugins/github", from:oh-my-zsh
