@@ -1,4 +1,4 @@
-local lsp_delete =   {
+local lsp_conf =   {
   "neovim/nvim-lspconfig",
   lazy = false,
   config = function()
@@ -43,8 +43,11 @@ local lsp_delete =   {
     commander.add({
         { keys = {"n", "K"},  cmd = lsp_buf.hover, desc = "lsp hoover" },
         { keys = {"n", "<leader>gd"},  cmd = lsp_buf.definition, desc = "lsp definition" },
+
+        { keys = {"n", "<leader>gD"},  cmd = lsp_buf.declaration, desc = "lsp declaration" },
         { keys = {"n", "<leader>gr"},  cmd = lsp_buf.references, desc = "lsp references" },
         { keys = { {"n", "v"}, "<leader>ca"},  cmd = lsp_buf.code_action, desc = "lsp code_action" },
+
     })
 
     -- vim.keymap.set("n", "K", vim.lsp.buf.hover, {})
@@ -92,6 +95,6 @@ return {
   },
 
 
-  lsp_delete,
+  lsp_conf,
 
 }
