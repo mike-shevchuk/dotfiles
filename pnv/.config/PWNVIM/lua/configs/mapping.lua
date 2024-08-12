@@ -90,6 +90,13 @@ commander.add({
     cmd = "<cmd>Neotree toggle<cr>"
   },
 
+    {
+    desc = "Exit Terminal Mode",
+    keys = {"t", "<C-t>"},
+    cmd = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
+    end
+    },
 
 
   {
@@ -99,6 +106,10 @@ commander.add({
     end,
     keys = {"n", "<leader>H"}
   },
+
+
+
+    -- { "<leader>esc", "[[<C-\><C-n>]]", mode = "t", desc="exit terminal mode" },
 
 
   {
