@@ -37,21 +37,6 @@ local wrapped_get_input = function()
 end
 
 
-local rename_session_2 = function()
-    local new_session_name
-      -- wrapped_get_input()
-      --
-      --
-      coroutine.wrap(
-        function()
-          new_session_name = get_input("Enter new termux session")
-          new_session_name = new_session_name.input
-          vim.print("User input: " .. new_session_name)
-        end
-      )()
-    return new_session_name or ""
-end
-
 
 local function rename_session()
   local new_session_name = ""
@@ -90,13 +75,25 @@ commander.add({
     cmd = "<cmd>Neotree toggle<cr>"
   },
 
-    {
-    desc = "Exit Terminal Mode",
-    keys = {"t", "<C-t>"},
-    cmd = function()
-      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
-    end
+  {
+    desc = "Legendary",
+    keys = {
+      {"i", "n", "t"},
+      "<M-p>"
     },
+    cmd = "<cmd>Legendary<cr>"
+  },
+-- st('n', '<C-p>', '<cmd>Legendary<cr>', { desc='Command Pallete'})
+
+  -- {
+  --   desc = "Exit Terminal Mode",
+  --   keys = {"t", "<C-t>"},
+  --   cmd = function()
+  --     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
+  --   end
+  -- },
+  --
+
 
 
   {
@@ -104,7 +101,7 @@ commander.add({
     cmd = function()
       require("alpha").start()
     end,
-    keys = {"n", "<leader>H"}
+    keys = {{"n", 'i'}, "<C-H>"}
   },
 
 
@@ -113,7 +110,7 @@ commander.add({
 
 
   {
-    desc = "Renamr this terminal seesion",
+    desc = "Rename this terminal seesion",
     keys = {"n", "<leader>sr"},
     cmd = function()
       local new_session_name = rename_session()
@@ -149,24 +146,10 @@ commander.add({
 })
 
 
-
--- leg.keymap = {
---   { '<leader>E', '<cmd>Neotree toggle<cr>', description = 'FUCK Neotree' },
--- }
-
--- local leg = require('legendary')
-
--- local leg.keymaps = {
---   { '<leader>E', '<cmd>Neotree toggle<cr>', desc = 'Neotree' },
--- }
-
--- vim.keymap.set('n', 'e', '<cmd>Neotree Toogle<CR>', { desc = "Neotree" })
-
 st("n", "<leader>ff", '<cmd>Telescope find_files<cr>', { desc="Find files"})
 st('n', '<leader>fh', '<cmd>Telescope find_files hidden=true no_ignore=true<cr>', { desc="Find_files"})
 -- st('n', '<C-p>', '<cmd>Telescope commands<cr>', { desc='Command Pallete'})
 
-st('n', '<C-p>', '<cmd>Legendary<cr>', { desc='Command Pallete'})
 st('n', '<leader>fb', '<cmd>Telescope buffers<cr>', { desc="Find_buffers"})
 st('n', '<leader>ft', '<cmd>Telescope themes<cr>', { desc="colorscheme" })
 --
@@ -182,17 +165,21 @@ st('n', '<leader>md', '<cmd>NoiceDismiss<cr>', {desc = 'Dismiss message' })
 st('n', "<leader>3", '<cmd>Neotree left reveal<cr>', {desc='Change directory'})
 st('n', "<leader>e", "<cmd>Neotree toggle<cr>", {desc="Neovim"})
 
+-- Navigate vim panes better
+-- local st = vim.keymap.set
+st('n', '<c-k>', ':wincmd k<CR>')
+st('n', '<c-j>', ':wincmd j<CR>')
+st('n', '<c-h>', ':wincmd h<CR>')
+st('n', '<c-l>', ':wincmd l<CR>')
+
+st('n', '<leader>h', ':nohlsearch<CR>')
 
 
 
-st('n', '<C-o>', '<cmd>Telescope toggleterm_manager<cr>', {desc= 'term manager'})
 
-
-st('t', "<C-b>", "<C-\\><C-n><cr>", {desc = "Escape terminal mode"})
 -- st('t', "<C-n>", "<C-\\><C-n><cr>", {desc = "Escape terminal mode"})
 -- st('n', '<C-t>', '<cmd>Telescope toggleterm_manager<cr>', {desc= 'term manager'})
 -- st('t', "<C-t>", "<C-\\><C-n><cmd>Telescope toggleterm_manager<cr>", { desc = "Toggle terminal mode" })
-st('t', '<C-o>', '<C-\\><C-n><cmd>ToggleTermToggleAll<CR>', {desc= 'Term toggle'})
 
 
 
@@ -204,15 +191,18 @@ st('i', "<C-a>", "<esc>I", {desc = "The beginning of the line" })
 local toggleterm_manager = require("toggleterm-manager")
 local actions = toggleterm_manager.actions
 
--- commander.add({
---   { keys = {{"i", "n"}, "<leader>Tc"}, cmd = actions.create_and_name_term, desc = 'create_and_name_term' },
---   { keys = {{"i", "n"}, "<leader>Td"}, cmd = actions.delete_term, desc = 'delete_term' },
---
--- })
---
+
+
+
+st('n', '<C-o>', '<cmd>Telescope toggleterm_manager<cr>', {desc= 'term manager'})
+st('t', '<C-o>', '<C-\\><C-n><cmd>ToggleTermToggleAll<CR>', {desc= 'Term toggle'})
 commander.add({
   -- { keys = { "n", "<C-t>"}, cmd = "Telescope toggleterm_manager", desc="ToggleTermAll"},
   { keys = { "n", "<leader>tt"}, cmd = "<cmd>Telescope toggleterm_manager<cr>", desc="ToggleTermAll"},
+  { keys = { "t", "<C-t>"}, cmd = "<C-\\><C-n><cr>", desc="Exit terminal mode"},
+  { keys = {{"i", "n"}, "<leader>Tc"}, cmd = actions.create_and_name_term, desc = 'create_and_name_term' },
+  { keys = {{"i", "n"}, "<leader>Td"}, cmd = actions.delete_term, desc = 'delete_term' },
+
 
 })
 

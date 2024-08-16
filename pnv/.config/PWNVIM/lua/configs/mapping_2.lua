@@ -4,11 +4,12 @@ local function search_file_telescope(path_arg)
     vim.notify("No such directory: " .. cwd, vim.log.levels.ERROR)
     return
   end
-  
+
   local search_dirs = {}
   table.insert(search_dirs, cwd)
-  
+
   if vim.tbl_isempty(search_dirs) then
+---@diagnostic disable-next-line: undefined-global
     utils.notify("No user configuration files found", vim.log.levels.WARN)
   else
     if #search_dirs == 1 then cwd = search_dirs[1] end
@@ -21,12 +22,10 @@ local function search_file_telescope(path_arg)
   end
 end
 
-local function delete_whitespaces()
-  vim.api.nvim_command(":%s/\\s\\+$//e")
-end
 
 
 
+---@diagnostic disable-next-line: unused-local
 local mappings = {
   n = {
     ["L"] = { function() require("astronvim.utils.buffer").nav(vim.v.count > 0 and vim.v.count or 1) end, desc = "Next buffer" },
@@ -53,7 +52,6 @@ local mappings = {
     ["<leader>Tn"] = { ":tabnew<cr>", desc = "Tab new" },
     ["<leader>tt"] = { ":ToggleTerm direction=tab<cr>", desc = "ToggleTerm in new tab" },
     ["<leader>tj"] = { ":%!jq .<cr>", desc = "Format json" },
-    ["<leader>tw"] = { delete_whitespaces, desc = "Delete whitespaces" },
     ["<leader>TD"] = { desc = "Debugging" },
     ["<leader>TDD"] = { function() require("dapui").toggle() end, desc = "DAPUI Toggle" },
     ["<leader>TDc"] = { ":lua require'dap'.continue()<cr>", desc = "Continue" },
