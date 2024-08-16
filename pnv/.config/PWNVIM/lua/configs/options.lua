@@ -8,13 +8,14 @@ vim.g.background = "light"
 -- vim.g.markdown_folding = 1,
 -- vim.opt.swapfile = false
 
--- Navigate vim panes better
-local st = vim.keymap.set
-st('n', '<c-k>', ':wincmd k<CR>')
-st('n', '<c-j>', ':wincmd j<CR>')
-st('n', '<c-h>', ':wincmd h<CR>')
-st('n', '<c-l>', ':wincmd l<CR>')
+-- vim.opt.foldmethod = "expr" -- default is "normal"
+vim.opt.foldexpr = "nvim_treesitter#foldexpr()" -- default is ""
+vim.opt.foldenable = false --
+vim.opt.foldmethod = "indent"
+vim.opt.foldlevel = 99
 
-st('n', '<leader>h', ':nohlsearch<CR>')
+
+
+
 vim.wo.number = true
 
