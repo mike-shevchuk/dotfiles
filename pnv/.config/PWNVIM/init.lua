@@ -16,3 +16,12 @@ require("lazy").setup("plugins")
 
 require("configs/mapping")
 vim.cmd("colorscheme nightfox")
+
+-- autocmd BufRead *.md set ft=markdown
+-- vim.cmd('autocmd BufRead *.md set ft=markdown')
+-- autocmd BufRead,BufNewFile *.md set filetype=markdown
+--
+vim.api.nvim_create_autocmd({"BufRead", "BufNewFile"}, {
+  pattern = "*.md",
+  command = "set filetype=markdown"
+})

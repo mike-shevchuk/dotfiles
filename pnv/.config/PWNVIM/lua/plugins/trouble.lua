@@ -2,6 +2,8 @@ return {
   "folke/trouble.nvim",
   dependencies = { "nvim-tree/nvim-web-devicons" },
   config = function()
+    local commander = require("commander")
+
     require("trouble").setup({
       opts = {
         -- your configuration comes here
@@ -62,21 +64,28 @@ return {
         use_diagnostic_signs = false -- enabling this will use the signs defined in your lsp client
       },
     })
+
     local troub = require("trouble")
-    vim.keymap.set("n", "<leader>xx", troub.toggle)
-    vim.keymap.set("n", "<leader>xw", function() require("trouble").toggle("workspace_diagnostics") end)
-    vim.keymap.set("n", "<leader>xd", function() require("trouble").toggle("document_diagnostics") end)
-    vim.keymap.set("n", "<leader>xq", function() require("trouble").toggle("quickfix") end)
-    vim.keymap.set("n", "<leader>xl", function() require("trouble").toggle("loclist") end)
-    vim.keymap.set("n", "gR", function() require("trouble").toggle("lsp_references") end)
+    commander.add({
+       -- filter.severity=vim.diagnostic.severity.ERROR
+     { keys = {"n", "<leader>xx"}, cmd= "<cmd>Trouble diagnostics toggle win.position=right<cr>", desc = "Toggle trouble"},
+     -- { keys = {"n", "<leader>xX"}, cmd= "<cmd>Trouble diagnostics toggle filter.buf=0<cr>", desc = "Toggle trouble"},
+     { keys = {"n", "<leader>xl"}, cmd= "<cmd>Trouble loclist toggle<cr>", desc = "Toggle locallist"},
+    })
+  --   vim.keymap.set("n", "<leader>xx", troub.toggle)
+  --   vim.keymap.set("n", "<leader>xw", function() require("trouble").toggle("workspace_diagnostics") end)
+  --   vim.keymap.set("n", "<leader>xd", function() require("trouble").toggle("document_diagnostics") end)
+  --   vim.keymap.set("n", "<leader>xq", function() require("trouble").toggle("quickfix") end)
+  --   vim.keymap.set("n", "<leader>xl", function() require("trouble").toggle("loclist") end)
+  --   vim.keymap.set("n", "gR", function() require("trouble").toggle("lsp_references") end)
   end,
-  keys = {
-    desc = 'TroubleToggle',
-    {'<leader>xx', '<cmd>TroubleToggle<cr>', desc = "Toggle trouble", mode="n"},
-    {'<leader>xw', '<cmd>TroubleToggle workspace_diagnostics<cr>', desc = "Toggle trouble workspace_diagnostics", mode="n"},
-    {'<leader>xd', '<cmd>TroubleToggle document_diagnostics<cr>', desc = "Toggle trouble document_diagnostics", mode="n"},
-    {'<leader>xq', '<cmd>TroubleToggle quickfix<cr>', desc = "Toggle trouble quickfix", mode="n"},
-    {'<leader>xl', '<cmd>TroubleToggle loclist<cr>', desc = "Toggle trouble loclist", mode="n"},
-    {'gR', '<cmd>TroubleToggle lsp_references<cr>', desc = "Toggle trouble lsp_references", mode="n"},
-  }
+  -- keys = {
+  --   desc = 'TroubleToggle',
+  --   {'<leader>xx', '<cmd>TroubleToggle<cr>', desc = "Toggle trouble", mode="n"},
+  --   {'<leader>xw', '<cmd>TroubleToggle workspace_diagnostics<cr>', desc = "Toggle trouble workspace_diagnostics", mode="n"},
+  --   {'<leader>xd', '<cmd>TroubleToggle document_diagnostics<cr>', desc = "Toggle trouble document_diagnostics", mode="n"},
+  --   {'<leader>xq', '<cmd>TroubleToggle quickfix<cr>', desc = "Toggle trouble quickfix", mode="n"},
+  --   {'<leader>xl', '<cmd>TroubleToggle loclist<cr>', desc = "Toggle trouble loclist", mode="n"},
+  --   {'gR', '<cmd>TroubleToggle lsp_references<cr>', desc = "Toggle trouble lsp_references", mode="n"},
+  -- }
 }

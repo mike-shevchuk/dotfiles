@@ -24,7 +24,14 @@ return {
   --   end,
   -- },
 
-
+{
+  "vhyrro/luarocks.nvim",
+  priority = 1000, -- Very high priority is required, luarocks.nvim should run as the first plugin in your config.
+  opts = {
+    rocks = { "fzy", "pathlib.nvim ~> 1.0" }, -- specifies a list of rocks to install
+    -- luarocks_build_args = { "--with-lua=/my/path" }, -- extra options to pass to luarocks's configuration script
+  },
+},
 
 
 
@@ -41,36 +48,36 @@ return {
 },
 
   -- NOTE: so good
-  {
-    'chentoast/marks.nvim',
-    config = function()
-      require('marks').setup({
-        mappings = {
-          set_next = "m,",
-          next = "m]",
-          prev = "m[",
-          delete_line = "m-",
-          delete = "md",
-          toggle = "m`",
-          preview = "m:",
-          set_bookmark0 = "m0",
-          prev = false -- pass false to disable only this default mapping
-        },
-        -- whether to map keybinds or not. default true
-        default_mappings = true,
-        -- which builtin marks to show. default {}
-        builtin_marks = { ".", "<", ">", "^" },
-        -- whether movements cycle back and forth between rows
-        cyclic = true,
-        -- whether the shada file is updated after modifying uppercase marks
-        force_write_shada = false,
-        -- how often (in ms) to redraw signs/recompute mark positions
-        -- can be an interval
-        refresh_interval = 250,
-      })
-    end
-
-  },
+  -- {
+  --   'chentoast/marks.nvim',
+  --   config = function()
+  --     require('marks').setup({
+  --       mappings = {
+  --         set_next = "m,",
+  --         next = "m]",
+  --         prev = "m[",
+  --         delete_line = "m-",
+  --         delete = "md",
+  --         toggle = "m`",
+  --         preview = "m:",
+  --         set_bookmark0 = "m0",
+  --         prev = false -- pass false to disable only this default mapping
+  --       },
+  --       -- whether to map keybinds or not. default true
+  --       default_mappings = true,
+  --       -- which builtin marks to show. default {}
+  --       builtin_marks = { ".", "<", ">", "^" },
+  --       -- whether movements cycle back and forth between rows
+  --       cyclic = true,
+  --       -- whether the shada file is updated after modifying uppercase marks
+  --       force_write_shada = false,
+  --       -- how often (in ms) to redraw signs/recompute mark positions
+  --       -- can be an interval
+  --       refresh_interval = 250,
+  --     })
+  --   end
+  --
+  -- },
 
   -- NOTE: Work fine  Rainbow Highlighting
   {"HiPhish/nvim-ts-rainbow2",},
@@ -81,25 +88,7 @@ return {
   -- Plugin to diff different versions of a file
   {'will133/vim-dirdiff'},
 
-  {
-    'anuvyklack/pretty-fold.nvim',
-    config = function()
-      require('pretty-fold').setup({
-        keep_indentation = true,
-        fill_char = '━',
-        sections = {
-          left = {
-            '━ ', function() return string.rep('*', vim.v.foldlevel) end, ' ━┫', 'content', '┣'
-          },
-          right = {
-            '┫ ', 'number_of_folded_lines', ': ', 'percentage', ' ┣━━',
-          }
-        }
-
-      })
-    end
-  },
-
+ 
   {
     "m4xshen/hardtime.nvim",
     dependencies = { "MunifTanjim/nui.nvim", "nvim-lua/plenary.nvim" },

@@ -30,6 +30,7 @@ alias syu='sudo pacman -Syu'
 
 alias szsh='source ~/.zshrc'
 alias nv='nvim'
+alias ftmx='tmux new -s 0; tmux a -t 0'
 alias l='ls'
 alias ls='ls --color=auto'
 alias la='ls -ah'
@@ -110,4 +111,4 @@ bindkey "^[[1;5C" forward-word
 # # <<< conda initialize <<<
 #
 
-[ ! -f "$HOME/.x-cmd.root/X" ] || . "$HOME/.x-cmd.root/X" # boot up x-cmd.
+# [ ! -f "$HOME/.x-cmd.root/X" ] || . "$HOME/.x-cmd.root/X" # boot up x-cmd.

@@ -24,7 +24,7 @@ local gpt4 = {
       --   model = "gpt-4-1106-preview",
       --   max_tokens = 128000,
       -- },
-    })      
+    })
     end,
   }
 
@@ -54,8 +54,8 @@ local gpt3 = {
       openai_api_key = os.getenv("GPT_TOKEN"),
 		})
 
-	end,
-  }
+	end
+}
 
 
 -- Autosugestion
@@ -73,33 +73,35 @@ local codeium_nvim = {
     end,
 }
 
+-- local codeium_nvim_2 = {
+--   "Exafunction/u
+-- }
+
+
+
+
+
+
+
 local codeium_vim =  {
-    'Exafunction/codeium.vim',
-    event = 'BufEnter',
-    keys = {
-      {'<C-g>', '<cmd>Codeium<cr>', desc = 'Codeium', mode = {"n", "i"}},
-      {'<C-]', '<cmd>CodeiumAccept<cr>', desc = 'Codeium accept', mode = {"i"}},
-      {'<C-x>', '<cmd>CodeiumCancel<cr>', desc = 'Codeium cancel', mode = {"i"}},
-      {'<C-s>', '<cmd>CodeiumReject<cr>', desc = 'Codeium reject', mode = {"i"}},
-      {'<C-l>', '<cmd>CodeiumClear<cr>', desc = 'Codeium clear', mode ={"i"}},
-      {'g]', '<cmd>CodeiumComplete<cr>', desc = 'Codeium complete', mode = {"n"}}, 
-      {'gx', '<cmd>CodeiumRun<cr>', desc = 'Codeium run', mode = {"n"}},
-    },
-    init = function()
-      -- Set up the Codeium mappings
-      vim.g.codeium_disable_bindings = 1
-      vim.keymap.set("i", "<C-g>", "<Cmd>Codeium<CR>", { silent = true, expr = true })
-      vim.keymap.set("i", "<C-]>", "<Cmd>CodeiumAccept<CR>", { silent = true, expr = true })
-      vim.keymap.set("i", "<C-x>", "<Cmd>CodeiumCancel<CR>", { silent = true, expr = true })
-      vim.keymap.set("i", "<C-s>", "<Cmd>CodeiumReject<CR>", { silent = true, expr = true })
-      vim.keymap.set("i", "<C-l>", "<Cmd>CodeiumClear<CR>", { silent = true, expr = true })
-      vim.keymap.set("n", "g]", "<Cmd>CodeiumComplete<CR>", { silent = true })
-      vim.keymap.set("n", "gx", "<Cmd>CodeiumRun<CR>", { silent = true })
+  'Exafunction/codeium.vim',
+  -- event = 'BufEnter',
+  config = function()
+    require('codeium').setup({
+
+    })
   end,
+  -- vim.keymap.set('i', '<C-g>', function() return vim.fn['codeium#Accept']() end, { expr = true, silent = true }),
+  -- vim.keymap.set('i', '<C-s>', function() return vim.fn['codeium#Reject']() end, { expr = true, silent = true }),
+  -- vim.keymap.set('i', '<C-v>', function() return vim.fn['codeium#Complete']() end, { expr = true, silent = true }),
+  -- vim.keymap.set('i', '<C-]>', function() return vim.fn['codeium#CycleCompletions'](1) end, { expr = true, silent = true }),
+  -- vim.keymap.set('i', '<C-[>', function() return vim.fn['codeium#CycleCompletions'](-1) end, { expr = true, silent = true }),
+  -- vim.keymap.set('i', '<C-x>', function() return vim.fn['codeium#Clear']() end, { expr = true, silent = true }),
+
 }
 
-
-return {gpt4, gpt3, 
-  codeium_nvim, 
+return {
+  gpt4, gpt3,
+  -- codeium_nvim,
   codeium_vim
 }

@@ -29,18 +29,29 @@ local barbar = {
 }
 
 
-
-
-local rngr = {
-  "kevinhwang91/rnvimr",
-  event = { "BufReadPost", "BufNewFile" },
-  keys = { { "<leader>R", "<cmd>RnvimrToggle<cr>", desc = "Ranger file manager" } },
-  init = function()
-    vim.g.rnvimr_enable_picker = 1
-    vim.g.rnvimr_border_attr = { fg = 3, bg = -1 }
-    vim.g.rnvimr_shadow_winblend = 90
+local hop = {
+  "phaazon/hop.nvim",
+  enable = true,
+  keys = {    
+    {"<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1"}
+  },
+  config = function()
+    require("hop").setup({ keys = "etovxqpdygfblzhckisuran" })
   end,
 }
+
+
+
+-- local rngr = {
+--   "kevinhwang91/rnvimr",
+--   event = { "BufReadPost", "BufNewFile" },
+--   keys = { { "<leader>R", "<cmd>RnvimrToggle<cr>", desc = "Ranger file manager" } },
+--   init = function()
+--     vim.g.rnvimr_enable_picker = 1
+--     vim.g.rnvimr_border_attr = { fg = 3, bg = -1 }
+--     vim.g.rnvimr_shadow_winblend = 90
+--   end,
+-- }
 
 
 local other = {
@@ -69,7 +80,7 @@ local other = {
   },
 
   -- NOTE: perfetct
-  { 
+  {
     "anuvyklack/windows.nvim",
     dependencies = {
       "anuvyklack/middleclass",
@@ -88,7 +99,7 @@ local other = {
   },
 
   -- NOTE: perfetct
-  { 
+  {
     'gen740/SmoothCursor.nvim',
     config = function()
       require('smoothcursor').setup({
@@ -102,7 +113,7 @@ local other = {
     end,
   },
 
-  { 
+  {
     'willthbill/opener.nvim',
     config = function()
       require('telescope').load_extension("opener")
@@ -128,7 +139,7 @@ local other = {
       vim.api.nvim_set_keymap('n', '<Leader>fd', ":Telescope opener<CR>", { noremap = true })
 
     end
-  }, 
+  },
 
 
   {
@@ -152,28 +163,99 @@ local other = {
 
 local alpha = { "goolord/alpha-nvim", enabled = true }
 
-
-local fold = {
-	"chrisgrieser/nvim-origami",
-	event = "BufReadPost", -- later or on keypress would prevent saving folds
+local fold_pretty = {
+  'anuvyklack/pretty-fold.nvim',
   config = function()
-    local folder = require('origami')
-    folder.setup({
-      keepFoldsAcrossSessions = true,
-      pauseFoldsOnSearch = true,
-      setupFoldKeymaps = true,
-      hOnlyOpensOnFirstColumn = false,
-      
-    })
+    require('pretty-fold').setup({
+      ft = {'lua'},
+      keep_indentation = false,
+      fill_char = '━',
+      matchup_patterns = {
+        -- ╟─ Start of line ──╭───────╮── "do" ── End of line ─╢
+        --                    ╰─ WSP ─╯
+        { '^%s*do$', 'end' }, -- `do ... end` blocks
 
-  end,
+        -- ╟─ Start of line ──╭───────╮── "if" ─╢
+        --                    ╰─ WSP ─╯
+        { '^%s*if', 'end' },
+
+        -- ╟─ Start of line ──╭───────╮── "for" ─╢
+        --                    ╰─ WSP ─╯
+        { '^%s*for', 'end' },
+
+        -- ╟─ "function" ──╭───────╮── "(" ─╢
+        --                 ╰─ WSP ─╯
+        { 'function%s*%(', 'end' }, -- 'function(' or 'function ('
+
+        {  '{', '}' },
+        { '%(', ')' }, -- % to escape lua pattern char
+        { '%[', ']' }, -- % to escape lua pattern char
+      },
+      sections = {
+        left = { 'content' },
+        right = { ' ', 'number_of_folded_lines', ' ' },
+      },
+      -- sections = {
+      --   left = {
+      --     -- '━ ', function() return string.rep('*', vim.v.foldlevel) end, ' ━┫', 'content', '┣'
+      --     'content',
+      --   },
+      --   right = {
+      --     '┫ ', 'number_of_folded_lines', ': ', 'percentage', ' ┣━━',
+      --   }
+      -- }
+    })
+  end
+}
+
+local fold_preview = {
+  'anuvyklack/fold-preview.nvim',
+  dependencies = { 'anuvyklack/pretty-fold.nvim', 'anuvyklack/nvim-keymap-amend' },
+  config = function()
+    local keymap = vim.keymap
+    keymap.amend = require('keymap-amend')
+    local map = require('fold-preview').mapping
+
+
+    require('fold-preview').setup({
+      keymap.amend('n', 'h',  map.show_close_preview_open_fold),
+      keymap.amend('n', 'l',  map.close_preview_open_fold),
+      keymap.amend('n', 'zo', map.close_preview),
+      keymap.amend('n', 'zO', map.close_preview),
+      keymap.amend('n', 'zc', map.close_preview_without_defer),
+      keymap.amend('n', 'zR', map.close_preview),
+      keymap.amend('n', 'zM', map.close_preview_without_defer),
+
+    })
+  end
 }
 
 
+
+
+local tail_fold = {
+  'razak17/tailwind-fold.nvim',
+  -- opts= {},
+  dependencies = { 'nvim-treesitter/nvim-treesitter' },
+  ft = { 'html', 'svelte', 'blade', 'python', 'lua' },
+  config = function()
+    require('tailwind-fold').setup()
+  end
+}
+
+
+
+
 return {
-  fold,
+  -- fold_pretty,
+
+  -- Good fold plugins
+  -- fold_preview,
+  tail_fold,
+  hop,
+
   rng,
-  rngr,
+  -- rngr,
   alpha,
   barbar,
   other,

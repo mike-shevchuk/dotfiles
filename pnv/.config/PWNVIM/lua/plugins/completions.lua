@@ -20,6 +20,7 @@ return {
       "hrsh7th/cmp-cmdline",
       "saadparwaiz1/cmp_luasnip",
       "L3MON4D3/LuaSnip",
+      "Exafunction/codeium.nvim",
     },
 
     config = function()
@@ -38,11 +39,16 @@ return {
 
         },
         mapping = cmp.mapping.preset.insert({
-          ['<Up>'] = cmp.mapping.select_prev_item(select_opts),
-          ['<Down>'] = cmp.mapping.select_next_item(select_opts),
+          -- ['<Up>'] = cmp.mapping.select_prev_item(select_opts),
+          -- ['<Down>'] = cmp.mapping.select_next_item(select_opts),
 
-          ["<C-b>"] = cmp.mapping.scroll_docs(-4),
-          ["<C-f>"] = cmp.mapping.scroll_docs(4),
+          ['<Up>'] = cmp.mapping.select_prev_item(),
+          ['<Down>'] = cmp.mapping.select_next_item(),
+
+
+
+          ["<C-u>"] = cmp.mapping.scroll_docs(-4),
+          ["<C-d>"] = cmp.mapping.scroll_docs(4),
           ["<C-Space>"] = cmp.mapping.complete(),
           ["<C-e>"] = cmp.mapping.abort(),
           ["<CR>"] = cmp.mapping.confirm({ select = true }),
@@ -81,7 +87,6 @@ return {
 
           -- customize the appearance of the completion menu
           format = function(entry, vim_item)
-              
               vim_item.menu = ({
                   nvim_lsp = '[Lsp]',
                   codeium = '[Codeium]',
@@ -95,15 +100,15 @@ return {
         },
 
         sources = cmp.config.sources({
-          { name = "nvim_lsp" },
-          { name = "codeium", max_item_count = 10, keyword = 1, priority = 1000},
-          { name = "nvim_lua" },
+          { name = "nvim_lsp", max_item_count = 10 },
+          { name = "codeium", max_item_count = 10, priority = 1000},
+          { name = "nvim_lua", max_item_count = 10 },
           { name = "luasnip" }, -- For luasnip users.
-          { name = "path" },
-          { name = "buffer" },
+          { name = "buffer", max_item_count = 5 },
+          { name = "path", max_item_count = 5 },
 
         }),
-        
+
         experimental = {
           ghost_text = true,
         },
