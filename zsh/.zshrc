@@ -89,6 +89,35 @@ bw_gpt_token() {
   bw list items | jq -r --arg email "$email" '.[] | select(.login.username==$email and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value'
 }
 
+# FOR agnoster
+prompt_time() {
+  prompt_segment '' 'green' ' %D{%H:%M:%S} '
+}
+
+# Store the start time of the command
+preexec() {
+  cmd_start_time=$SECONDS
+}
+
+# Calculate the duration of the command and display it if it's longer than 1 second
+precmd() {
+  if (( SECONDS - cmd_start_time > 1 )); then
+    cmd_duration=$(( SECONDS - cmd_start_time ))
+    duration_segment=" ($cmd_duration s)"
+  else
+    duration_segment=""
+  fi
+}
+
+prompt_duration() {
+  prompt_segment 'red' '' "$duration_segment"
+}
+
+
+#AGNOSTER_PROMPT_SEGMENTS+=("prompt_segment '' 'red' ' ($cmd_duration s) '")
+
+AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
+AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
 
 bindkey '^A' beginning-of-line
 bindkey '^E' end-of-line
