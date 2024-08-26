@@ -3,6 +3,30 @@ return {
     'kristijanhusak/vim-hybrid-material',
   },
 
+  -- SOMETEXT: disabled_filetypes
+  -- TODO: some todo stuff
+  -- TASK: check for now
+  -- PERF: perfect code
+  -- FIX: fix code
+  -- HACK: dirty code
+  -- WARN: warning code
+  -- NOTE: note code
+  -- TEST: test code
+  -- ERROR: error code 
+  {
+    "folke/todo-comments.nvim",
+    dependencies = { "nvim-lua/plenary.nvim" },
+    config = function()
+      require("todo-comments").setup {
+        keywords = {
+          ERROR = { icon = " ", color = "error", alt = { "ERROR", "FUCK" } },
+          TASK = { icon = "", color = "warning", alt = { "TASK", "NOW" } },
+        }
+      }
+    end,
+
+  },
+
   -- {
   --   'fei6409/log-highlight.nvim',
   --   enable=false,
