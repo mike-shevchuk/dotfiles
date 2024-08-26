@@ -2,7 +2,7 @@ return {
   'renerocksai/telekasten.nvim',
   dependencies = {'nvim-telescope/telescope.nvim'},
   keys = {
-    { "<leader>zZ", "<cmd>Telekasten panel<CR>", desc="Telekasten Panel", mode={'n'}},
+    { "<leader>zp", "<cmd>Telekasten panel<CR>", desc="Telekasten Panel", mode={'n'}},
     { "<leader>zt", "<cmd>Telekasten show_tags<CR>", desc="Telekasten show tags", mode={'n'}},
     { "<leader>zg", "<cmd>Telekasten search_notes<CR>", desc="Telekasten search notes", mode={'n'}},
     { "<leader>zd", "<cmd>Telekasten goto_today<CR>", desc="Telekasten go today notes", mode={'n'}},
