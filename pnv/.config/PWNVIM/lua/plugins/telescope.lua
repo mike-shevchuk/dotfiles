@@ -5,6 +5,18 @@ return {
 
 
   {
+    "otavioschwanck/arrow.nvim",
+    config = function()
+      require("arrow").setup({
+        show_icons = true,
+        leader_key = ';', -- Recommended to be a single key
+        buffer_leader_key = 'm', -- Per Buffer Mappings
+      })
+    end
+  },
+
+
+  {
   "nvim-telescope/telescope-z.nvim",
   config = function()
     require("telescope").load_extension "z"
@@ -44,6 +56,7 @@ return {
     dependencies = { 
       "nvim-lua/plenary.nvim",
       'andrew-george/telescope-themes',
+      'folke/noice.nvim',
       -- "nvim-telescope/telescope-frecency.nvim",
     }, 
     keys = {
@@ -98,6 +111,7 @@ return {
 
       require("telescope").load_extension("ui-select")
       require("telescope").load_extension('themes')
+      require("telescope").load_extension("noice")
       -- require("telescope").load_extension("z")
 
       --  Has some bugs
