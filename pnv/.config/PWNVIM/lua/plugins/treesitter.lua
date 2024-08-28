@@ -1,5 +1,25 @@
 return {
 
+  -- NOTE: perfetct, automatically highlighting other uses of the word under the cursor
+  {
+    "RRethy/vim-illuminate",
+    config = function()
+      require("illuminate").configure()
+      vim.api.nvim_set_keymap(
+        "n",
+        "<leader>gn",
+        ':lua require("illuminate").goto_next_reference()<CR>',
+        { silent = true, noremap = true }
+      )
+      vim.api.nvim_set_keymap(
+        "n",
+        "<leader>gp",
+        ':lua require("illuminate").goto_prev_reference()<CR>',
+        { silent = true, noremap = true }
+      )
+    end,
+  },
+
 
 
   {
