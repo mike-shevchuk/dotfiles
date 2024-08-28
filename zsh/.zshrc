@@ -46,17 +46,25 @@ alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
 # alias ls='exa --color=always --group-directories-first --icons'
 # alias cat='bat --style header --style snip --style changes --style header'
 
-alias bwu="bw unlock | sed -n 4p | cut -d ' ' -f 2-3 | xargs -o echo | xclip -sel c"
 
-alias bw_gpt_mike="bw_gpt_token 'mshevchukmofficial@gmail.com'"
-alias bw_gpt_yuiriy="bw_gpt_token 'yuriy@znovyak.com'"
-alias bw_gpt_lwi="bw_gpt_token 'wiai@sexeducation.com.ua'"
+# function bw_gpt_token() {
+#   local email="$1"
+#   bw list items | jq -r --arg email "$email" '.[] | select(.login.username==$email and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value'
+# }
 
-export GPT_TOKEN="$(bw_gpt_token 'wiai@sexeducation.com.ua' || echo '')"
+# alias bwu="bw unlock | sed -n 4p | cut -d ' ' -f 2-3 | xargs -o echo | xclip -sel c"
+#
+# alias bw_gpt_mike="bw_gpt_token 'mshevchukmofficial@gmail.com'"
+# alias bw_gpt_yuiriy="bw_gpt_token 'yuriy@znovyak.com'"
+# alias bw_gpt_lwi="bw_gpt_token 'wiai@sexeducation.com.ua'"
+
+# export GPT_TOKEN="$(bw_gpt_token 'wiai@sexeducation.com.ua' || echo '')"
 
 
-alias bw_lb_gpt4="bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-alias bw_gpt3_token="bw list items | jq -r '.[] | select(.login.username==\"mshevchukmofficial@gmail.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
+# alias bw_lb_gpt4="bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
+# alias bw_gpt3_token="bw list items | jq -r '.[] | select(.login.username==\"mshevchukmofficial@gmail.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
+
+
 # alias bw_gpt4_token="bw list items | jq -r '.[] | select(.login.username==\"yuriy@znovyak.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
 # alias bw_gpt4_token = 
 # alias btuith="bluetuith"
@@ -84,10 +92,7 @@ function nvims() {
   NVIM_APPNAME=$config nvim $@
 }
 
-bw_gpt_token() {
-  local email="$1"
-  bw list items | jq -r --arg email "$email" '.[] | select(.login.username==$email and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value'
-}
+
 
 # FOR agnoster
 prompt_time() {
@@ -103,7 +108,17 @@ preexec() {
 precmd() {
   if (( SECONDS - cmd_start_time > 1 )); then
     cmd_duration=$(( SECONDS - cmd_start_time ))
-    duration_segment=" ($cmd_duration s)"
+    #duration_segment=" ($cmd_duration s)"
+    #
+    minutes=$(( cmd_duration / 60 ))
+    seconds=$(( cmd_duration % 60 ))
+
+    if (( minutes > 0 )); then
+      duration_segment=" ($minutes min $seconds s)"
+    else
+      duration_segment=" ($seconds s)"
+    fi
+
   else
     duration_segment=""
   fi
@@ -140,4 +155,3 @@ bindkey "^[[1;5C" forward-word
 # # <<< conda initialize <<<
 #
 
-# [ ! -f "$HOME/.x-cmd.root/X" ] || . "$HOME/.x-cmd.root/X" # boot up x-cmd.
