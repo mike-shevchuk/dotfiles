@@ -146,24 +146,8 @@ commander.add({
 })
 
 
-st("n", "<leader>ff", '<cmd>Telescope find_files<cr>', { desc="Find files"})
-st('n', '<leader>fh', '<cmd>Telescope find_files hidden=true no_ignore=true<cr>', { desc="Find_files"})
--- st('n', '<C-p>', '<cmd>Telescope commands<cr>', { desc='Command Pallete'})
-
-st('n', '<leader>fb', '<cmd>Telescope buffers<cr>', { desc="Find_buffers"})
-st('n', '<leader>ft', '<cmd>Telescope themes<cr>', { desc="colorscheme" })
---
-
--- ["<leader>3"] = { ":Neotree left reveal<cr>", desc = "Change directory", silent = true, noremap = true },
--- st('n', "<leader>ee", "<cmd>Neotree toggle<cr>", {desc="Neovim"})
--- st('n', "<leader>3", "<cr>Neotree left reveal<cr>", {desk="Change directory", silent = true, noremap = true})
-
-
-
 
 st('n', '<leader>md', '<cmd>NoiceDismiss<cr>', {desc = 'Dismiss message' })
-st('n', "<leader>3", '<cmd>Neotree left reveal<cr>', {desc='Change directory'})
-st('n', "<leader>e", "<cmd>Neotree toggle<cr>", {desc="Neovim"})
 
 -- Navigate vim panes better
 -- local st = vim.keymap.set
@@ -196,17 +180,26 @@ local actions = toggleterm_manager.actions
 
 st('n', '<C-o>', '<cmd>Telescope toggleterm_manager<cr>', {desc= 'term manager'})
 st('t', '<C-o>', '<C-\\><C-n><cmd>ToggleTermToggleAll<CR>', {desc= 'Term toggle'})
+
 commander.add({
   -- { keys = { "n", "<C-t>"}, cmd = "Telescope toggleterm_manager", desc="ToggleTermAll"},
   { keys = { "n", "<leader>tt"}, cmd = "<cmd>Telescope toggleterm_manager<cr>", desc="ToggleTermAll"},
   { keys = { "t", "<C-t>"}, cmd = "<C-\\><C-n><cr>", desc="Exit terminal mode"},
   { keys = {{"i", "n"}, "<leader>Tc"}, cmd = actions.create_and_name_term, desc = 'create_and_name_term' },
   { keys = {{"i", "n"}, "<leader>Td"}, cmd = actions.delete_term, desc = 'delete_term' },
-
-
 })
 
 
+commander.add({
+  { keys = { "n", "<leader>bn"}, cmd = "<cmd>bn<cr>", desc = 'next tab' },
+  { keys = { "n", "<leader>bp"}, cmd = "<cmd>bp<cr>", desc = 'previous tab' },
+  { keys = {"n", "<leader>bd"}, cmd = "<cmd>bd<cr>", desc = 'close tub' },
+
+  { keys = {"n", "<leader>bn"}, cmd = "<cmd>tabnew<cr>", desc = 'new tab' },
+  { keys = {"n", "<leader>bP"}, cmd = "<cmd>tabp<cr>", desc = 'previous tab' },
+  { keys = {"n", "<leader>bN"}, cmd = "<cmd>tabnext<cr>", desc = 'next tab' },
+
+})
 
 
 toggleterm_manager.setup {
