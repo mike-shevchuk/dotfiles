@@ -2,6 +2,34 @@ return {
   {
     "nvim-telescope/telescope-ui-select.nvim",
   },
+  
+  {
+    'willthbill/opener.nvim',
+    config = function()
+      require('telescope').load_extension("opener")
+      require('telescope').setup({
+        extensions = {
+          opener = {
+            use_telescope = true,
+            hidden = false, -- do not show hidden directories
+            root_dir = "$HOME", -- search from home directory by default
+            -- respect_gitignore = true, -- respect .gitignore files
+          }
+        }
+      })
+      require('opener').setup({
+        pre_open = function(new_dir)
+          print("Yay, opening " .. new_dir .. " in a moment")
+        end,
+        post_open = { "NeoTree", function(new_dir)
+          print(new_dir .. " was opened")
+        end },
+      })
+      -- TODO: add hiden files like find files 
+      vim.api.nvim_set_keymap('n', '<Leader>fd', ":Telescope opener<CR>", { noremap = true })
+
+    end
+  },
 
 
   {
@@ -17,6 +45,7 @@ return {
 
 
   {
+  -- ln -s ~/.zshrc ~/.zshenv
   "nvim-telescope/telescope-z.nvim",
   config = function()
     require("telescope").load_extension "z"
@@ -53,12 +82,12 @@ return {
   {
     "nvim-telescope/telescope.nvim",
     tag = "0.1.5",
-    dependencies = { 
+    dependencies = {
       "nvim-lua/plenary.nvim",
       'andrew-george/telescope-themes',
       'folke/noice.nvim',
       -- "nvim-telescope/telescope-frecency.nvim",
-    }, 
+    },
     keys = {
       {
       "<leader>fg",
@@ -68,12 +97,43 @@ return {
       mode = "n"
       },
       {
+        "<leader>ff",
+        '<cmd>Telescope find_files<cr>',
+        desc = 'Find files',
+        mode = "n"
+      },
+      {
+        "<leader>fh",
+        "<cmd>Telescope find_files hidden=true no_ignore=true<cr>",
+        desc = 'Find files',
+        mode = "n"
+      },
+      {
+        "<leader>ft",
+        '<cmd>Telescope themes<cr>',
+        desc = 'change themes',
+        mode = "n"
+      },
+      {
+        "<leader>fb",
+        '<cmd>Telescope buffers<cr>',
+        desc = 'buffers',
+        mode = "n"
+      },
+      {
         "<leader><leader>",
         '<cmd>Telescope oldfiles<cr>',
         desc = 'recent files',
         mode = "n"
       },
+      {
+        "<leader>fz",
+        "<cmd>Telescope z<cr>",
+        desc = 'z autojump',
+        mode = 'n'
+      },
     },
+
 
     config = function()
       require("telescope").setup({

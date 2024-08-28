@@ -7,7 +7,7 @@ return {
   },
 
 
-    --  Not use for now
+  --  Not use for now
   -- {
   --   "kndndrj/nvim-dbee",
   --   dependencies = {
@@ -24,14 +24,14 @@ return {
   --   end,
   -- },
 
-{
-  "vhyrro/luarocks.nvim",
-  priority = 1000, -- Very high priority is required, luarocks.nvim should run as the first plugin in your config.
-  opts = {
-    rocks = { "fzy", "pathlib.nvim ~> 1.0" }, -- specifies a list of rocks to install
-    -- luarocks_build_args = { "--with-lua=/my/path" }, -- extra options to pass to luarocks's configuration script
-  },
-},
+  -- {
+  --   "vhyrro/luarocks.nvim",
+  --   priority = 1000, -- Very high priority is required, luarocks.nvim should run as the first plugin in your config.
+  --   opts = {
+  --     rocks = { "fzy", "pathlib.nvim ~> 1.0" }, -- specifies a list of rocks to install
+  --     -- luarocks_build_args = { "--with-lua=/my/path" }, -- extra options to pass to luarocks's configuration script
+  --   }
+  -- },
 
 
 
@@ -39,45 +39,23 @@ return {
   { "folke/neodev.nvim", opts = {} },
 
   {
+    'sindrets/winshift.nvim',
+    config = true,
+    keys = { -- load the plugin only when using it's keybinding:
+      { "<leader>Tw", "<cmd>lua require('winshift').start_winshift()<cr>" },
+    },
+
+  },
+
+  {
     "jiaoshijie/undotree",
     dependencies = "nvim-lua/plenary.nvim",
     config = true,
     keys = { -- load the plugin only when using it's keybinding:
-    { "<leader>Tu", "<cmd>lua require('undotree').toggle()<cr>" },
+      { "<leader>Tu", "<cmd>lua require('undotree').toggle()<cr>" },
+    },
   },
-},
 
-  -- NOTE: so good
-  -- {
-  --   'chentoast/marks.nvim',
-  --   config = function()
-  --     require('marks').setup({
-  --       mappings = {
-  --         set_next = "m,",
-  --         next = "m]",
-  --         prev = "m[",
-  --         delete_line = "m-",
-  --         delete = "md",
-  --         toggle = "m`",
-  --         preview = "m:",
-  --         set_bookmark0 = "m0",
-  --         prev = false -- pass false to disable only this default mapping
-  --       },
-  --       -- whether to map keybinds or not. default true
-  --       default_mappings = true,
-  --       -- which builtin marks to show. default {}
-  --       builtin_marks = { ".", "<", ">", "^" },
-  --       -- whether movements cycle back and forth between rows
-  --       cyclic = true,
-  --       -- whether the shada file is updated after modifying uppercase marks
-  --       force_write_shada = false,
-  --       -- how often (in ms) to redraw signs/recompute mark positions
-  --       -- can be an interval
-  --       refresh_interval = 250,
-  --     })
-  --   end
-  --
-  -- },
 
   -- NOTE: Work fine  Rainbow Highlighting
   {"HiPhish/nvim-ts-rainbow2",},
@@ -88,16 +66,7 @@ return {
   -- Plugin to diff different versions of a file
   {'will133/vim-dirdiff'},
 
- 
-  {
-    "m4xshen/hardtime.nvim",
-    dependencies = { "MunifTanjim/nui.nvim", "nvim-lua/plenary.nvim" },
-    config = function ()
-      require("hardtime").setup({
-        enabled = false,
-      })
-    end
-  },
+
 
   {
     'xiyaowong/transparent.nvim',
@@ -118,55 +87,40 @@ return {
         -- exclude = {}, -- table: groups you don't want to clear
 
         groups = { -- table: default groups
-        'Normal', 'NormalNC', 'Comment', 'Constant', 'Special', 'Identifier',
-        'statement', 'PreProc', 'Type', 'Underlined', 'Todo', 'string', 'Function',
-        'Conditional', 'Repeat', 'Operator', 'structure', 'LineNr', 'NonText',
-        'SignColumn', 'CursorLine', 'CursorLineNr', 'statusLine', 'statusLineNC',
-        'EndOfBuffer',
-      },
-      extra_groups = {}, -- table: additional groups that should be cleared
-      exclude_groups = {}, -- table: groups you don't want to clear
-    })
-    vim.cmd('TransparentDisable')
-  end
+          'Normal', 'NormalNC', 'Comment', 'Constant', 'Special', 'Identifier',
+          'statement', 'PreProc', 'Type', 'Underlined', 'Todo', 'string', 'Function',
+          'Conditional', 'Repeat', 'Operator', 'structure', 'LineNr', 'NonText',
+          'SignColumn', 'CursorLine', 'CursorLineNr', 'statusLine', 'statusLineNC',
+          'EndOfBuffer',
+        },
+        extra_groups = {}, -- table: additional groups that should be cleared
+        exclude_groups = {}, -- table: groups you don't want to clear
+      })
+      vim.cmd('TransparentDisable')
+    end
   },
+
+
 
   {
     "SmiteshP/nvim-navic",
     dependencies = "neovim/nvim-lspconfig",
   },
 
-  { "CRAG666/code_runner.nvim", config = true },
+  -- NOTE: not need because has OVERseer 
+  -- { "CRAG666/code_runner.nvim", config = true },
 
 
-  {
-    "Praczet/encrypt-text.nvim",
-        config = function()
-            require("encrypt-text").setup({
-            dir_path = '~/zettelkasten'
-        })
-        end
-  },
 
-   -- NOTE: perfetct, automatically highlighting other uses of the word under the cursor
-  {
-    "RRethy/vim-illuminate",
-    config = function()
-      require("illuminate").configure()
-      vim.api.nvim_set_keymap(
-      "n",
-      "<leader>tN",
-      ':lua require("illuminate").goto_next_reference()<CR>',
-      { silent = true, noremap = true }
-      )
-      vim.api.nvim_set_keymap(
-      "n",
-      "<leader>P",
-      ':lua require("illuminate").goto_prev_reference()<CR>',
-      { silent = true, noremap = true }
-      )
-    end,
-  },
+  -- NOTE: dont work normaly
+  -- {
+  --   "Praczet/encrypt-text.nvim",
+  --   config = function()
+  --     require("encrypt-text").setup({
+  --       dir_path = '~/zettelkasten'
+  --     })
+  --   end
+  -- },
 
 
 
@@ -191,6 +145,4 @@ return {
       'RainbowMultiDelim'
     }
   },
-} 
-
-
+}
