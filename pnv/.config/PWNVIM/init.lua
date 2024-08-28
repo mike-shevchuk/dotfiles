@@ -21,7 +21,15 @@ vim.cmd("colorscheme nightfox")
 -- vim.cmd('autocmd BufRead *.md set ft=markdown')
 -- autocmd BufRead,BufNewFile *.md set filetype=markdown
 --
-vim.api.nvim_create_autocmd({"BufRead", "BufNewFile"}, {
+-- vim.api.nvim_create_autocmd({"BufRead", "BufNewFile"}, {
+--   pattern = "*.md",
+--   command = "set filetype=markdown"
+-- })
+
+
+vim.api.nvim_create_autocmd({ "BufNewFile", "BufRead" }, {
   pattern = "*.md",
-  command = "set filetype=markdown"
+  callback = function()
+    vim.bo.filetype = "markdown"
+  end,
 })
