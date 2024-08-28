@@ -11,6 +11,22 @@ local rng = {
   end,
 }
 
+-- PERF: work great
+local overseer = {
+    'stevearc/overseer.nvim',
+    config = function()
+      local overseer = require('overseer')
+      local commander = require('commander')
+      overseer.setup({
+        strategy = "toggleterm",
+      })
+      commander.add({
+        { cmd='<cmd>OverseerToggle<cr>', keys={'n', '<leader>oo'}, desc='OverseerToggle'  }
+      })
+    end
+}
+
+
 -- Perfect
 local barbar = {
     'romgrk/barbar.nvim',
@@ -32,7 +48,7 @@ local barbar = {
 local hop = {
   "phaazon/hop.nvim",
   enable = true,
-  keys = {    
+  keys = {
     {"<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1"}
   },
   config = function()
@@ -80,6 +96,7 @@ local other = {
   },
 
   -- NOTE: perfetct
+  -- NOW
   {
     "anuvyklack/windows.nvim",
     dependencies = {
@@ -113,33 +130,6 @@ local other = {
     end,
   },
 
-  {
-    'willthbill/opener.nvim',
-    config = function()
-      require('telescope').load_extension("opener")
-      require('telescope').setup({
-        extensions = {
-          opener = {
-            use_telescope = true,
-            hidden = false, -- do not show hidden directories
-            root_dir = "$HOME", -- search from home directory by default
-            -- respect_gitignore = true, -- respect .gitignore files
-          }
-        }
-      })
-      require('opener').setup({
-        pre_open = function(new_dir)
-          print("Yay, opening " .. new_dir .. " in a moment")
-        end,
-        post_open = { "NeoTree", function(new_dir)
-          print(new_dir .. " was opened")
-        end },
-      })
-      -- TODO: add hiden files like find files 
-      vim.api.nvim_set_keymap('n', '<Leader>fd', ":Telescope opener<CR>", { noremap = true })
-
-    end
-  },
 
 
   {
@@ -163,50 +153,6 @@ local other = {
 
 local alpha = { "goolord/alpha-nvim", enabled = true }
 
-local fold_pretty = {
-  'anuvyklack/pretty-fold.nvim',
-  config = function()
-    require('pretty-fold').setup({
-      ft = {'lua'},
-      keep_indentation = false,
-      fill_char = '━',
-      matchup_patterns = {
-        -- ╟─ Start of line ──╭───────╮── "do" ── End of line ─╢
-        --                    ╰─ WSP ─╯
-        { '^%s*do$', 'end' }, -- `do ... end` blocks
-
-        -- ╟─ Start of line ──╭───────╮── "if" ─╢
-        --                    ╰─ WSP ─╯
-        { '^%s*if', 'end' },
-
-        -- ╟─ Start of line ──╭───────╮── "for" ─╢
-        --                    ╰─ WSP ─╯
-        { '^%s*for', 'end' },
-
-        -- ╟─ "function" ──╭───────╮── "(" ─╢
-        --                 ╰─ WSP ─╯
-        { 'function%s*%(', 'end' }, -- 'function(' or 'function ('
-
-        {  '{', '}' },
-        { '%(', ')' }, -- % to escape lua pattern char
-        { '%[', ']' }, -- % to escape lua pattern char
-      },
-      sections = {
-        left = { 'content' },
-        right = { ' ', 'number_of_folded_lines', ' ' },
-      },
-      -- sections = {
-      --   left = {
-      --     -- '━ ', function() return string.rep('*', vim.v.foldlevel) end, ' ━┫', 'content', '┣'
-      --     'content',
-      --   },
-      --   right = {
-      --     '┫ ', 'number_of_folded_lines', ': ', 'percentage', ' ┣━━',
-      --   }
-      -- }
-    })
-  end
-}
 
 local fold_preview = {
   'anuvyklack/fold-preview.nvim',
@@ -247,13 +193,12 @@ local tail_fold = {
 
 
 return {
-  -- fold_pretty,
 
   -- Good fold plugins
-  -- fold_preview,
+  fold_preview,
   tail_fold,
   hop,
-
+  overseer,
   rng,
   -- rngr,
   alpha,
