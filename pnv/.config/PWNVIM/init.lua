@@ -15,7 +15,7 @@ require("configs/options")
 require("lazy").setup("plugins")
 
 require("configs/mapping")
-vim.cmd("colorscheme nightfox")
+vim.cmd("colorscheme nordfox")
 
 -- autocmd BufRead *.md set ft=markdown
 -- vim.cmd('autocmd BufRead *.md set ft=markdown')

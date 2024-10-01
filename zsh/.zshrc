@@ -5,8 +5,9 @@ compinit
 
 # Default shell history
 HISTSIZE=1000
-HISTFILE=~/.histfile
 SAVEHIST=1000
+HISTFILE=~/.histfile
+setopt SHARE_HISTORY
 export EDITOR=vim
 
 
@@ -16,6 +17,13 @@ eval "$(pyenv virtualenv-init -)"
 
 
 ZPLUGRC=$HOME/.zsh_zplug
+
+############# ASDF
+. "$HOME/.asdf/asdf.sh"
+# append completions to fpath
+fpath=(${ASDF_DIR}/completions $fpath)
+# initialise completions with ZSH's compinit
+autoload -Uz compinit && compinit
 
 ############ INFO: ZPLUG
 source $ZPLUGRC
@@ -41,6 +49,14 @@ alias open="xdg-open"
 alias git_dog="git log --all --decorate --oneline --graph"
 
 alias stow="$HOME/.local/src/stow-2.4.0/bin/stow"
+
+
+# alias td="todoist-cli --collor --indent"
+# alias td="todoist-cli --color"
+# --namespace
+
+alias td="todoist-cli --color --namespace --indent --project-namespace"
+alias cl="clear"
 
 # alias ll='exa -l --color=always --group-directories-first --icons'
 # alias ls='exa --color=always --group-directories-first --icons'
@@ -91,7 +107,6 @@ function nvims() {
   fi
   NVIM_APPNAME=$config nvim $@
 }
-
 
 
 # FOR agnoster

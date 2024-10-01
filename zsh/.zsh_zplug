@@ -56,6 +56,8 @@ zplug "plugins/helm", from:oh-my-zsh
 
 # Commands
 zplug "rupa/z", use:z.sh
+# Package manager for nvim zsh
+zplug "kiurchv/asdf.plugin.zsh", defer:2
 # zplug "kmccormick/rsnapshot-timestamp", as:command
 
 # zsh profiler (TODO is not on PATH)

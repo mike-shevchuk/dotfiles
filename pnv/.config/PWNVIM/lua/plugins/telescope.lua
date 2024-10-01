@@ -33,6 +33,35 @@ return {
 
 
   {
+    "nvim-telescope/telescope.nvim",
+    dependencies = {
+      "nvim-lua/plenary.nvim",
+      "debugloop/telescope-undo.nvim",
+    },
+    keys = {
+      { -- lazy style key map
+        "<leader>Tu",
+        "<cmd>Telescope undo<cr>",
+        desc = "undo history",
+      },
+    },
+    config = function()
+      require("telescope").setup({
+        -- the rest of your telescope config goes here
+        extensions = {
+          undo = {
+            -- telescope-undo.nvim config, see below
+          },
+          -- other extensions:
+          -- file_browser = { ... }
+        },
+      })
+      require("telescope").load_extension("undo")
+    end,
+  },
+
+
+  {
     "otavioschwanck/arrow.nvim",
     config = function()
       require("arrow").setup({

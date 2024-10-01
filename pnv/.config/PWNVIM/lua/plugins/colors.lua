@@ -3,6 +3,9 @@ return {
     'kristijanhusak/vim-hybrid-material',
   },
 
+  {
+    "cpea2506/one_monokai.nvim",
+  },
   -- SOMETEXT: disabled_filetypes
   -- TODO: some todo stuff
   -- TASK: check for now
@@ -25,6 +28,25 @@ return {
       }
     end,
 
+  },
+
+  {
+    "lalitmee/cobalt2.nvim",
+    event = { "ColorSchemePre" }, -- if you want to lazy load
+    dependencies = { "tjdevries/colorbuddy.nvim", tag = "v1.0.0" },
+    init = function()
+        require("colorbuddy").colorscheme("cobalt2")
+    end,
+  },
+
+
+  {
+    "baliestri/aura-theme",
+    lazy = false,
+    config = function(plugin)
+      vim.opt.rtp:append(plugin.dir .. "/packages/neovim")
+      vim.cmd([[colorscheme aura-dark]])
+    end
   },
 
   -- {

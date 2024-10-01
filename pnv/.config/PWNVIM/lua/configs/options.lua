@@ -1,8 +1,10 @@
-vim.cmd("set expandtab")
-vim.cmd("set tabstop=2")
-vim.cmd("set softtabstop=2")
-vim.cmd("set shiftwidth=2")
-vim.cmd("set clipboard=unnamedplus")
+local cmd=vim.cmd
+
+cmd("set expandtab")
+cmd("set tabstop=2")
+cmd("set softtabstop=2")
+cmd("set shiftwidth=2")
+cmd("set clipboard=unnamedplus")
 vim.g.mapleader = " "
 vim.g.background = "light"
 -- vim.g.markdown_folding = 1,
@@ -16,6 +18,5 @@ vim.opt.foldlevel = 99
 
 
 
-
-vim.wo.number = true
+-- vim.wo.number = true
 
