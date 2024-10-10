@@ -116,7 +116,7 @@ local project_cli_terminal = {
 }
 
 return {
-  project_cli_terminal,
+  -- project_cli_terminal,
   tterm,
   tmanager,
 }
