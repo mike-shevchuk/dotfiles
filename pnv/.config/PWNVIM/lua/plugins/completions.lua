@@ -20,7 +20,7 @@ return {
       "hrsh7th/cmp-cmdline",
       "saadparwaiz1/cmp_luasnip",
       "L3MON4D3/LuaSnip",
-      "Exafunction/codeium.nvim",
+      -- "Exafunction/codeium.nvim",
     },
 
     config = function()
@@ -89,7 +89,7 @@ return {
           format = function(entry, vim_item)
               vim_item.menu = ({
                   nvim_lsp = '[Lsp]',
-                  codeium = '[Codeium]',
+                  -- codeium = '[Codeium]',
                   nvim_lua = '[Lua]',
                   luasnip = '[Luasnip]',
                   buffer = '[File]',
@@ -101,7 +101,7 @@ return {
 
         sources = cmp.config.sources({
           { name = "nvim_lsp", max_item_count = 10 },
-          { name = "codeium", max_item_count = 10, priority = 1000},
+          -- { name = "codeium", max_item_count = 10, priority = 1000},
           { name = "nvim_lua", max_item_count = 10 },
           { name = "luasnip" }, -- For luasnip users.
           { name = "buffer", max_item_count = 5 },
