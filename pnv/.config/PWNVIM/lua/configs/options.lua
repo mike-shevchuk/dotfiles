@@ -5,6 +5,7 @@ cmd("set tabstop=2")
 cmd("set softtabstop=2")
 cmd("set shiftwidth=2")
 cmd("set clipboard=unnamedplus")
+cmd("set so=6")   -- scrolloff alias
 vim.g.mapleader = " "
 vim.g.background = "light"
 -- vim.g.markdown_folding = 1,
