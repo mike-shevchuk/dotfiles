@@ -156,6 +156,75 @@ bindkey "^[[1;5C" forward-word
 
 
 
+function encrypt_dir() {
+  # Display help message
+  if [[ "$1" == "--help" ]]; then
+    echo "Usage: encrypt_directory <directory> <passphrase>"
+    echo "Encrypts the specified directory and deletes the original if encryption is successful."
+    echo
+    echo "Example:"
+    echo "  encrypt_directory comb-notes 'my_secret_text_anigma'"
+    return 0
+  fi
+
+  # Check if proper arguments are provided
+  if [[ $# -ne 2 ]]; then
+    echo "Error: Invalid arguments."
+    echo "Use '--help' for usage information."
+    return 1
+  fi
+
+  local dir=$1
+  local passphrase=$2
+  local output_file="${dir}.gpg"
+
+  # Encrypt the directory using gpgtar with the given passphrase
+  gpgtar -c -o "$output_file" --gpg-args "--batch --yes --passphrase=$passphrase" "$dir"
+
+  # Check if encryption was successful
+  if [[ $? -eq 0 ]]; then
+    echo "Encryption successful. Deleting original directory..."
+    rm -rf "$dir"  # Delete the original directory
+  else
+    echo "Encryption failed."
+  fi
+}
+
+
+function decrypt_dir() {
+  # Display help message
+  if [[ "$1" == "--help" ]]; then
+    echo "Usage: decrypt_directory <gpg_file> <passphrase>"
+    echo "Decrypts the specified .gpg file and deletes the encrypted file if decryption is successful."
+    echo
+    echo "Example:"
+    echo "  decrypt_directory comb-notes.gpg 'my_secret_text_anigma'"
+    return 0
+  fi
+
+  # Check if proper arguments are provided
+  if [[ $# -ne 2 ]]; then
+    echo "Error: Invalid arguments."
+    echo "Use '--help' for usage information."
+    return 1
+  fi
+
+  local gpg_file=$1
+  local passphrase=$2
+  # local output_dir="${gpg_file%.gpg}"
+  local output_dir="."
+
+  # Decrypt the gpg file using gpgtar with the given passphrase
+  gpgtar --decrypt --directory "$output_dir" --gpg-args "--batch --yes --passphrase=$passphrase" "$gpg_file"
+
+  # Check if decryption was successful
+  if [[ $? -eq 0 ]]; then
+    echo "Decryption successful. Deleting encrypted file..."
+    rm -f "$gpg_file"  # Delete the encrypted .gpg file
+  else
+    echo "Decryption failed."
+  fi
+}
 
 
 function y() {
