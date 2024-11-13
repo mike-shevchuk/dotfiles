@@ -8,7 +8,7 @@ HISTSIZE=1000
 SAVEHIST=1000
 HISTFILE=~/.histfile
 setopt SHARE_HISTORY
-export EDITOR=vim
+export EDITOR='NVIM_APPNAME=PWNVIM nvim'
 
 
 export PATH="$HOME/.pyenv/bin:$PATH"
@@ -153,6 +153,20 @@ bindkey '^A' beginning-of-line
 bindkey '^E' end-of-line
 bindkey "^[[1;5D" backward-word
 bindkey "^[[1;5C" forward-word
+
+
+
+
+
+function y() {
+	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+	yazi "$@" --cwd-file="$tmp"
+	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+		builtin cd -- "$cwd"
+	fi
+	rm -f -- "$tmp"
+}
+
 
 # # >>> conda initialize >>>
 # # !! Contents within this block are managed by 'conda init' !!
