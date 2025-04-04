@@ -47,6 +47,7 @@ alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
 alias open="xdg-open"
 alias git_dog="git log --all --decorate --oneline --graph"
+alias pip_freeze="pip list --not-required --format freeze"
 
 alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
 
