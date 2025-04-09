@@ -165,6 +165,17 @@ return {
     end,
   },
 
+  {
+    "phaazon/hop.nvim",
+    enable = true,
+    keys = {
+      { "<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1" },
+    },
+    config = function()
+      require("hop").setup({ keys = "etovxqpdygfblzhckisuran" })
+    end,
+  },
+
   -- or you can return new options to override all the defaults
   {
     "nvim-lualine/lualine.nvim",

@@ -69,27 +69,32 @@ commander.add({
   {
     desc = "Test Neotree",
     keys = { "n", "<leader>fi" },
-    cmd = "<cmd>Neotree toggle<cr>",
+    cmd = "<cmd>Legendary<cr>",
+  },
+
+  -- {
+  --   desc = "Legendary",
+  --   keys = {
+  --     { "i", "n", "t" },
+  --     "<M-p>",
+  --   },
+  --   cmd = "<cmd>Legendary<cr>",
+  -- },
+  -- -- st('n', '<C-p>', '<cmd>Legendary<cr>', { desc='Command Pallete'})
+  --
+  {
+    desc = "Exit Terminal Mode",
+    keys = { "t", "<C-n>" },
+    cmd = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
+    end,
   },
 
   {
-    desc = "Legendary",
-    keys = {
-      { "i", "n", "t" },
-      "<M-p>",
-    },
-    cmd = "<cmd>Legendary<cr>",
+    desc = "the toogle terminal manager",
+    keys = { { "i", "n", "t" }, "<C-t>" },
+    cmd = "<cmd>Telescope toggleterm_manager<cr>",
   },
-  -- st('n', '<C-p>', '<cmd>Legendary<cr>', { desc='Command Pallete'})
-
-  -- {
-  --   desc = "Exit Terminal Mode",
-  --   keys = {"t", "<C-t>"},
-  --   cmd = function()
-  --     vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
-  --   end
-  -- },
-  --
 
   {
     desc = "Alpha",
@@ -98,6 +103,12 @@ commander.add({
     end,
     keys = { { "n", "i" }, "<C-H>" },
   },
+
+  { desc = "The end of the line", keys = { { "i" }, "<C-e>" }, cmd = "<esc>A" },
+  { desc = "The beg of the line", keys = { { "i" }, "<C-a>" }, cmd = "<esc>I" },
+
+  { desc = "The end of the line", keys = { { "n" }, "<C-e>" }, cmd = "<esc>$" },
+  { desc = "The beg of the line", keys = { { "n" }, "<C-a>" }, cmd = "<esc>^" },
 })
 
 st("n", "<leader>md", "<cmd>NoiceDismiss<cr>", { desc = "Dismiss message" })
@@ -116,5 +127,3 @@ st("n", "<leader>h", ":nohlsearch<CR>")
 -- st('t', "<C-t>", "<C-\\><C-n><cmd>Telescope toggleterm_manager<cr>", { desc = "Toggle terminal mode" })
 
 -- st('i', "<C-f>", "<cmd>HopChar1<cr>", {desc = "Find char"})
-st("i", "<C-e>", "<esc>A", { desc = "The end of the line" })
-st("i", "<C-a>", "<esc>I", { desc = "The beginning of the line" })
