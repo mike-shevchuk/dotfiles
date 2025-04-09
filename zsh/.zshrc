@@ -88,7 +88,7 @@ alias cl="clear"
 # export GPT4_TOKEN=$(bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value')
 
 
-alias lz="NVIM_APPNAME=LazyVim nvim"
+alias lz="NVIM_APPNAME=LazyVIM nvim"
 alias kck="NVIM_APPNAME=kickstart nvim"
 alias nvim-chad="NVIM_APPNAME=NvChad nvim"
 alias nv="NVIM_APPNAME=AstroNvim nvim"
