@@ -165,6 +165,15 @@ local fold_preview = {
   end,
 }
 
+local bat = {
+  "justinhj/battery.nvim",
+  config = function()
+    require("battery").setup({
+      battery = "BAT0", -- or "BAT1" depending on your system
+    })
+  end,
+}
+
 local tail_fold = {
   "razak17/tailwind-fold.nvim",
   -- opts= {},
@@ -182,6 +191,7 @@ return {
   tail_fold,
   hop,
   overseer,
+  bat,
   -- rng,
   -- rngr,
   -- alpha,
