@@ -12,6 +12,7 @@ export EDITOR='NVIM_APPNAME=PWNVIM nvim'
 
 
 export PATH="$HOME/.pyenv/bin:$PATH"
+export PATH=$PATH:$(npm bin -g)
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
@@ -19,7 +20,8 @@ eval "$(pyenv virtualenv-init -)"
 ZPLUGRC=$HOME/.zsh_zplug
 
 ############# ASDF
-. "$HOME/.asdf/asdf.sh"
+# . "$HOME/.asdf/asdf.sh"
+[ -f "$HOME/.asdf/asdf.sh" ] && . "$HOME/.asdf/asdf.sh"
 # append completions to fpath
 fpath=(${ASDF_DIR}/completions $fpath)
 # initialise completions with ZSH's compinit
