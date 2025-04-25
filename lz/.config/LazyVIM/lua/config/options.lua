@@ -20,5 +20,5 @@ vim.opt.foldexpr = "nvim_treesitter#foldexpr()" -- default is ""
 vim.opt.foldenable = false --
 vim.opt.foldmethod = "indent"
 vim.opt.foldlevel = 99
-
+vim.opt.shell = "/usr/bin/zsh"
 -- vim.wo.number = true
