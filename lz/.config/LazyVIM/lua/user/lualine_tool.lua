@@ -1,5 +1,7 @@
 local M = {}
 
+local commmander = require("commander")
+
 local last_sys_info = ""
 local last_update_time = 0
 local update_interval = 5 -- seconds between real updates
@@ -154,14 +156,24 @@ vim.api.nvim_create_user_command("ReloadCurrent", M.reload_current, {})
 
 vim.api.nvim_create_user_command("SYS", function()
   vim.notify(M.get_sys_status())
-end, {})
+end, { desc = "Show system monitor" })
 
 vim.api.nvim_create_user_command("BAT", function()
   vim.notify(M.get_battery_status())
-end, {})
+end, { desc = "Show battery" })
 
 vim.api.nvim_create_user_command("LANG", function()
   vim.notify(M.get_keyboard_layout())
-end, {})
+end, { desc = "Show lang layout" })
 
+-- commander.add({
+--   {
+--     desc = "Relload Current File",
+--     keys = { "n", "<leader>rr" },
+--     cmd = function()
+--       M.reload_current()
+--     end,
+--   },
+-- })
+--
 return M

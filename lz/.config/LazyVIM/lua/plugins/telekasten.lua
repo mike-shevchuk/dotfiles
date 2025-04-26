@@ -1,4 +1,7 @@
 return {
+
+  -- { "wakatime/vim-wakatime", lazy = false },
+
   "renerocksai/telekasten.nvim",
   dependencies = { "nvim-telescope/telescope.nvim" },
   keys = {
@@ -11,6 +14,7 @@ return {
     { "<leader>zc", "<cmd>Telekasten show_calendar<CR>", desc = "Telekasten calendar", mode = { "n" } },
     { "<leader>zb", "<cmd>Telekasten show_backlinks<CR>", desc = "Telekasten backlinks", mode = { "n" } },
     { "<leader>zI", "<cmd>Telekasten insert_img_link<CR>", desc = "Telekasten insert image", mode = { "n" } },
+    { "<leader>z3", "<cmd>Telekasten toggle_todo<CR>", desc = "Telekasten toggle todo", mode = { "n" } },
   },
 
   config = function()
