@@ -67,7 +67,7 @@ end
 
 commander.add({
   {
-    desc = "Test Neotree",
+    desc = "Legendary",
     keys = { "n", "<leader>fi" },
     cmd = "<cmd>Legendary<cr>",
   },
@@ -87,6 +87,22 @@ commander.add({
     keys = { "t", "<C-n>" },
     cmd = function()
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n>", true, true, true), "n", true)
+    end,
+  },
+
+  {
+    desc = "Go to normal mode",
+    keys = { { "t", "i" }, "<C-j>" },
+    cmd = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<Esc>", true, true, true), "n", true)
+    end,
+  },
+
+  {
+    desc = "Switch window in terminal mode",
+    keys = { "t", "C-w" },
+    cmd = function()
+      vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n><C-w>w", true, true, true), "n", true)
     end,
   },
 
@@ -111,6 +127,16 @@ commander.add({
   { desc = "The beg of the line", keys = { { "n" }, "<C-a>" }, cmd = "<esc>^" },
 })
 
+commander.add({
+  { keys = { "n", "<leader>bn" }, cmd = "<cmd>bn<cr>", desc = "next tab" },
+  { keys = { "n", "<leader>bp" }, cmd = "<cmd>bp<cr>", desc = "previous tab" },
+  { keys = { "n", "<leader>bd" }, cmd = "<cmd>bd<cr>", desc = "close tub" },
+
+  -- { keys = { "n", "<leader>bn" }, cmd = "<cmd>tabnew<cr>", desc = "new tab" },
+  -- { keys = { "n", "<leader>bP" }, cmd = "<cmd>tabp<cr>", desc = "previous tab" },
+  -- { keys = { "n", "<leader>bN" }, cmd = "<cmd>tabnext<cr>", desc = "next tab" },
+})
+
 st("n", "<leader>md", "<cmd>NoiceDismiss<cr>", { desc = "Dismiss message" })
 
 -- Navigate vim panes better
@@ -120,7 +146,7 @@ st("n", "<c-j>", ":wincmd j<CR>")
 st("n", "<c-h>", ":wincmd h<CR>")
 st("n", "<c-l>", ":wincmd l<CR>")
 
-st("n", "<leader>h", ":nohlsearch<CR>")
+-- st("n", "<leader>h", ":nohlsearch<CR>")
 
 -- st('t', "<C-n>", "<C-\\><C-n><cr>", {desc = "Escape terminal mode"})
 -- st('n', '<C-t>', '<cmd>Telescope toggleterm_manager<cr>', {desc= 'term manager'})
