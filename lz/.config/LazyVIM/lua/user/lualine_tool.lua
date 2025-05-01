@@ -55,6 +55,69 @@ local function update_temperatures()
   end
 end
 
+-- local function style_temp(temp)
+--   if type(temp) ~= "number" then
+--     return "?"
+--   end
+--
+--   local symbol = "🌡️"
+--   local color_group = "%#Normal#"
+--
+--   if temp >= 60 then
+--     symbol = "🔥"
+--     color_group = "%#ErrorMsg#"
+--   elseif temp < 36 then
+--     symbol = "🧊"
+--     color_group = "%#Comment#"
+--   else
+--     color_group = "%#WarningMsg#"
+--   end
+--
+--   return string.format("%s%s°C%%#", color_group, temp) .. symbol
+-- end
+
+local function style_cpu(cpu)
+  local val = tonumber(cpu)
+  if not val then
+    return "?"
+  end
+
+  local hl, icon
+  if val >= 45 then
+    hl = "ErrorMsg"
+    icon = "🔥"
+  elseif val >= 20 then
+    hl = "WarningMsg"
+    icon = "🧠"
+  else
+    hl = "MoreMsg"
+    icon = "🧊"
+  end
+
+  return string.format("%%#%s#%s %.2f%%*", hl, icon, val)
+end
+
+local function style_temp(temp)
+  if type(temp) ~= "number" then
+    return "?"
+  end
+
+  local symbol = "🌡️"
+  local hl_group = "Normal"
+
+  if temp >= 60 then
+    symbol = "🔥"
+    hl_group = "ErrorMsg"
+  elseif temp < 39 then
+    symbol = "🧊"
+    hl_group = "Comment"
+  else
+    hl_group = "WarningMsg"
+  end
+
+  return string.format("%%#%s#%d°C%%*%s", hl_group, temp, symbol)
+end
+
 function M.get_sys_status()
   local now = vim.loop.hrtime() / 1e9 -- convert nanoseconds to seconds
 
@@ -66,12 +129,20 @@ function M.get_sys_status()
     update_usage()
     update_temperatures()
 
+    -- last_sys_info = string.format(
+    --   "🧠 %s⧖ | 💾 %sGB | 🌡️ %s/%s",
+    --   cached_temps.cpu or "?",
+    --   cached_temps.mem or "?",
+    --   cached_temps.cpu_t or "?",
+    --   cached_temps.gpu_t or "?"
+    -- )
+
     last_sys_info = string.format(
-      "🧠 %s⧖ | 💾 %sGB | 🌡️ %s/%s",
-      cached_temps.cpu or "?",
+      "🧠 %s⧖ | 💾 %sGB | %s/%s",
+      style_cpu(cached_temps.cpu),
       cached_temps.mem or "?",
-      cached_temps.cpu_t or "?",
-      cached_temps.gpu_t or "?"
+      style_temp(cached_temps.cpu_t),
+      style_temp(cached_temps.gpu_t)
     )
 
     last_update_time = now
