@@ -1,6 +1,7 @@
 return {
   {
     "kristijanhusak/vim-hybrid-material",
+    priority = 1000,
   },
 
   {
@@ -33,28 +34,20 @@ return {
     "lalitmee/cobalt2.nvim",
     event = { "ColorSchemePre" }, -- if you want to lazy load
     dependencies = { "tjdevries/colorbuddy.nvim", tag = "v1.0.0" },
-    init = function()
-      require("colorbuddy").colorscheme("cobalt2")
-    end,
+    -- init = function()
+    -- require("colorbuddy").colorscheme("cobalt2")
+    -- end,
   },
 
   {
     "baliestri/aura-theme",
     lazy = false,
     config = function(plugin)
-      vim.opt.rtp:append(plugin.dir .. "/packages/neovim")
-      vim.cmd([[colorscheme aura-dark]])
+      -- vim.opt.rtp:append(plugin.dir .. "/packages/neovim")
+      -- vim.cmd([[colorscheme aura-dark]])
     end,
   },
 
-  -- {
-  --   "justinhj/battery.nvim",
-  --   config = function()
-  --     require("battery").setup({
-  --       battery = "BAT0", -- or "BAT1" depending on your system
-  --     })
-  --   end,
-  -- },
   --
   -- {
   --   'fei6409/log-highlight.nvim',
