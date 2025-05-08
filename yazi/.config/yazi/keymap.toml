@@ -1,0 +1,71 @@
+[keymap]
+
+# 🔁 File movement & symlink
+"dd" = "delete"
+"yy" = "yank"
+"pp" = "paste"
+"ss" = "create_symlink"
+"alt+s" = "create_symlink"   # Alternative shortcut
+"S" = "create_symlink"       # Shift+S
+
+# 📋 Clipboard enhancements
+"yw" = "yank_path"           # Yank path to clipboard
+"yp" = "yank_absolute_path"  # Yank full path
+"yt" = "yank_relative_path"  # Yank relative path
+
+# 🧰 File creation & management
+"a" = "create_file"
+"A" = "create_directory"
+"r" = "rename"
+"c" = "copy"
+"x" = "cut"
+"u" = "undo"
+"U" = "redo"
+"z" = "zip"
+"Z" = "unzip"
+
+# 🔍 Search
+"/" = "search"
+"n" = "search_next"
+"N" = "search_prev"
+"*" = "filter"
+
+# 🧭 Navigation
+"h" = "go_parent"
+"l" = "open"
+"j" = "move_down"
+"k" = "move_up"
+"gg" = "first"
+"G" = "last"
+"ctrl+d" = "page_down"
+"ctrl+u" = "page_up"
+
+# 🪟 Pane and tab
+"ctrl+h" = "focus_left"
+"ctrl+l" = "focus_right"
+"ctrl+k" = "focus_up"
+"ctrl+j" = "focus_down"
+"T" = "new_tab"
+"gt" = "next_tab"
+"gT" = "prev_tab"
+"q" = "quit"
+"mg" = "dir_graph"
+
+
+# 🪄 Preview
+"tab" = "toggle_preview"
+"i" = "toggle_preview_sync"
+"m" = "toggle_meta"
+
+# 👁 Hidden files
+"." = "toggle_hidden"
+
+# 🔧 Shell
+"!" = "shell"
+
+# 🔂 Reload
+"R" = "reload"
+
+# ❓ Help
+"?" = "help"
+
