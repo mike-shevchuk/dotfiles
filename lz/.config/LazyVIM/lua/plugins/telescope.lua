@@ -30,6 +30,7 @@ return {
       })
       -- TODO: add hiden files like find files
       vim.api.nvim_set_keymap("n", "<Leader>fd", ":Telescope opener<CR>", { noremap = true })
+      vim.api.nvim_set_keymap("n", "<Leader>fD", ":Telescope opener hidden=true<CR>", { noremap = true })
     end,
   },
 

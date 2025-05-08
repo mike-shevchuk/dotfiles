@@ -39,14 +39,10 @@ return {
     -- end,
   },
 
-  {
-    "baliestri/aura-theme",
-    lazy = false,
-    config = function(plugin)
-      -- vim.opt.rtp:append(plugin.dir .. "/packages/neovim")
-      -- vim.cmd([[colorscheme aura-dark]])
-    end,
-  },
+  -- {
+  --   "baliestri/aura-theme",
+  --   lazy = false,
+  -- },
 
   --
   -- {
