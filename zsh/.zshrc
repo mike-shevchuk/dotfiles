@@ -8,7 +8,9 @@ HISTSIZE=1000
 SAVEHIST=1000
 HISTFILE=~/.histfile
 setopt SHARE_HISTORY
-export EDITOR='NVIM_APPNAME=PWNVIM nvim'
+# export EDITOR='NVIM_APPNAME=PWNVIM nvim'
+# export EDITOR='NVIM_APPNAME=LazyVIM nvim'
+export EDITOR='nvim'
 
 
 export PATH="$HOME/.pyenv/bin:$PATH"
