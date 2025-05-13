@@ -9,7 +9,7 @@ return {
   config = function()
     local commander = require("commander")
     commander.add({
-      { keys = { "n", "<leader>e" }, cmd = "<cmd>Neotree toggle filesystem reveal right<cr>", desc = "Neotree" },
+      { keys = { "n", "<leader>e" }, cmd = "<cmd>Neotree toggle filesystem reveal left<cr>", desc = "Neotree" },
       -- { keys={'n', '<leader>3'}, cmd='<cmd>cd %:h <CR>', desc='Change dir'},
 
       {
