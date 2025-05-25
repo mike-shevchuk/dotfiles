@@ -1,6 +1,8 @@
 {
   "extras": [
-
+    "lazyvim.plugins.extras.ai.codeium",
+    "lazyvim.plugins.extras.lang.toml",
+    "lazyvim.plugins.extras.vscode"
   ],
   "install_version": 8,
   "news": {

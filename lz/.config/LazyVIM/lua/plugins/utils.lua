@@ -111,18 +111,14 @@ local other = {
     end,
   },
 
-  -- NOTE: perfetct
   {
-    "gen740/SmoothCursor.nvim",
+    "phaazon/hop.nvim",
+    enable = true,
+    keys = {
+      { "<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1" },
+    },
     config = function()
-      require("smoothcursor").setup({
-        type = "matrix",
-        cursor = require("smoothcursor.matrix_chars"), -- Cursor shape (requires Nerd Font). Disabled in fancy mode.:HopChar1
-        texthl = "SmoothCursorGreen", -- Highlight group. Default is { bg = nil, fg = "#FFD400" }. Disabled in fancy mode.
-        linehl = nil, -- Highlights the line under the cursor, similar to 'cursorline'. "CursorLine" is recommended. Disabled in fancy mode.
-        speed = 40,
-        threshold = 1, -- Animate only if cursor moves more than this many lines
-      })
+      require("hop").setup({ keys = "etovxqpdygfblzhckisuran" })
     end,
   },
 

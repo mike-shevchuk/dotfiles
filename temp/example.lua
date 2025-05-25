@@ -16,7 +16,7 @@ return {
   {
     "LazyVim/LazyVim",
     opts = {
-      colorscheme = "gruvbox",
+      -- colorscheme = "gruvbox",
     },
   },
 
@@ -115,6 +115,8 @@ return {
   -- treesitter, mason and typescript.nvim. So instead of the above, you can use:
   { import = "lazyvim.plugins.extras.lang.typescript" },
 
+  { import = "lazyvim.plugins.extras.lsp.none-ls" },
+
   -- add more treesitter parsers
   {
     "nvim-treesitter/nvim-treesitter",
@@ -153,39 +155,28 @@ return {
   },
 
   -- the opts function can also be used to change the default opts:
-  {
-    "nvim-lualine/lualine.nvim",
-    event = "VeryLazy",
-    opts = function(_, opts)
-      table.insert(opts.sections.lualine_x, {
-        function()
-          return "😄"
-        end,
-      })
-    end,
-  },
-
-  {
-    "phaazon/hop.nvim",
-    enable = true,
-    keys = {
-      { "<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1" },
-    },
-    config = function()
-      require("hop").setup({ keys = "etovxqpdygfblzhckisuran" })
-    end,
-  },
+  -- {
+  --   "nvim-lualine/lualine.nvim",
+  --   event = "VeryLazy",
+  --   opts = function(_, opts)
+  --     table.insert(opts.sections.lualine_x, {
+  --       function()
+  --         return "😄"
+  --       end,
+  --     })
+  --   end,
+  -- },
 
   -- or you can return new options to override all the defaults
-  {
-    "nvim-lualine/lualine.nvim",
-    event = "VeryLazy",
-    opts = function()
-      return {
-        --[[add your custom lualine config here]]
-      }
-    end,
-  },
+  -- {
+  --   "nvim-lualine/lualine.nvim",
+  --   event = "VeryLazy",
+  --   opts = function()
+  --     return {
+  --       --[[add your custom lualine config here]]
+  --     }
+  --   end,
+  -- },
 
   -- use mini.starter instead of alpha
   { import = "lazyvim.plugins.extras.ui.mini-starter" },

@@ -4,6 +4,11 @@ return {
   },
 
   {
+    "nvim-telescope/telescope-file-browser.nvim",
+    dependencies = { "nvim-telescope/telescope.nvim", "nvim-lua/plenary.nvim" },
+  },
+
+  {
     "willthbill/opener.nvim",
     config = function()
       require("telescope").load_extension("opener")
@@ -73,13 +78,13 @@ return {
     end,
   },
 
-  {
-    -- ln -s ~/.zshrc ~/.zshenv
-    "nvim-telescope/telescope-z.nvim",
-    config = function()
-      require("telescope").load_extension("z")
-    end,
-  },
+  -- {
+  --   -- ln -s ~/.zshrc ~/.zshenv
+  --   "nvim-telescope/telescope-z.nvim",
+  --   config = function()
+  --     require("telescope").load_extension("z")
+  --   end,
+  -- },
 
   {
     "gelguy/wilder.nvim",
@@ -198,6 +203,7 @@ return {
       require("telescope").load_extension("ui-select")
       require("telescope").load_extension("themes")
       require("telescope").load_extension("noice")
+      require("telescope").load_extension("file_browser")
       -- require("telescope").load_extension("z")
 
       --  Has some bugs

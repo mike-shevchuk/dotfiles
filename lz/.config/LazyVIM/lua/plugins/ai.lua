@@ -1,4 +1,16 @@
+local codeium = {
+  "Exafunction/windsurf.nvim",
+  dependencies = {
+    "nvim-lua/plenary.nvim",
+    "hrsh7th/nvim-cmp",
+  },
+  config = function()
+    require("codeium").setup({})
+  end,
+}
+
 local codecomp = {
+
   "olimorris/codecompanion.nvim",
   opts = {},
   dependencies = {
@@ -33,4 +45,5 @@ local codecomp = {
 
 return {
   codecomp,
+  codeium,
 }

@@ -31,6 +31,21 @@ return {
     end,
   },
 
+  -- NOTE: perfetct
+  {
+    "gen740/SmoothCursor.nvim",
+    config = function()
+      require("smoothcursor").setup({
+        type = "matrix",
+        cursor = require("smoothcursor.matrix_chars"), -- Cursor shape (requires Nerd Font). Disabled in fancy mode.:HopChar1
+        texthl = "SmoothCursorGreen", -- Highlight group. Default is { bg = nil, fg = "#FFD400" }. Disabled in fancy mode.
+        linehl = nil, -- Highlights the line under the cursor, similar to 'cursorline'. "CursorLine" is recommended. Disabled in fancy mode.
+        speed = 40,
+        threshold = 1, -- Animate only if cursor moves more than this many lines
+      })
+    end,
+  },
+
   -- {
   --   "lalitmee/cobalt2.nvim",
   --   dependencies = { "tjdevries/colorbuddy.nvim" },
