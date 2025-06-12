@@ -11,6 +11,8 @@ local rng = {
   end,
 }
 
+local git_conf = { "akinsho/git-conflict.nvim", version = "*", config = true }
+
 -- PERF: work great
 local overseer = {
   "stevearc/overseer.nvim",
@@ -161,6 +163,15 @@ local fold_preview = {
   end,
 }
 
+local flog = {
+  "rbong/vim-flog",
+  lazy = true,
+  cmd = { "Flog", "Flogsplit", "Floggit" },
+  dependencies = {
+    "tpope/vim-fugitive",
+  },
+}
+
 local bat = {
   "justinhj/battery.nvim",
   config = function()
@@ -188,6 +199,8 @@ return {
   hop,
   overseer,
   bat,
+  git_conf,
+  flog,
   -- rng,
   -- rngr,
   -- alpha,

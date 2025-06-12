@@ -1,3 +1,87 @@
+local diffview = {
+  "sindrets/diffview.nvim",
+  dependencies = {
+    "nvim-lua/plenary.nvim",
+    { "TimUntersberger/neogit", config = { disable_commit_confirmation = true } },
+  },
+  -- commit = "9359f7b1dd3cb9fb1e020f57a91f8547be3558c6", -- HEAD requires git 2.31
+  keys = {
+    { "<C-g>", "<CMD>DiffviewOpen<CR>", mode = { "n", "i", "v" } },
+  },
+  config = {
+    keymaps = {
+      view = {
+        ["<C-g>"] = "<CMD>DiffviewClose<CR>",
+        ["c"] = "<CMD>DiffviewClose|Neogit commit<CR>",
+      },
+      file_panel = {
+        ["<C-g>"] = "<CMD>DiffviewClose<CR>",
+        ["c"] = "<CMD>DiffviewClose|Neogit commit<CR>",
+      },
+    },
+  },
+}
+
+local dfview = {
+  "sindrets/diffview.nvim",
+  -- Завантажувати плагін лише тоді, коли викликаються ці команди
+  cmd = { "DiffviewOpen", "DiffviewClose", "DiffviewLog", "DiffviewFileHistory" },
+  dependencies = {
+    "nvim-lua/plenary.nvim", -- Обов'язкова залежність для Diffview
+    {
+      "TimUntersberger/neogit", -- Neogit для інтеграції комітів, якщо ви використовуєте його
+      opts = {
+        disable_commit_confirmation = true,
+      },
+    },
+    -- Додаємо Telescope як залежність для інтеграції
+    {
+      "nvim-telescope/telescope.nvim",
+      tag = "0.1.x", -- Рекомендований тег для стабільної версії Telescope
+      dependencies = { "nvim-lua/plenary.nvim" },
+    },
+  },
+  keys = {
+    -- Глобальні клавіші для відкриття Diffview (тут можна використовувати таблиці з desc)
+    { "<leader>gd", "<CMD>DiffviewOpen<CR>", mode = "n", desc = "Diffview: Open" },
+    { "<leader>gl", "<CMD>Telescope diffview<CR>", mode = "n", desc = "Diffview: Log (Telescope)" },
+  },
+  opts = {
+    -- Ці опції будуть передані `require("diffview").setup()`
+    -- У цьому розділі keymaps значення мають бути лише рядками (командами) або функціями
+    keymaps = {
+      view = {
+        -- Клавіші для навігації та дій у режимі перегляду дифу
+        ["<C-g>"] = "<CMD>DiffviewClose<CR>", -- Закрити Diffview
+        ["c"] = "<CMD>DiffviewClose | Neogit commit<CR>", -- Закрити Diffview та відкрити Neogit для коміту
+        ["n"] = "<cmd>diffview_next_hunk<CR>", -- Перехід до наступного ханку
+        ["N"] = "<cmd>diffview_prev_hunk<CR>", -- Перехід до попереднього ханку
+        ["gf"] = "<cmd>diffview_focus_file<CR>", -- Фокусуватися на файлі в поточному вікні
+      },
+      file_panel = {
+        -- Клавіші для навігації та дій у панелі файлів
+        ["<C-g>"] = "<CMD>DiffviewClose<CR>", -- Закрити Diffview
+        ["c"] = "<CMD>DiffviewClose | Neogit commit<CR>", -- Закрити Diffview та відкрити Neogit для коміту
+        ["j"] = "<cmd>diffview_next_entry<CR>", -- Перехід до наступного елемента
+        ["k"] = "<cmd>diffview_prev_entry<CR>", -- Перехід до попереднього елемента
+        ["P"] = "<cmd>diffview_toggle_preview<CR>", -- Перемикання попереднього перегляду
+        ["C"] = "<cmd>diffview_toggle_cached<CR>", -- Перемикання кешованих змін
+        ["<cr>"] = "<cmd>diffview_select_entry<CR>", -- Вибрати елемент
+      },
+    },
+    -- Інші корисні налаштування Diffview
+    -- theme = "diffview",
+    -- merge_tool = "nvimdiff",
+    -- use_icons = true,
+  },
+  -- Налаштування розширення Telescope для Diffview
+  config = function(_, opts)
+    require("diffview").setup(opts)
+    -- Завантажуємо розширення diffview для Telescope
+    require("telescope").load_extension("diffview")
+  end,
+}
+
 local cmp_lsp = {
   "hrsh7th/cmp-nvim-lsp",
 }
@@ -302,5 +386,7 @@ return {
   -- compleate,
   -- cmp,
   merge_cmp,
+  -- diffview,
+  dfview,
   -- cmp_lsp,
 }
