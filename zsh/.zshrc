@@ -13,8 +13,12 @@ setopt SHARE_HISTORY
 export EDITOR='nvim'
 
 
-export PATH="$HOME/.pyenv/bin:$PATH"
-export PATH=$PATH:$(npm bin -g)
+export PYENV_ROOT="$HOME/.pyenv"
+export PATH="$PYENV_ROOT/bin:$PATH"
+export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
+
+# export PATH="$HOME/.pyenv/bin:$PATH"
+# export PATH=$PATH:$(npm bin -g)
 eval "$(pyenv init -)"
 eval "$(pyenv virtualenv-init -)"
 
@@ -304,3 +308,4 @@ tmate-unpair() {
 # # <<< conda initialize <<<
 #
 
+export PATH="$HOME/.local/bin:$PATH"
