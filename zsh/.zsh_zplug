@@ -56,6 +56,7 @@ zplug "plugins/helm", from:oh-my-zsh
 
 # Commands
 zplug "rupa/z", use:z.sh
+zplug "zdharma-continuum/history-search-multi-word"
 # Package manager for nvim zsh
 zplug "kiurchv/asdf.plugin.zsh", defer:2
 # zplug "kmccormick/rsnapshot-timestamp", as:command

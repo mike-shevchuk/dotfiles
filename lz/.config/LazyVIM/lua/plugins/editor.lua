@@ -22,6 +22,18 @@ local diffview = {
   },
 }
 
+local macros = {
+  "ecthelionvi/NeoComposer.nvim",
+  dependencies = { "kkharji/sqlite.lua" },
+  config = function()
+    require("NeoComposer").setup()
+
+    local cmp = require("cmp")
+
+    cmp.setup({})
+  end,
+}
+
 local dfview = {
   "sindrets/diffview.nvim",
   -- Завантажувати плагін лише тоді, коли викликаються ці команди
@@ -386,6 +398,7 @@ return {
   -- compleate,
   -- cmp,
   merge_cmp,
+  macros,
   -- diffview,
   dfview,
   -- cmp_lsp,
