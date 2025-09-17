@@ -1,3 +1,9 @@
-lz/.config/LazyVIM/lazy-lock.json
-lz/.config/LazyVIM/lua/current-theme.lua
-pnv/.config/PWNVIM/lazy-lock.json
+# Private configuration files
+zsh/.zshrc.private
+zsh/.zshrc.secure
+*.private
+*.secure
+
+# Backup files
+*.backup
+*~

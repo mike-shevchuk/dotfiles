@@ -59,6 +59,42 @@ alias pip_freeze="pip list --not-required --format freeze"
 
 alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
 
+# Job scripts management
+alias job-dir="cd $HOME/dotfiles/zsh/.zsh_spaces/job"
+
+# Interactive alias selector
+alias-select() {
+    # Get all aliases and format them for fzf (name\tvalue)
+    local aliases_output=$(alias | sed 's/^alias //' | sed 's/=/	/' | sort)
+    
+    if [ -z "$aliases_output" ]; then
+        echo "No aliases found"
+        return 1
+    fi
+    
+    # Show aliases with fzf in two columns and execute selected one
+    local selected=$(echo "$aliases_output" | fzf \
+        --prompt="Select alias to run: " \
+        --height=50% \
+        --layout=reverse \
+        --border \
+        --with-nth=1,2 \
+        --delimiter=$'\t' \
+        --preview='echo "Alias: {1}" && echo "Command: {2}"' \
+        --preview-window=right:30%:wrap \
+        --bind='ctrl-/:toggle-preview')
+    
+    if [ -n "$selected" ]; then
+        # Extract just the alias name (first column)
+        local alias_name=$(echo "$selected" | cut -d$'\t' -f1)
+        echo "Running: $alias_name"
+        eval "$alias_name"
+    else
+        echo "No alias selected"
+    fi
+}
+
+
 
 # alias td="todoist-cli --collor --indent"
 # alias td="todoist-cli --color"
@@ -72,28 +108,7 @@ alias cl="clear"
 # alias cat='bat --style header --style snip --style changes --style header'
 
 
-# function bw_gpt_token() {
-#   local email="$1"
-#   bw list items | jq -r --arg email "$email" '.[] | select(.login.username==$email and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value'
-# }
-
-# alias bwu="bw unlock | sed -n 4p | cut -d ' ' -f 2-3 | xargs -o echo | xclip -sel c"
-#
-# alias bw_gpt_mike="bw_gpt_token 'mshevchukmofficial@gmail.com'"
-# alias bw_gpt_yuiriy="bw_gpt_token 'yuriy@znovyak.com'"
-# alias bw_gpt_lwi="bw_gpt_token 'wiai@sexeducation.com.ua'"
-
-# export GPT_TOKEN="$(bw_gpt_token 'wiai@sexeducation.com.ua' || echo '')"
-
-
-# alias bw_lb_gpt4="bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-# alias bw_gpt3_token="bw list items | jq -r '.[] | select(.login.username==\"mshevchukmofficial@gmail.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-
-
-# alias bw_gpt4_token="bw list items | jq -r '.[] | select(.login.username==\"yuriy@znovyak.com\" and (.name | test(\"openai.com\"))) | .fields[] | select(.name==\"token\") | .value'"
-# alias bw_gpt4_token = 
-# alias btuith="bluetuith"
-# export GPT4_TOKEN=$(bw list items | jq -r '.[] | select(.login.username==\"wiai@sexeducation.com.ua\" and (.name | test("openai.com"))) | .fields[] | select(.name=="token") | .value')
+# Bitwarden and GPT token functions moved to ~/.zshrc.private
 
 
 alias lz="NVIM_APPNAME=LazyVIM nvim"
@@ -292,6 +307,12 @@ tmate-unpair() {
 
 
 
+# Load private credentials if file exists
+[ -f ~/.zshrc.private ] && source ~/.zshrc.private
+
+# Load all zsh spaces
+[ -f "$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh" ] && source "$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh"
+
 # # >>> conda initialize >>>
 # # !! Contents within this block are managed by 'conda init' !!
 # __conda_setup="$('/home/mike/miniconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
@@ -309,3 +330,8 @@ tmate-unpair() {
 #
 
 export PATH="$HOME/.local/bin:$PATH"
+
+# Auto-change to last Yazi directory
+if [ -f ~/.yazi_last_dir ]; then
+    cd "$(cat ~/.yazi_last_dir)" 2>/dev/null && rm ~/.yazi_last_dir
+fi
