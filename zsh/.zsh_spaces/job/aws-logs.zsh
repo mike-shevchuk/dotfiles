@@ -4,8 +4,9 @@ AWS_LOG_STREAMS=(
     "/aws/lambda/dev-rescue-serverless-monitoring-data-extractor"
     "/aws/lambda/dev-rescue-serverless-monitoring-data-processor"
     "/aws/lambda/dev-rescue-serverless-monitoring-notification-processor"
-    "/aws/apprunner/dev-rescue-serverless-mqtt-worker/6ce023ee88034697b34d2452f9b98a2a/application"
+    # "/aws/apprunner/dev-rescue-serverless-mqtt-worker/6ce023ee88034697b34d2452f9b98a2a/application"
     "/aws/lambda/dev-rescue-serverless-fast-api"
+    "/aws/lambda/dev-rescue-serverless-mqtt-webhook"
 )
 
 # Default time range
