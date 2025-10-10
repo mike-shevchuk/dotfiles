@@ -1,13 +1,11 @@
 
-# Use modern completion system
-autoload -Uz compinit
-compinit
-
 # Default shell history
-HISTSIZE=1000
-SAVEHIST=1000
+HISTSIZE=10000
+SAVEHIST=10000
 HISTFILE=~/.histfile
 setopt SHARE_HISTORY
+setopt HIST_IGNORE_DUPS
+setopt HIST_FIND_NO_DUPS
 # export EDITOR='NVIM_APPNAME=PWNVIM nvim'
 # export EDITOR='NVIM_APPNAME=LazyVIM nvim'
 export EDITOR='nvim'
@@ -30,8 +28,10 @@ ZPLUGRC=$HOME/.zsh_zplug
 [ -f "$HOME/.asdf/asdf.sh" ] && . "$HOME/.asdf/asdf.sh"
 # append completions to fpath
 fpath=(${ASDF_DIR}/completions $fpath)
-# initialise completions with ZSH's compinit
-autoload -Uz compinit && compinit
+
+# Initialize completion system (once, after all fpath modifications)
+autoload -Uz compinit
+compinit
 
 ############ INFO: ZPLUG
 source $ZPLUGRC
@@ -106,9 +106,6 @@ func-select() {
     
     # Get functions from current shell
     local func_names=$(typeset -f | grep '^[a-zA-Z_][a-zA-Z0-9_]* ()' | sed 's/ ()//' | sort)
-    
-    echo "Debug: Found functions: $(echo $func_names | wc -w)"
-    echo "Debug: First 5 functions: $(echo $func_names | head -5)"
     
     for func in $func_names; do
         # Skip internal zsh functions and selector functions
@@ -199,7 +196,7 @@ alias nvim-oyi="NVIM_APPNAME=Oyinbra_nvim nvim"
 alias nvim-oyinbra="NVIM_APPNAME=Oyinbra nvim"
 
 function nvims() {
-  items=("default" "Oyinbra" "Oyinbra_nvim" "LazyVim" "NvChad" "AstroNvim", "TNVIM", "PWNVIM")
+  items=("default" "Oyinbra" "Oyinbra_nvim" "LazyVim" "NvChad" "AstroNvim" "TNVIM" "PWNVIM")
   config=$(printf "%s\n" "${items[@]}" | fzf --prompt=" Neovim Config  " --height=~50% --layout=reverse --border --exit-0)
   if [[ -z $config ]]; then
     echo "Nothing selected"
@@ -245,11 +242,62 @@ prompt_duration() {
   prompt_segment 'red' '' "$duration_segment"
 }
 
+# Git arrows showing commits to pull/push
+prompt_git_arrows() {
+  # Check if we're in a git repository
+  if ! git rev-parse --git-dir > /dev/null 2>&1; then
+    return
+  fi
+
+  # Get current branch
+  local branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+  if [[ -z "$branch" ]]; then
+    return
+  fi
+
+  # Get remote tracking branch
+  local remote=$(git config branch.$branch.remote 2>/dev/null)
+  local merge=$(git config branch.$branch.merge 2>/dev/null | sed 's|refs/heads/||')
+  
+  if [[ -z "$remote" ]] || [[ -z "$merge" ]]; then
+    return
+  fi
+
+  local remote_branch="$remote/$merge"
+
+  # Check if remote branch exists
+  if ! git rev-parse --verify $remote_branch > /dev/null 2>&1; then
+    return
+  fi
+
+  # Count commits ahead and behind
+  local ahead=$(git rev-list --count ${remote_branch}..HEAD 2>/dev/null)
+  local behind=$(git rev-list --count HEAD..${remote_branch} 2>/dev/null)
+
+  local arrows=""
+  
+  if [[ $ahead -gt 0 ]]; then
+    arrows+="↑$ahead"
+  fi
+  
+  if [[ $behind -gt 0 ]]; then
+    if [[ -n "$arrows" ]]; then
+      arrows+=" "
+    fi
+    arrows+="↓$behind"
+  fi
+
+  if [[ -n "$arrows" ]]; then
+    prompt_segment 'cyan' 'black' " $arrows "
+  fi
+}
+
 
 #AGNOSTER_PROMPT_SEGMENTS+=("prompt_segment '' 'red' ' ($cmd_duration s) '")
 
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
+AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 
 bindkey '^A' beginning-of-line
 bindkey '^E' end-of-line
@@ -413,3 +461,4 @@ export PATH="$HOME/.local/bin:$PATH"
 if [ -f ~/.yazi_last_dir ]; then
     cd "$(cat ~/.yazi_last_dir)" 2>/dev/null && rm ~/.yazi_last_dir
 fi
+
