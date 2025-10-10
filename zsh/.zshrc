@@ -62,10 +62,15 @@ alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
 # Job scripts management
 alias job-dir="cd $HOME/dotfiles/zsh/.zsh_spaces/job"
 
+# Function and alias selectors
+alias a_sel="alias-select"
+alias f_sel="func-select"
+
 # Interactive alias selector
 alias-select() {
     # Get all aliases and format them for fzf (name\tvalue)
-    local aliases_output=$(alias | sed 's/^alias //' | sed 's/=/	/' | sort)
+    # Exclude the selector aliases to prevent recursion
+    local aliases_output=$(alias | sed 's/^alias //' | sed 's/=/	/' | grep -v '^a_sel	' | grep -v '^f_sel	' | sort)
     
     if [ -z "$aliases_output" ]; then
         echo "No aliases found"
@@ -91,6 +96,79 @@ alias-select() {
         eval "$alias_name"
     else
         echo "No alias selected"
+    fi
+}
+
+# Function selector - search functions by name and description
+func-select() {
+    # Get all functions and their descriptions
+    local functions_output=""
+    
+    # Get functions from current shell
+    local func_names=$(typeset -f | grep '^[a-zA-Z_][a-zA-Z0-9_]* ()' | sed 's/ ()//' | sort)
+    
+    echo "Debug: Found functions: $(echo $func_names | wc -w)"
+    echo "Debug: First 5 functions: $(echo $func_names | head -5)"
+    
+    for func in $func_names; do
+        # Skip internal zsh functions and selector functions
+        if [[ "$func" =~ ^__ ]] || [[ "$func" =~ ^VCS_INFO_ ]] || [[ "$func" =~ ^prompt_ ]] || [[ "$func" == "alias-select" ]] || [[ "$func" == "func-select" ]]; then
+            continue
+        fi
+        
+        # Get function description from comments
+        local description=""
+        local func_def=$(typeset -f "$func" | head -10)
+        
+        # Look for description in comments
+        if echo "$func_def" | grep -q "#.*[Dd]escription\|#.*[Uu]sage\|#.*[Ff]unction"; then
+            description=$(echo "$func_def" | grep "#" | head -1 | sed 's/^[[:space:]]*#//' | sed 's/^[[:space:]]*//')
+        elif echo "$func_def" | grep -q "^[[:space:]]*#"; then
+            description=$(echo "$func_def" | grep "^[[:space:]]*#" | head -1 | sed 's/^[[:space:]]*#//' | sed 's/^[[:space:]]*//')
+        else
+            description="No description"
+        fi
+        
+        # Format: function_name\tdescription
+        functions_output+="$func\t$description\n"
+    done
+    
+    if [ -z "$functions_output" ]; then
+        echo "No functions found"
+        return 1
+    fi
+    
+    # Show functions with fzf
+    local selected=$(echo -e "$functions_output" | fzf \
+        --prompt="Select function to run: " \
+        --height=60% \
+        --layout=reverse \
+        --border \
+        --with-nth=1,2 \
+        --delimiter=$'\t' \
+        --preview='echo "Function: {1}" && echo "Description: {2}" && echo "" && echo "Function definition:" && typeset -f {1} | head -20' \
+        --preview-window=right:50%:wrap \
+        --bind='ctrl-/:toggle-preview' \
+        --bind='ctrl-e:execute(echo "Function: {1}" && typeset -f {1})')
+    
+    if [ -n "$selected" ]; then
+        local func_name=$(echo "$selected" | cut -d$'\t' -f1)
+        echo "Running function: $func_name"
+        echo "About to execute: $func_name"
+        printf "Are you sure? [Y/n] "
+        local answer
+        read -r answer
+        case "$answer" in
+            ""|Y|y|Yes|yes)
+                eval "$func_name"
+                ;;
+            *)
+                echo "Aborted."
+                return 130
+                ;;
+        esac
+    else
+        echo "No function selected"
     fi
 }
 

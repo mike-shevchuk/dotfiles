@@ -1,25 +1,20 @@
-[manager]
-show_hidden = true       # Show dotfiles
-# sort_by = "name"         # Options: name, size, created, modified
-sort_by = "size"         # Options: name, size, created, modified
+[mgr]
+show_hidden = true
+sort_by = "size"
 sort_dir_first = true
 sort_reverse = true
-scrolloff = 3            # Number of lines to keep above/below cursor
-
+scrolloff = 3
 
 prepend_keymap = [
-  { on = "mg", run = "dir_graph", desc = "Show directory size graph" },
-  { on = "alt-p", run = "print_test", desc = "Print test message" }
-  # { on = "alt-s", run = "spawn_shell", desc = "Open shell in current dir" }
+  { on = "!", run = "shell '~/yazi_shell.sh \"$1\"'", desc = "Open shell here" },
+  { on = "gs", run = "shell '~/yazi_shell.sh \"$1\"'", desc = "Open shell here" }
 ]
 
-
 [preview]
-max_width = 1000         # Image preview scaling
+max_width = 1000
 max_height = 1000
-ueberzug = true          # Use ueberzug if available
+ueberzug = true
 prepend_meta = true
-
 
 [status]
 left = ["mode", "size", "created", "modified"]
@@ -28,11 +23,6 @@ right = ["permissions", "owner", "group"]
 [command.create_symlink]
 run = "ln -s \"$1\" \"$(pwd)/$1-symlink\""
 desc = "Create symlink in current directory"
-
-
-[command.spawn_shell]
-run = "cd \"$1\" && ${SHELL:-bash}; exec yazi"
-desc = "Shell and return to Yazi"
 
 [command.toggle_meta]
 run = '''
@@ -48,20 +38,9 @@ desc = "Toggle metadata preview"
 run = 'echo "✅ Hello from Yazi!"'
 desc = "Test print command"
 
-
-
-# [opener]
-# # Open with specific applications
-# # image = ["nsxiv"]
-# video = ["vlc"]
-# # pdf = ["zathura"]
-# text = ["nvim"]
-
-
 [command.dir_graph]
 run = "~/.config/yazi/yazi-size-graph.sh \"$1\""
 desc = "Show directory size graph"
-
 
 [opener]
 edit = [
@@ -77,25 +56,9 @@ prepend_rules = [
   { name = "*.yml", use = "edit" },
   { name = "*.md", use = "edit" }
 ]
-# [opener]
-#
-# [opener.text]
-# block = false
-# run = ["nvim", "$1"]
-#
-# # [opener.image]
-# # run = ["feh", "$1"]
-#
-# [opener.video]
-# run = ["mpv", "$1"]
-
-# [opener.pdf]
-# run = ["zathura", "$1"]
 
 [keymap]
 "ss" = "create_symlink"
 
-
 [log]
-level = "info"           # Options: error, warn, info, debug, trace
-
+level = "info"

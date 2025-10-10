@@ -69,3 +69,6 @@
 # ❓ Help
 "?" = "help"
 
+
+# Alternative shell keybinding
+"gs" = "shell"

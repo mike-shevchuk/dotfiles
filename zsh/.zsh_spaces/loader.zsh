@@ -15,8 +15,14 @@ for space_dir in "$ZSH_SPACES_DIR"/*; do
         space_name=$(basename "$space_dir")
         loader_file="$space_dir/${space_name}-space.zsh"
         
+        echo "Loading space: $space_name"
+        echo "Looking for: $loader_file"
+        
         if [ -f "$loader_file" ]; then
+            echo "Found loader: $loader_file"
             source "$loader_file"
+        else
+            echo "Loader not found: $loader_file"
         fi
     fi
 done
