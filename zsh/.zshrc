@@ -295,9 +295,9 @@ prompt_git_arrows() {
 
 #AGNOSTER_PROMPT_SEGMENTS+=("prompt_segment '' 'red' ' ($cmd_duration s) '")
 
+AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
-AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 
 bindkey '^A' beginning-of-line
 bindkey '^E' end-of-line
