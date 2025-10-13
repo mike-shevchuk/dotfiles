@@ -1,6 +1,6 @@
 DOTFILES=$HOME/dotfiles
 
-ZSHPlUGINS=$HOME/$DOTFILES/zsh_plug
+ZSHPlUGINS=$DOTFILES/zsh_plug
 # zplug
 if [[ ! -d $ZSHPlUGINS ]]; then
 	git clone https://github.com/zplug/zplug $ZSHPlUGINS

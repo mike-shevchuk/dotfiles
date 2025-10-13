@@ -461,4 +461,3 @@ export PATH="$HOME/.local/bin:$PATH"
 if [ -f ~/.yazi_last_dir ]; then
     cd "$(cat ~/.yazi_last_dir)" 2>/dev/null && rm ~/.yazi_last_dir
 fi
-
