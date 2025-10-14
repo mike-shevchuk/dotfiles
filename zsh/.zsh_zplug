@@ -1,6 +1,6 @@
 DOTFILES=$HOME/dotfiles
 
-ZSHPlUGINS=$DOTFILES/zsh_plug
+ZSHPlUGINS=$DOTFILES/zsh/zsh_plug
 # zplug
 if [[ ! -d $ZSHPlUGINS ]]; then
 	git clone https://github.com/zplug/zplug $ZSHPlUGINS
@@ -16,7 +16,8 @@ zplug "Aloxaf/fzf-tab"
 zplug "zsh-users/zsh-syntax-highlighting", defer:2
 zplug "zsh-users/zsh-autosuggestions"
 zplug "zsh-users/zsh-completions"
-zplug "zsh-users/zsh-history-substring-search", defer:3
+# use better zdharma-continuum/history-search-multi-word
+# zplug "zsh-users/zsh-history-substring-search", defer:3
 
 # oh-my-zsh base config
 # This is a selection of the available libs
@@ -27,7 +28,13 @@ zplug "zsh-users/zsh-history-substring-search", defer:3
 # zplug "themes/clean", from:oh-my-zsh, as:theme
 # zplug 'themes/linuxonly', from:oh-my-zsh, as:theme, use:"linuxonly.zsh-theme"
 # zplug "themes/$theme", from:oh-my-zsh
+# zplug "fdellwing/zsh-bat", from:github # https://github.com/fdellwing/zsh-bat.git
+zplug "fdellwing/zsh-bat"
 zplug "agnoster/agnoster-zsh-theme", as:theme, use:agnoster.zsh-theme
+zplug "UshioA/zsh-python-module-completion"
+zplug "sindresorhus/zsh-notify"
+zplug "plugins/ssh-agent", from:oh-my-zsh
+zplug "jeffreytse/zsh-vi-mode"
 # PROMPT='env:$env $PROMPT'
 
 

@@ -46,7 +46,7 @@ alias syu='sudo pacman -Syu'
 
 alias szsh='source ~/.zshrc'
 alias nv='nvim'
-alias ftmx='tmux new -s 0; tmux a -t 0'
+alias ftx='tmux new -s 0; tmux a -t 0'
 alias l='ls'
 alias ls='ls --color=auto'
 alias la='ls -ah'
@@ -169,7 +169,16 @@ func-select() {
     fi
 }
 
-
+fjob() {
+    local selected
+    selected=$(jobs -l | fzf --prompt="Select Job: " --height=20% --layout=reverse --border --no-hscroll)
+    if [[ -n "$selected" ]]; then
+        # Витягуємо номер завдання [%N] та переводимо на передній план
+        local job_id=$(echo "$selected" | awk '{print $1}' | tr -d '[]%')
+        fg %"$job_id"
+    fi
+}
+alias jf='fjob'
 
 # alias td="todoist-cli --collor --indent"
 # alias td="todoist-cli --color"
@@ -177,6 +186,10 @@ func-select() {
 
 alias td="todoist-cli --color --namespace --indent --project-namespace"
 alias cl="clear"
+
+
+alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
+
 
 # alias ll='exa -l --color=always --group-directories-first --icons'
 # alias ls='exa --color=always --group-directories-first --icons'
@@ -386,7 +399,8 @@ function y() {
 	rm -f -- "$tmp"
 }
 
-
+alias sstat='systemctl list-units --type=service --state=running | less'
+alias sfailed='systemctl --failed'
 
 ######################### TMATE Functions
 
