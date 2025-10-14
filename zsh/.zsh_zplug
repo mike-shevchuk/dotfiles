@@ -18,6 +18,7 @@ zplug "zsh-users/zsh-autosuggestions"
 zplug "zsh-users/zsh-completions"
 # use better zdharma-continuum/history-search-multi-word
 # zplug "zsh-users/zsh-history-substring-search", defer:3
+zplug "zdharma-continuum/history-search-multi-word"
 
 # oh-my-zsh base config
 # This is a selection of the available libs
@@ -32,7 +33,7 @@ zplug "zsh-users/zsh-completions"
 zplug "fdellwing/zsh-bat"
 zplug "agnoster/agnoster-zsh-theme", as:theme, use:agnoster.zsh-theme
 zplug "UshioA/zsh-python-module-completion"
-zplug "sindresorhus/zsh-notify"
+# zplug "sindresorhus/zsh-notify"
 zplug "plugins/ssh-agent", from:oh-my-zsh
 zplug "jeffreytse/zsh-vi-mode"
 # PROMPT='env:$env $PROMPT'

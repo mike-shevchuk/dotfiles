@@ -14,6 +14,7 @@ _source_job_module() {
 # Load modules (add more here as needed)
 _source_job_module "aws-logs.zsh"
 _source_job_module "git.zsh"
+_source_job_module "tmux_manager.zsh"
 
 # Optionally load all *.zsh files except this loader
 # Uncomment if you want to auto-load everything
