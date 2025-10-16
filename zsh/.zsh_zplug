@@ -35,7 +35,7 @@ zplug "agnoster/agnoster-zsh-theme", as:theme, use:agnoster.zsh-theme
 zplug "UshioA/zsh-python-module-completion"
 # zplug "sindresorhus/zsh-notify"
 zplug "plugins/ssh-agent", from:oh-my-zsh
-zplug "jeffreytse/zsh-vi-mode"
+# zplug "jeffreytse/zsh-vi-mode"
 # PROMPT='env:$env $PROMPT'
 
 
