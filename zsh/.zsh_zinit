@@ -1,0 +1,138 @@
+# =============================================================================
+# ZINIT CONFIGURATION - FAST ZSH PLUGIN MANAGER
+# =============================================================================
+# This configuration uses zinit for faster shell startup with lazy loading
+# and includes clipboard support for modern terminals
+
+# =============================================================================
+# ZINIT INSTALLATION AND INITIALIZATION
+# =============================================================================
+
+# Install zinit if not present
+if [[ ! -f "$HOME/.local/share/zinit/zinit.git/zinit.zsh" ]]; then
+    echo "Installing zinit..."
+    mkdir -p "$HOME/.local/share/zinit"
+    git clone https://github.com/zdharma-continuum/zinit.git "$HOME/.local/share/zinit/zinit.git"
+fi
+
+# Load zinit
+source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
+
+# =============================================================================
+# STARTUP TIMER
+# =============================================================================
+
+# Record startup time (integer seconds to avoid affecting $SECONDS elsewhere)
+STARTUP_START=$EPOCHSECONDS
+
+# =============================================================================
+# ESSENTIAL PLUGINS (LOADED IMMEDIATELY)
+# =============================================================================
+
+# Syntax highlighting - must be loaded early
+zinit light "zsh-users/zsh-syntax-highlighting"
+
+# Autosuggestions - must be loaded early  
+zinit light "zsh-users/zsh-autosuggestions"
+
+# Completions - essential for shell functionality
+zinit light "zsh-users/zsh-completions"
+
+# =============================================================================
+# THEME (LOADED IMMEDIATELY)
+# =============================================================================
+
+# Agnoster theme from repo (robust)
+zinit ice pick"agnoster.zsh-theme"
+zinit light agnoster/agnoster-zsh-theme
+
+# =============================================================================
+# LAZY LOADED PLUGINS (TURBO MODE FOR SPEED)
+# =============================================================================
+# Using zinit ice wait"X" lucid for:
+# - wait"X": Load plugins X seconds after shell startup
+# - lucid: Silent loading (no output during load)
+# - Grouped loading: Multiple plugins loaded together for efficiency
+
+# Total number of lazy plugins/snippets (for final message)
+ZINIT_TOTAL_PLUGINS=18
+
+# Core utilities - turbo loaded after 1s
+zinit ice wait"1"; zinit light Aloxaf/fzf-tab
+zinit ice wait"1"; zinit light zdharma-continuum/history-search-multi-word
+zinit ice wait"1" pick"z.sh"; zinit light rupa/z
+
+# Essential OH-MY-ZSH plugins - after 2s
+zinit ice wait"2"; zinit snippet OMZ::plugins/git/git.plugin.zsh
+zinit ice wait"2"; zinit snippet OMZ::plugins/ssh-agent/ssh-agent.plugin.zsh
+zinit ice wait"2"; zinit snippet OMZ::plugins/command-not-found/command-not-found.plugin.zsh
+zinit ice wait"2"; zinit snippet OMZ::plugins/colored-man-pages/colored-man-pages.plugin.zsh
+zinit ice wait"2"; zinit snippet OMZ::plugins/sudo/sudo.plugin.zsh
+
+# Development tools - after 3s
+zinit ice wait"3"; zinit snippet OMZ::plugins/docker/docker.plugin.zsh
+zinit ice wait"3"; zinit snippet OMZ::plugins/docker-compose/docker-compose.plugin.zsh
+zinit ice wait"3"; zinit snippet OMZ::plugins/github/github.plugin.zsh
+zinit ice wait"3"; zinit snippet OMZ::plugins/pip/pip.plugin.zsh
+zinit ice wait"3"; zinit snippet OMZ::plugins/helm/helm.plugin.zsh
+
+# Additional tools - after 4s
+zinit ice wait"4"; zinit light fdellwing/zsh-bat
+zinit ice wait"4"; zinit light UshioA/zsh-python-module-completion
+# zinit ice wait"4" atload'print -P "%F{green}Loaded all ${ZINIT_TOTAL_PLUGINS} plugins%f"'; zinit light UshioA/zsh-python-module-completion
+# zinit ice wait"4"; zinit light kiurchv/asdf.plugin.zsh
+
+# =============================================================================
+# CLIPBOARD SUPPORT FOR MODERN TERMINALS
+# =============================================================================
+
+# Detect terminal and set up clipboard support (kitty + generic fallback)
+setup_clipboard() {
+    case "$TERM" in
+        *kitty*)
+            alias copy="kitty +kitten clipboard"
+            alias paste="kitty +kitten clipboard --get-clipboard"
+            ;;
+        *)
+            if command -v wl-copy >/dev/null 2>&1; then
+                alias copy="wl-copy"
+                alias paste="wl-paste"
+            elif command -v xclip >/dev/null 2>&1; then
+                alias copy="xclip -selection clipboard"
+                alias paste="xclip -selection clipboard -o"
+            elif command -v xsel >/dev/null 2>&1; then
+                alias copy="xsel --clipboard --input"
+                alias paste="xsel --clipboard --output"
+            fi
+            ;;
+    esac
+}
+
+setup_clipboard
+
+# =============================================================================
+# COMPLETION SYSTEM INITIALIZATION
+# =============================================================================
+
+# Initialize completion system only once here (use caching)
+# autoload -Uz compinit
+# compinit -C
+
+# =============================================================================
+# STARTUP TIME DISPLAY
+# =============================================================================
+
+# Report startup time on first prompt
+autoload -Uz add-zsh-hook
+_zinit_report_startup_time() {
+    local startup_time=$(( EPOCHSECONDS - STARTUP_START ))
+    echo "🚀 Shell startup time: ${startup_time}s"
+    add-zsh-hook -d precmd _zinit_report_startup_time
+}
+add-zsh-hook precmd _zinit_report_startup_time
+
+# =============================================================================
+# PLUGIN LOADING COMPLETION
+# =============================================================================
+
+# Done

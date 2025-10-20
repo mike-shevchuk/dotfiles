@@ -5,7 +5,7 @@ ZSH_SPACES_DIR="$HOME/dotfiles/zsh/.zsh_spaces"
 
 # Check if .zsh_spaces directory exists
 if [ ! -d "$ZSH_SPACES_DIR" ]; then
-    echo "Warning: .zsh_spaces directory not found at $ZSH_SPACES_DIR"
+    echo "Warning: .zsh_spaces directory not found at $ZSH_SPACES_DIR" >&2
     return 1
 fi
 
@@ -15,14 +15,16 @@ for space_dir in "$ZSH_SPACES_DIR"/*; do
         space_name=$(basename "$space_dir")
         loader_file="$space_dir/${space_name}-space.zsh"
         
-        echo "Loading space: $space_name"
-        echo "Looking for: $loader_file"
+        # Skip the loader.zsh file itself
+        if [ "$space_name" = "loader" ]; then
+            continue
+        fi
         
         if [ -f "$loader_file" ]; then
-            echo "Found loader: $loader_file"
-            source "$loader_file"
-        else
-            echo "Loader not found: $loader_file"
+            # Source the loader file with error handling
+            if ! source "$loader_file" 2>/dev/null; then
+                echo "Warning: Failed to load space '$space_name' from $loader_file" >&2
+            fi
         fi
     fi
 done

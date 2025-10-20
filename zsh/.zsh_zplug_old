@@ -1,0 +1,107 @@
+# ZPlug Configuration
+# This file manages zsh plugins using zplug
+
+DOTFILES=$HOME/dotfiles
+ZSHPLUGINS=$DOTFILES/zsh/zsh_plug
+
+# Initialize zplug
+if [[ ! -d $ZSHPLUGINS ]]; then
+    echo "Installing zplug..."
+    git clone https://github.com/zplug/zplug $ZSHPLUGINS
+fi
+
+source $ZSHPLUGINS/init.zsh
+
+# =============================================================================
+# CORE PLUGINS
+# =============================================================================
+
+# Let zplug manage zplug
+zplug "zplug/zplug", hook-build:'zplug --self-manage'
+
+# Essential plugins
+zplug "zsh-users/zsh-syntax-highlighting", defer:2
+zplug "zsh-users/zsh-autosuggestions"
+zplug "zsh-users/zsh-completions"
+zplug "zdharma-continuum/history-search-multi-word"
+zplug "Aloxaf/fzf-tab"
+
+# =============================================================================
+# THEME
+# =============================================================================
+
+zplug "agnoster/agnoster-zsh-theme", as:theme, use:agnoster.zsh-theme
+
+# =============================================================================
+# OH-MY-ZSH PLUGINS
+# =============================================================================
+
+# Core functionality
+zplug "plugins/git", from:oh-my-zsh
+zplug "plugins/ssh-agent", from:oh-my-zsh
+zplug "plugins/command-not-found", from:oh-my-zsh
+zplug "plugins/colored-man-pages", from:oh-my-zsh
+zplug "plugins/sudo", from:oh-my-zsh
+
+# Development tools
+zplug "plugins/docker", from:oh-my-zsh
+zplug "plugins/docker-compose", from:oh-my-zsh
+zplug "plugins/github", from:oh-my-zsh
+zplug "plugins/pip", from:oh-my-zsh
+zplug "plugins/helm", from:oh-my-zsh
+
+# =============================================================================
+# THIRD-PARTY PLUGINS
+# =============================================================================
+
+# File operations
+zplug "fdellwing/zsh-bat"
+
+# Python support
+zplug "UshioA/zsh-python-module-completion"
+
+# Navigation
+zplug "rupa/z", use:z.sh
+
+# Package management
+zplug "kiurchv/asdf.plugin.zsh", defer:2
+
+# =============================================================================
+# DISABLED PLUGINS (commented out for reference)
+# =============================================================================
+
+# Alternative themes
+# zplug 'carloscuesta/materialshell', use:materialshell, from:github, as:theme
+# zplug "themes/clean", from:oh-my-zsh, as:theme
+# zplug 'themes/linuxonly', from:oh-my-zsh, as:theme, use:"linuxonly.zsh-theme"
+
+# Additional tools
+# zplug "djui/alias-tips"  # Warn when you run a command that you've got an alias for
+# zplug "sindresorhus/zsh-notify"
+# zplug "jeffreytse/zsh-vi-mode"
+# zplug "czocher/gpg-crypt"  # git plugins
+# zplug "plugins/gpg-agent", from:oh-my-zsh
+# zplug "plugins/kubectl", from:oh-my-zsh
+# zplug "plugins/terraform", from:oh-my-zsh
+# zplug "plugins/dotenv", from:oh-my-zsh
+# zplug 'RobertDeRose/virtualenv-autodetect', as:plugin  # really slow
+# zplug "kmccormick/rsnapshot-timestamp", as:command
+# zplug "bdesham/2d7ef99f93b226be29e01cadcad37405", from:gist, as:command  # zsh profiler
+
+# =============================================================================
+# PLUGIN INSTALLATION AND LOADING
+# =============================================================================
+
+# Install plugins if there are plugins that have not been installed
+if ! zplug check --verbose; then
+    printf "Install missing plugins? [y/N]: "
+    if read -q; then
+        echo
+        zplug install
+    fi
+fi
+
+# Load plugins and add commands to $PATH
+zplug load
+
+

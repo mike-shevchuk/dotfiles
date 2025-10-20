@@ -1,63 +1,120 @@
 
-# Default shell history
+# =============================================================================
+# ZSH CONFIGURATION
+# =============================================================================
+
+# =============================================================================
+# HISTORY CONFIGURATION
+# =============================================================================
+
 HISTSIZE=10000
 SAVEHIST=10000
 HISTFILE=~/.histfile
 setopt SHARE_HISTORY
 setopt HIST_IGNORE_DUPS
 setopt HIST_FIND_NO_DUPS
+# Enable prompt substitution for themes using $(...) in PROMPT
+setopt PROMPT_SUBST
 # export EDITOR='NVIM_APPNAME=PWNVIM nvim'
 # export EDITOR='NVIM_APPNAME=LazyVIM nvim'
+
+# =============================================================================
+# ENVIRONMENT VARIABLES
+# =============================================================================
+
 export EDITOR='nvim'
+export PATH="$HOME/.local/bin:$PATH"
 
-
+# Python environment
 export PYENV_ROOT="$HOME/.pyenv"
 export PATH="$PYENV_ROOT/bin:$PATH"
 export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
 
-# export PATH="$HOME/.pyenv/bin:$PATH"
-# export PATH=$PATH:$(npm bin -g)
-eval "$(pyenv init -)"
-eval "$(pyenv virtualenv-init -)"
+# ZPlug configuration
+# ZPLUGRC=$HOME/.zsh_zplug
 
+# ZInit configuration (replaces zplug for faster loading)
+ZINITRC=$HOME/dotfiles/zsh/.zsh_zinit
 
-ZPLUGRC=$HOME/.zsh_zplug
+# =============================================================================
+# COMPLETION SYSTEM
+# =============================================================================
 
-############# ASDF
-# . "$HOME/.asdf/asdf.sh"
+# ASDF (if available)
 [ -f "$HOME/.asdf/asdf.sh" ] && . "$HOME/.asdf/asdf.sh"
-# append completions to fpath
 fpath=(${ASDF_DIR}/completions $fpath)
 
 # Initialize completion system (once, after all fpath modifications)
 autoload -Uz compinit
 compinit
 
-############ INFO: ZPLUG
-source $ZPLUGRC
+# =============================================================================
+# PLUGIN MANAGEMENT
+# =============================================================================
 
-############# ARCH
+# Load ZPlug configuration
+# source $ZPLUGRC
+
+# Load ZInit configuration
+source $ZINITRC
+
+# Initialize pyenv (after zinit to avoid conflicts)
+eval "$(pyenv init -)" 2>/dev/null
+eval "$(pyenv virtualenv-init -)" 2>/dev/null
+
+# =============================================================================
+# CLIPBOARD UTILITIES
+# =============================================================================
+
+# Enhanced clipboard functions
+clip() {
+    if command -v wl-copy >/dev/null 2>&1; then
+        wl-copy "$@"
+    elif command -v xclip >/dev/null 2>&1; then
+        echo "$@" | xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        echo "$@" | xsel --clipboard --input
+    else
+        echo "No clipboard utility found"
+        return 1
+    fi
+}
+
+# Copy current directory to clipboard
+alias cwd="pwd | clip"
+
+# Copy last command to clipboard
+alias lc="fc -ln -1 | clip"
+
+# =============================================================================
+# ALIASES
+# =============================================================================
+
+# System management
 alias syu='sudo pacman -Syu'
-#
-#
-#
-#
-###############
+alias pau='sudo reboot now'
+alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
+alias open="xdg-open"
 
+# Shell management
 alias szsh='source ~/.zshrc'
-alias nv='nvim'
-alias ftx='tmux new -s 0; tmux a -t 0'
+alias cl='clear'
+
+# File operations
 alias l='ls'
 alias ls='ls --color=auto'
 alias la='ls -ah'
 alias ll='ls -lh'
-alias pau='sudo reboot now'
-alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
-alias open="xdg-open"
-alias git_dog="git log --all --decorate --oneline --graph"
-alias pip_freeze="pip list --not-required --format freeze"
 
+# Development tools
+alias nv='nvim'
 alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
+
+# Git
+alias git_dog="git log --all --decorate --oneline --graph"
+
+# Python
+alias pip_freeze="pip list --not-required --format freeze"
 
 # Job scripts management
 alias job-dir="cd $HOME/dotfiles/zsh/.zsh_spaces/job"
@@ -65,6 +122,10 @@ alias job-dir="cd $HOME/dotfiles/zsh/.zsh_spaces/job"
 # Function and alias selectors
 alias a_sel="alias-select"
 alias f_sel="func-select"
+
+# =============================================================================
+# INTERACTIVE SELECTORS
+# =============================================================================
 
 # Interactive alias selector
 alias-select() {
@@ -169,11 +230,16 @@ func-select() {
     fi
 }
 
+# =============================================================================
+# UTILITY FUNCTIONS
+# =============================================================================
+
+# Job management with fzf
 fjob() {
     local selected
     selected=$(jobs -l | fzf --prompt="Select Job: " --height=20% --layout=reverse --border --no-hscroll)
     if [[ -n "$selected" ]]; then
-        # Витягуємо номер завдання [%N] та переводимо на передній план
+        # Extract job number [%N] and bring to foreground
         local job_id=$(echo "$selected" | awk '{print $1}' | tr -d '[]%')
         fg %"$job_id"
     fi
@@ -187,18 +253,15 @@ alias jf='fjob'
 alias td="todoist-cli --color --namespace --indent --project-namespace"
 alias cl="clear"
 
-
+# Tmux management
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
 
 
-# alias ll='exa -l --color=always --group-directories-first --icons'
-# alias ls='exa --color=always --group-directories-first --icons'
-# alias cat='bat --style header --style snip --style changes --style header'
+# =============================================================================
+# NEOVIM CONFIGURATIONS
+# =============================================================================
 
-
-# Bitwarden and GPT token functions moved to ~/.zshrc.private
-
-
+# Neovim with different configurations
 alias lz="NVIM_APPNAME=LazyVIM nvim"
 alias kck="NVIM_APPNAME=kickstart nvim"
 alias nvim-chad="NVIM_APPNAME=NvChad nvim"
@@ -221,96 +284,114 @@ function nvims() {
 }
 
 
-# FOR agnoster
+# =============================================================================
+# PROMPT CUSTOMIZATION (AGNOSTER THEME)
+# =============================================================================
+
+# Time display in prompt
 prompt_time() {
-  prompt_segment '' 'green' ' %D{%H:%M:%S} '
+    prompt_segment '' 'green' ' %D{%H:%M:%S} '
 }
 
-# Store the start time of the command
+# Command timing functions
 preexec() {
-  cmd_start_time=$SECONDS
+    # High-resolution start time for the last command (global var needed in precmd)
+    typeset -gF 6 cmd_start_time_rt
+    cmd_start_time_rt=$EPOCHREALTIME
 }
 
-# Calculate the duration of the command and display it if it's longer than 1 second
 precmd() {
-  if (( SECONDS - cmd_start_time > 1 )); then
-    cmd_duration=$(( SECONDS - cmd_start_time ))
-    #duration_segment=" ($cmd_duration s)"
-    #
-    minutes=$(( cmd_duration / 60 ))
-    seconds=$(( cmd_duration % 60 ))
-
-    if (( minutes > 0 )); then
-      duration_segment=" ($minutes min $seconds s)"
-    else
-      duration_segment=" ($seconds s)"
+    # Skip if we don't have a start time yet
+    if [[ -z ${cmd_start_time_rt:-} ]]; then
+        duration_segment=""
+        return
     fi
 
-  else
-    duration_segment=""
-  fi
+    # Compute duration in seconds with 2 decimals
+    local -F 6 dur
+    dur=$(( EPOCHREALTIME - cmd_start_time_rt ))
+
+    if (( dur > 1 )); then
+        # Minutes displayed only if strictly greater than 1
+        local -i mins
+        mins=$(( dur / 60 ))
+        local secs
+        # Fractional seconds with 2 decimals
+        secs=$(printf '%.2f' $(( dur - mins * 60 )))
+
+        if (( mins > 1 )); then
+            duration_segment=" (${mins} min ${secs} s)"
+        else
+            duration_segment=" (${secs} s)"
+        fi
+    else
+        duration_segment=""
+    fi
 }
 
 prompt_duration() {
-  prompt_segment 'red' '' "$duration_segment"
+    prompt_segment 'red' '' "$duration_segment"
 }
 
 # Git arrows showing commits to pull/push
 prompt_git_arrows() {
-  # Check if we're in a git repository
-  if ! git rev-parse --git-dir > /dev/null 2>&1; then
-    return
-  fi
-
-  # Get current branch
-  local branch=$(git symbolic-ref --short HEAD 2>/dev/null)
-  if [[ -z "$branch" ]]; then
-    return
-  fi
-
-  # Get remote tracking branch
-  local remote=$(git config branch.$branch.remote 2>/dev/null)
-  local merge=$(git config branch.$branch.merge 2>/dev/null | sed 's|refs/heads/||')
-  
-  if [[ -z "$remote" ]] || [[ -z "$merge" ]]; then
-    return
-  fi
-
-  local remote_branch="$remote/$merge"
-
-  # Check if remote branch exists
-  if ! git rev-parse --verify $remote_branch > /dev/null 2>&1; then
-    return
-  fi
-
-  # Count commits ahead and behind
-  local ahead=$(git rev-list --count ${remote_branch}..HEAD 2>/dev/null)
-  local behind=$(git rev-list --count HEAD..${remote_branch} 2>/dev/null)
-
-  local arrows=""
-  
-  if [[ $ahead -gt 0 ]]; then
-    arrows+="↑$ahead"
-  fi
-  
-  if [[ $behind -gt 0 ]]; then
-    if [[ -n "$arrows" ]]; then
-      arrows+=" "
+    # Check if we're in a git repository
+    if ! git rev-parse --git-dir > /dev/null 2>&1; then
+        return
     fi
-    arrows+="↓$behind"
-  fi
 
-  if [[ -n "$arrows" ]]; then
-    prompt_segment 'cyan' 'black' " $arrows "
-  fi
+    # Get current branch
+    local branch=$(git symbolic-ref --short HEAD 2>/dev/null)
+    if [[ -z "$branch" ]]; then
+        return
+    fi
+
+    # Get remote tracking branch
+    local remote=$(git config branch.$branch.remote 2>/dev/null)
+    local merge=$(git config branch.$branch.merge 2>/dev/null | sed 's|refs/heads/||')
+    
+    if [[ -z "$remote" ]] || [[ -z "$merge" ]]; then
+        return
+    fi
+
+    local remote_branch="$remote/$merge"
+
+    # Check if remote branch exists
+    if ! git rev-parse --verify $remote_branch > /dev/null 2>&1; then
+        return
+    fi
+
+    # Count commits ahead and behind
+    local ahead=$(git rev-list --count ${remote_branch}..HEAD 2>/dev/null)
+    local behind=$(git rev-list --count HEAD..${remote_branch} 2>/dev/null)
+
+    local arrows=""
+    
+    if [[ $ahead -gt 0 ]]; then
+        arrows+="↑$ahead"
+    fi
+    
+    if [[ $behind -gt 0 ]]; then
+        if [[ -n "$arrows" ]]; then
+            arrows+=" "
+        fi
+        arrows+="↓$behind"
+    fi
+
+    if [[ -n "$arrows" ]]; then
+        prompt_segment 'cyan' 'black' " $arrows "
+    fi
 }
 
 
-#AGNOSTER_PROMPT_SEGMENTS+=("prompt_segment '' 'red' ' ($cmd_duration s) '")
-
+# Configure prompt segments
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
+
+# =============================================================================
+# KEY BINDINGS
+# =============================================================================
 
 bindkey '^A' beginning-of-line
 bindkey '^E' end-of-line
@@ -319,133 +400,147 @@ bindkey "^[[1;5C" forward-word
 
 
 
+# =============================================================================
+# ENCRYPTION UTILITIES
+# =============================================================================
+
 function encrypt_dir() {
-  # Display help message
-  if [[ "$1" == "--help" ]]; then
-    echo "Usage: encrypt_directory <directory> <passphrase>"
-    echo "Encrypts the specified directory and deletes the original if encryption is successful."
-    echo
-    echo "Example:"
-    echo "  encrypt_directory comb-notes 'my_secret_text_anigma'"
-    return 0
-  fi
+    # Display help message
+    if [[ "$1" == "--help" ]]; then
+        echo "Usage: encrypt_directory <directory> <passphrase>"
+        echo "Encrypts the specified directory and deletes the original if encryption is successful."
+        echo
+        echo "Example:"
+        echo "  encrypt_directory comb-notes 'my_secret_text_anigma'"
+        return 0
+    fi
 
-  # Check if proper arguments are provided
-  if [[ $# -ne 2 ]]; then
-    echo "Error: Invalid arguments."
-    echo "Use '--help' for usage information."
-    return 1
-  fi
+    # Check if proper arguments are provided
+    if [[ $# -ne 2 ]]; then
+        echo "Error: Invalid arguments."
+        echo "Use '--help' for usage information."
+        return 1
+    fi
 
-  local dir=$1
-  local passphrase=$2
-  local output_file="${dir}.gpg"
+    local dir=$1
+    local passphrase=$2
+    local output_file="${dir}.gpg"
 
-  # Encrypt the directory using gpgtar with the given passphrase
-  gpgtar -c -o "$output_file" --gpg-args "--batch --yes --passphrase=$passphrase" "$dir"
+    # Encrypt the directory using gpgtar with the given passphrase
+    gpgtar -c -o "$output_file" --gpg-args "--batch --yes --passphrase=$passphrase" "$dir"
 
-  # Check if encryption was successful
-  if [[ $? -eq 0 ]]; then
-    echo "Encryption successful. Deleting original directory..."
-    rm -rf "$dir"  # Delete the original directory
-  else
-    echo "Encryption failed."
-  fi
+    # Check if encryption was successful
+    if [[ $? -eq 0 ]]; then
+        echo "Encryption successful. Deleting original directory..."
+        rm -rf "$dir"  # Delete the original directory
+    else
+        echo "Encryption failed."
+    fi
 }
 
 
 function decrypt_dir() {
-  # Display help message
-  if [[ "$1" == "--help" ]]; then
-    echo "Usage: decrypt_directory <gpg_file> <passphrase>"
-    echo "Decrypts the specified .gpg file and deletes the encrypted file if decryption is successful."
-    echo
-    echo "Example:"
-    echo "  decrypt_directory comb-notes.gpg 'my_secret_text_anigma'"
-    return 0
-  fi
+    # Display help message
+    if [[ "$1" == "--help" ]]; then
+        echo "Usage: decrypt_directory <gpg_file> <passphrase>"
+        echo "Decrypts the specified .gpg file and deletes the encrypted file if decryption is successful."
+        echo
+        echo "Example:"
+        echo "  decrypt_directory comb-notes.gpg 'my_secret_text_anigma'"
+        return 0
+    fi
 
-  # Check if proper arguments are provided
-  if [[ $# -ne 2 ]]; then
-    echo "Error: Invalid arguments."
-    echo "Use '--help' for usage information."
-    return 1
-  fi
+    # Check if proper arguments are provided
+    if [[ $# -ne 2 ]]; then
+        echo "Error: Invalid arguments."
+        echo "Use '--help' for usage information."
+        return 1
+    fi
 
-  local gpg_file=$1
-  local passphrase=$2
-  # local output_dir="${gpg_file%.gpg}"
-  local output_dir="."
+    local gpg_file=$1
+    local passphrase=$2
+    local output_dir="."
 
-  # Decrypt the gpg file using gpgtar with the given passphrase
-  gpgtar --decrypt --directory "$output_dir" --gpg-args "--batch --yes --passphrase=$passphrase" "$gpg_file"
+    # Decrypt the gpg file using gpgtar with the given passphrase
+    gpgtar --decrypt --directory "$output_dir" --gpg-args "--batch --yes --passphrase=$passphrase" "$gpg_file"
 
-  # Check if decryption was successful
-  if [[ $? -eq 0 ]]; then
-    echo "Decryption successful. Deleting encrypted file..."
-    rm -f "$gpg_file"  # Delete the encrypted .gpg file
-  else
-    echo "Decryption failed."
-  fi
+    # Check if decryption was successful
+    if [[ $? -eq 0 ]]; then
+        echo "Decryption successful. Deleting encrypted file..."
+        rm -f "$gpg_file"  # Delete the encrypted .gpg file
+    else
+        echo "Decryption failed."
+    fi
 }
 
 
+# =============================================================================
+# FILE MANAGER INTEGRATION
+# =============================================================================
+
+# Yazi file manager with directory change support
 function y() {
-	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-	yazi "$@" --cwd-file="$tmp"
-	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-		builtin cd -- "$cwd"
-	fi
-	rm -f -- "$tmp"
+    local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
+    yazi "$@" --cwd-file="$tmp"
+    if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
+        builtin cd -- "$cwd"
+    fi
+    rm -f -- "$tmp"
 }
+
+# =============================================================================
+# SYSTEM MANAGEMENT
+# =============================================================================
 
 alias sstat='systemctl list-units --type=service --state=running | less'
 alias sfailed='systemctl --failed'
 
-######################### TMATE Functions
+# =============================================================================
+# TMATE PAIR PROGRAMMING
+# =============================================================================
 
 TMATE_PAIR_NAME="$(whoami)-pair"
 TMATE_SOCKET_LOCATION="/tmp/tmate-pair.sock"
 
 # Get current tmate connection url
 tmate-url() {
-  url="$(tmate -S $TMATE_SOCKET_LOCATION display -p '#{tmate_ssh}')"
-  echo "$url" | tr -d '\n' | pbcopy
-  echo "Copied tmate url for $TMATE_PAIR_NAME:"
-  echo "$url"
+    url="$(tmate -S $TMATE_SOCKET_LOCATION display -p '#{tmate_ssh}')"
+    echo "$url" | tr -d '\n' | pbcopy
+    echo "Copied tmate url for $TMATE_PAIR_NAME:"
+    echo "$url"
 }
 
 # Start a new tmate pair session if one doesn't already exist
 # If creating a new session, the first argument can be an existing TMUX session to connect to automatically
 tmate-pair() {
-  if [ ! -e "$TMATE_SOCKET_LOCATION" ]; then
-    tmate -S "$TMATE_SOCKET_LOCATION" -f "$HOME/.tmate.conf" new-session -d -s "$TMATE_PAIR_NAME"
-    sleep 0.3
-    tmate-url
-    sleep 1
+    if [ ! -e "$TMATE_SOCKET_LOCATION" ]; then
+        tmate -S "$TMATE_SOCKET_LOCATION" -f "$HOME/.tmate.conf" new-session -d -s "$TMATE_PAIR_NAME"
+        sleep 0.3
+        tmate-url
+        sleep 1
 
-    if [ -n "$1" ]; then
-      tmate -S "$TMATE_SOCKET_LOCATION" send -t "$TMATE_PAIR_NAME" "TMUX='' tmux attach-session -t $1" ENTER
+        if [ -n "$1" ]; then
+            tmate -S "$TMATE_SOCKET_LOCATION" send -t "$TMATE_PAIR_NAME" "TMUX='' tmux attach-session -t $1" ENTER
+        fi
     fi
-  fi
-  tmate -S "$TMATE_SOCKET_LOCATION" attach-session -t "$TMATE_PAIR_NAME"
+    tmate -S "$TMATE_SOCKET_LOCATION" attach-session -t "$TMATE_PAIR_NAME"
 }
 
 # Close the pair because security
 tmate-unpair() {
-  if [ -e "$TMATE_SOCKET_LOCATION" ]; then
-    tmate -S "$TMATE_SOCKET_LOCATION" kill-session -t "$TMATE_PAIR_NAME"
-    echo "Killed session $TMATE_PAIR_NAME"
-  else
-    echo "Session already killed"
-  fi
+    if [ -e "$TMATE_SOCKET_LOCATION" ]; then
+        tmate -S "$TMATE_SOCKET_LOCATION" kill-session -t "$TMATE_PAIR_NAME"
+        echo "Killed session $TMATE_PAIR_NAME"
+    else
+        echo "Session already killed"
+    fi
 }
 
 
 
-######################### TAMTE END
-
-
+# =============================================================================
+# FINAL LOADING
+# =============================================================================
 
 # Load private credentials if file exists
 [ -f ~/.zshrc.private ] && source ~/.zshrc.private
@@ -469,7 +564,6 @@ tmate-unpair() {
 # # <<< conda initialize <<<
 #
 
-export PATH="$HOME/.local/bin:$PATH"
 
 # Auto-change to last Yazi directory
 if [ -f ~/.yazi_last_dir ]; then
