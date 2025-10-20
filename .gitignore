@@ -7,3 +7,4 @@ zsh/.zshrc.secure
 # Backup files
 *.backup
 *~
+lz/.config/LazyVIM/lazy-lock.json
