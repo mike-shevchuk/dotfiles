@@ -23,7 +23,8 @@ setopt PROMPT_SUBST
 # =============================================================================
 
 export EDITOR='nvim'
-export PATH="$HOME/.local/bin:$PATH"
+# export PATH="$HOME/.local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
 
 # Python environment
 export PYENV_ROOT="$HOME/.pyenv"
@@ -569,3 +570,7 @@ tmate-unpair() {
 if [ -f ~/.yazi_last_dir ]; then
     cd "$(cat ~/.yazi_last_dir)" 2>/dev/null && rm ~/.yazi_last_dir
 fi
+
+# Mise PATH
+# eval "$($HOME/.local/bin/mise activate zsh)"
+
