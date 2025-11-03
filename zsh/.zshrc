@@ -395,6 +395,9 @@ AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
 
+ZSH_THEME_AGNOSTER_DEFAULT_PROMPT_SEGMENT_FG=244 # сірий текст
+ZSH_THEME_AGNOSTER_DEFAULT_PROMPT_SEGMENT_BG=0   # чорний фон (або прозорий)
+
 # =============================================================================
 # KEY BINDINGS
 # =============================================================================
