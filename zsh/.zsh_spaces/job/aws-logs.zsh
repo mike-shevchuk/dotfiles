@@ -23,10 +23,22 @@ bb_aws_logs_short() {
     echo ""
     
     # Interactive selection of log stream
-    local log_stream=$(printf '%s\n' "${AWS_LOG_STREAMS[@]}" | fzf --prompt="Select log stream: " --height=50% --layout=reverse --border)
-    if [ -z "$log_stream" ]; then
+    echo "Enter number or full log group name (blank to cancel):"
+    read -r selection
+    local log_stream=""
+    if [ -z "$selection" ]; then
         echo "No log stream selected"
         return 1
+    fi
+    if [[ "$selection" == <-> ]]; then
+        if (( selection >= 1 && selection <= ${#AWS_LOG_STREAMS[@]} )); then
+            log_stream="${AWS_LOG_STREAMS[$selection]}"
+        else
+            echo "Invalid selection"
+            return 1
+        fi
+    else
+        log_stream="$selection"
     fi
     
     # Ask for time range
@@ -203,4 +215,39 @@ bb_aws_logs() {
         --bind 'ctrl-w:execute(grep -n "WARN" /tmp/aws_logs_detailed.txt | fzf)' \
         --bind 'ctrl-i:execute(grep -n "INFO" /tmp/aws_logs_detailed.txt | fzf)' \
         < /tmp/aws_logs_detailed.txt
+}
+
+bb_aws_logs_flow() {
+    # aws logs start-live-tail --log-group-identifier <log-group-ARN-or-name> --region <aws-region>
+    echo "Available AWS log streams:"
+    printf '%s\n' "${AWS_LOG_STREAMS[@]}" | nl
+    echo ""
+ 
+    local log_stream=$(printf '%s\n' "${AWS_LOG_STREAMS[@]}" | fzf --prompt="Select log stream: " --height=50% --layout=reverse --border)
+    if [ -z "$log_stream" ]; then
+        echo "No log stream selected"
+        return 1
+    fi
+   
+   # Ask for time range
+   echo "Select log stream: $log_stream"
+   echo "Starting live tail for: $log_stream"
+   local region='us-east-1'
+   local identifier="$log_stream"
+   # Resolve to ARN if a plain name is provided (some environments require ARN)
+   if [[ "$identifier" != arn:* ]]; then
+       local resolved_arn
+       resolved_arn=$(aws logs describe-log-groups --log-group-name-prefix "$log_stream" --region "$region" --query "logGroups[?logGroupName=='$log_stream'].arn | [0]" --output text 2>/dev/null)
+       if [[ -n "$resolved_arn" && "$resolved_arn" != "None" ]]; then
+           # CloudWatch returns log group ARNs with a trailing ':*'; strip it for APIs that disallow wildcards
+           if [[ "$resolved_arn" == *":*" ]]; then
+               resolved_arn=${resolved_arn%:\*}
+           fi
+           identifier="$resolved_arn"
+       fi
+   fi
+   local cmd_tail="aws logs start-live-tail --log-group-identifiers '$identifier' --region '$region' | awk 'NF {print; fflush()}'"
+   bb_confirm "$cmd_tail" || return $?
+
+   eval "$cmd_tail"
 }
