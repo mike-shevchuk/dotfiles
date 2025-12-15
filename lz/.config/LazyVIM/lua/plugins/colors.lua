@@ -8,6 +8,15 @@ return {
     "cpea2506/one_monokai.nvim",
   },
 
+  {
+    "Tsuzat/NeoSolarized.nvim",
+    lazy = false, -- make sure we load this during startup if it is your main colorscheme
+    priority = 1000, -- make sure to load this before all the other start plugins
+    config = function()
+      vim.cmd([[ colorscheme NeoSolarized ]])
+    end,
+  },
+
   -- SOMETEXT: disabled_filetypes
   -- TODO: some todo stuff
   -- TASK: check for now
