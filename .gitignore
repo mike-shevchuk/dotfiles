@@ -8,3 +8,9 @@ zsh/.zshrc.secure
 *.backup
 *~
 lz/.config/LazyVIM/lazy-lock.json
+
+# Hammerspoon secrets
+hammerspoon/.hammerspoon/.env
+
+# macOS
+.DS_Store

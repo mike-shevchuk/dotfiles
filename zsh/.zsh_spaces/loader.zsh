@@ -1,7 +1,9 @@
 # ZSH Spaces Loader
 # This file loads all spaces from .zsh_spaces directory
 
-ZSH_SPACES_DIR="$HOME/dotfiles/zsh/.zsh_spaces"
+# Try stow symlink path first (~/.zsh_spaces/), fall back to repo path for non-stow setups
+ZSH_SPACES_DIR="$HOME/.zsh_spaces"
+[ ! -d "$ZSH_SPACES_DIR" ] && ZSH_SPACES_DIR="$HOME/dotfiles/zsh/.zsh_spaces"
 
 # Check if .zsh_spaces directory exists
 if [ ! -d "$ZSH_SPACES_DIR" ]; then

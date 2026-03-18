@@ -40,7 +40,9 @@ export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
 # ZPLUGRC=$HOME/.zsh_zplug
 
 # ZInit configuration (replaces zplug for faster loading)
-ZINITRC=$HOME/dotfiles/zsh/.zsh_zinit
+# Try stow symlink path first (~/.zsh_zinit), fall back to repo path for non-stow setups
+ZINITRC="$HOME/.zsh_zinit"
+[ ! -f "$ZINITRC" ] && ZINITRC="$HOME/dotfiles/zsh/.zsh_zinit"
 
 # =============================================================================
 # COMPLETION SYSTEM
@@ -555,7 +557,10 @@ tmate-unpair() {
 [ -f ~/.zshrc.private ] && source ~/.zshrc.private
 
 # Load all zsh spaces
-[ -f "$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh" ] && source "$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh"
+# Try stow symlink path first (~/.zsh_spaces/), fall back to repo path for non-stow setups
+_ZSH_SPACES_LOADER="$HOME/.zsh_spaces/loader.zsh"
+[ ! -f "$_ZSH_SPACES_LOADER" ] && _ZSH_SPACES_LOADER="$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh"
+[ -f "$_ZSH_SPACES_LOADER" ] && source "$_ZSH_SPACES_LOADER"
 
 # # >>> conda initialize >>>
 # # !! Contents within this block are managed by 'conda init' !!

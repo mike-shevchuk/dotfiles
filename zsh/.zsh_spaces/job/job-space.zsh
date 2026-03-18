@@ -1,7 +1,9 @@
 # Job Space Loader
 # This file is sourced by ~/.zshrc and is responsible for loading job-specific modules.
 
-JOB_DIR="$HOME/dotfiles/zsh/.zsh_spaces/job"
+# Try stow symlink path first (~/.zsh_spaces/job/), fall back to repo path for non-stow setups
+JOB_DIR="$HOME/.zsh_spaces/job"
+[ ! -d "$JOB_DIR" ] && JOB_DIR="$HOME/dotfiles/zsh/.zsh_spaces/job"
 
 # Helper to source a module if it exists
 _source_job_module() {
@@ -15,6 +17,7 @@ _source_job_module() {
 _source_job_module "aws-logs.zsh"
 _source_job_module "git.zsh"
 _source_job_module "tmux_manager.zsh"
+_source_job_module "project-env.zsh"
 
 # Optionally load all *.zsh files except this loader
 # Uncomment if you want to auto-load everything
