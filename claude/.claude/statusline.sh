@@ -1,7 +1,4 @@
 #!/bin/bash
-# Line 1: Model | dir@branch | PR | tokens | thinking
-# Line 2: 5h bar | 7d bar | 2x promo | extra
-
 set -f # disable globbing
 
 input=$(cat)
@@ -10,6 +7,8 @@ if [ -z "$input" ]; then
   printf "Claude"
   exit 0
 fi
+
+now_epoch=$(date +%s)
 
 # ANSI colors matching oh-my-posh theme
 blue='\033[38;2;0;153;255m'
@@ -111,10 +110,9 @@ if [ -n "$cwd" ]; then
 
   local_branch=$(git -C "${cwd}" --no-optional-locks branch --show-current 2>/dev/null)
   remote_branch=$(cd "$cwd" && git --no-optional-locks rev-parse --abbrev-ref --symbolic-full-name @{u} 2>/dev/null)
-  # Detect worktree: git-dir differs from git-common-dir
+  # Reuse common_dir from above to detect worktree
   git_dir=$(git -C "${cwd}" --no-optional-locks rev-parse --git-dir 2>/dev/null)
-  git_common_dir=$(git -C "${cwd}" --no-optional-locks rev-parse --git-common-dir 2>/dev/null)
-  if [ -n "$git_dir" ] && [ -n "$git_common_dir" ] && [ "$git_dir" != "$git_common_dir" ]; then
+  if [ -n "$git_dir" ] && [ -n "$common_dir" ] && [ "$git_dir" != "$common_dir" ]; then
     worktree_label=$(basename "$cwd")
   else
     worktree_label="-"
@@ -167,8 +165,7 @@ if [ -n "$cwd" ]; then
   # Last commit age
   last_commit_epoch=$(git -C "${cwd}" --no-optional-locks log -1 --format=%ct 2>/dev/null)
   if [ -n "$last_commit_epoch" ]; then
-    now_epoch_git=$(date +%s)
-    age_secs=$((now_epoch_git - last_commit_epoch))
+    age_secs=$((now_epoch - last_commit_epoch))
     if [ "$age_secs" -lt 60 ]; then
       commit_age="just now"
     elif [ "$age_secs" -lt 3600 ]; then
@@ -194,8 +191,7 @@ needs_pr_refresh=true
 pr_number=""
 if [ -f "$pr_cache_file" ]; then
   pr_cache_mtime=$(stat -f %m "$pr_cache_file" 2>/dev/null || stat -c %Y "$pr_cache_file" 2>/dev/null)
-  now=$(date +%s)
-  pr_cache_age=$((now - pr_cache_mtime))
+  pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
     pr_number=$(cat "$pr_cache_file" 2>/dev/null)
@@ -205,9 +201,9 @@ if $needs_pr_refresh && [ -n "$cwd" ]; then
   if command -v gh >/dev/null 2>&1; then
     pr_number=$(cd "$cwd" && gh pr view --json number -q '.number' 2>/dev/null || true)
     if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
-      remote_branch=$(cd "$cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
-      if [ -n "$remote_branch" ]; then
-        pr_number=$(cd "$cwd" && gh pr view "$remote_branch" --json number -q '.number' 2>/dev/null || true)
+      pr_remote_branch=$(cd "$cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
+      if [ -n "$pr_remote_branch" ]; then
+        pr_number=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number -q '.number' 2>/dev/null || true)
       fi
     fi
     echo "${pr_number}" > "$pr_cache_file"
@@ -276,9 +272,8 @@ needs_refresh=true
 usage_data=""
 
 if [ -f "$cache_file" ]; then
-  cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
-  now=$(date +%s)
-  cache_age=$((now - cache_mtime))
+  cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
+  cache_age=$((now_epoch - cache_mtime))
   if [ "$cache_age" -lt "$cache_max_age" ]; then
     needs_refresh=false
     usage_data=$(cat "$cache_file" 2>/dev/null)
@@ -383,44 +378,6 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
 
   line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset}"
   [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
-
-  # ---- 2x Promo (Mar 13-28, 2026) ----
-  now_epoch=$(date +%s)
-  promo_start=$(env TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "2026-03-13T00:00:00" +%s 2>/dev/null || date -d "2026-03-13T00:00:00Z" +%s 2>/dev/null)
-  promo_end=$(env TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "2026-03-29T00:00:00" +%s 2>/dev/null || date -d "2026-03-29T00:00:00Z" +%s 2>/dev/null)
-
-  if [ -n "$promo_start" ] && [ -n "$promo_end" ] && [ "$now_epoch" -ge "$promo_start" ] && [ "$now_epoch" -lt "$promo_end" ]; then
-    et_hour=$(TZ="America/New_York" date +%H | sed 's/^0//')
-    et_dow=$(TZ="America/New_York" date +%u)
-
-    if [ "$et_dow" -le 5 ] && [ "$et_hour" -ge 8 ] && [ "$et_hour" -lt 14 ]; then
-      peak_end_today=$(TZ="America/New_York" date -v14H -v0M -v0S +%s 2>/dev/null || TZ="America/New_York" date -d "today 14:00:00" +%s 2>/dev/null)
-      mins_left=$(( (peak_end_today - now_epoch) / 60 ))
-      [ "$mins_left" -lt 0 ] && mins_left=0
-      line3+="${sep}🔴 ${red}PEAK${reset} ${dim}(1x) ${mins_left}m to 2x${reset}"
-    else
-      if [ "$et_dow" -ge 6 ]; then
-        days_to_mon=$((8 - et_dow))
-        next_peak=$(TZ="America/New_York" date -v+${days_to_mon}d -v8H -v0M -v0S +%s 2>/dev/null || TZ="America/New_York" date -d "+${days_to_mon} days 08:00:00" +%s 2>/dev/null)
-      elif [ "$et_hour" -lt 8 ]; then
-        next_peak=$(TZ="America/New_York" date -v8H -v0M -v0S +%s 2>/dev/null || TZ="America/New_York" date -d "today 08:00:00" +%s 2>/dev/null)
-      else
-        if [ "$et_dow" -eq 5 ]; then
-          next_peak=$(TZ="America/New_York" date -v+3d -v8H -v0M -v0S +%s 2>/dev/null || TZ="America/New_York" date -d "+3 days 08:00:00" +%s 2>/dev/null)
-        else
-          next_peak=$(TZ="America/New_York" date -v+1d -v8H -v0M -v0S +%s 2>/dev/null || TZ="America/New_York" date -d "+1 day 08:00:00" +%s 2>/dev/null)
-        fi
-      fi
-      if [ -n "$next_peak" ]; then
-        secs_left=$((next_peak - now_epoch))
-        hrs=$((secs_left / 3600))
-        mins=$(( (secs_left % 3600) / 60 ))
-        line3+="${sep}⚡ ${green}2x MODE${reset} ${dim}${hrs}h${mins}m left${reset}"
-      else
-        line3+="${sep}⚡ ${green}2x MODE${reset}"
-      fi
-    fi
-  fi
 
   # ---- Extra usage ----
   extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')

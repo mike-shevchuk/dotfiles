@@ -1,7 +1,4 @@
-import { exec, execSync } from "child_process";
-import { readFileSync } from "fs";
-import { homedir } from "os";
-import { join } from "path";
+import { readInput, notify } from "./shared";
 
 interface SubagentStopHookInput {
   session_id: string;
@@ -13,21 +10,9 @@ interface SubagentStopHookInput {
   cwd: string;
 }
 
-function sanitize(str: string): string {
-  return str.replace(/[^a-zA-Z0-9 _\-.,!?:()]/g, "");
+const input = readInput<SubagentStopHookInput>();
+
+if (!input.stop_hook_active) {
+  const agentType = input.agent_type ?? "Subagent";
+  notify("Claude Code - Subagent", `${agentType} agent completed`, "subagent_stop");
 }
-
-function main() {
-  const input: SubagentStopHookInput = JSON.parse(readFileSync(0, "utf-8"));
-
-  if (input.stop_hook_active) return;
-
-  const agentType = sanitize(input.agent_type ?? "Subagent");
-  const sound = join(homedir(), ".claude", "sounds", "subagent_stop.wav");
-  execSync(
-    `osascript -e 'display notification "${agentType} agent completed" with title "Claude Code - Subagent"'`
-  );
-  exec(`afplay "${sound}"`);
-}
-
-main();
