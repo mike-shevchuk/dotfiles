@@ -582,3 +582,6 @@ fi
 # Mise PATH
 # eval "$($HOME/.local/bin/mise activate zsh)"
 
+
+# Added by Antigravity
+export PATH="$HOME/.antigravity/antigravity/bin:$PATH"

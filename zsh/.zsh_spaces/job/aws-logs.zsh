@@ -5,11 +5,19 @@ AWS_LOG_STREAMS=(
     "/aws/lambda/dev-rescue-serverless-monitoring-data-processor"
     "/aws/lambda/dev-rescue-serverless-monitoring-notification-processor"
     "/aws/lambda/dev-rescue-serverless-pre-authentication"
-    # "/aws/apprunner/dev-rescue-serverless-mqtt-worker/6ce023ee88034697b34d2452f9b98a2a/application"
+    "/aws/apprunner/dev-rescue-serverless-mqtt-worker/6ce023ee88034697b34d2452f9b98a2a/application"
     "/aws/lambda/dev-rescue-serverless-fast-api"
     "/aws/lambda/dev-rescue-serverless-notify-integration"
     "/aws/lambda/dev-rescue-serverless-particle-webhook"
     "/aws/lambda/dev-rescue-serverless-mqtt-webhook"
+    "/aws/lambda/dev-rescue-serverless-rapidsos-integration"
+    "/aws/lambda/dev-rescue-serverless-rapidsos-webhook"
+    "/aws/lambda/dev-rescue-serverless-activate-devices-worker"
+    "/aws/lambda/dev-rescue-serverless-create-conversation-worker"
+    "/aws/lambda/dev-rescue-serverless-emergency-notifications-dispatcher"
+    "/aws/lambda/dev-rescue-serverless-device-operations-worker"
+    "/aws/lambda/dev-rescue-serverless-deactivate-devices-worker"
+    "/aws/lambda/dev-rescue-serverless-mqtt-sqs-consumer"
 
 )
 

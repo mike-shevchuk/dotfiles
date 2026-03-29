@@ -1,0 +1,4 @@
+# -- plugins -------------------------------------------------------------------
+
+set -g @plugin 'sandudorogan/tmux-sidebar'
+set -g @plugin 'sainnhe/tmux-fzf'
