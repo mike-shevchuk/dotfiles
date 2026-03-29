@@ -68,6 +68,25 @@ all: claude zsh tmux kitty lz pnv tnv yazi todoist fonts hyperland
 remove pkg:
     stow -D -t ~ {{pkg}}
 
+# --- Migration ---
+
+# Remove existing manual symlinks so stow can take over (one-time migration)
+migrate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dotfiles_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    echo "Removing manual symlinks pointing into dotfiles..."
+    count=0
+    while IFS= read -r -d '' link; do
+        target=$(readlink "$link" 2>/dev/null || true)
+        if [[ "$target" == "$dotfiles_dir"/* ]] || [[ "$target" == *"/dotfiles/"* ]]; then
+            echo "  removing: $link → $target"
+            rm "$link"
+            count=$((count + 1))
+        fi
+    done < <(find ~ -maxdepth 3 -type l -print0 2>/dev/null)
+    echo "Removed $count manual symlinks. Run 'just setup' now."
+
 # --- Internal ---
 
 [private]
