@@ -133,6 +133,73 @@ status:
     [ "$missing" -gt 0 ] && printf "  ${dim}$missing missing${reset}"
     printf "\n\n"
 
+# Check all dependencies are installed
+health:
+    #!/usr/bin/env bash
+    green='\033[32m'; yellow='\033[33m'; red='\033[31m'; dim='\033[2m'; reset='\033[0m'
+    ok=0; warn=0; fail=0
+
+    printf "\n  %-18s  %-10s  %s\n" "DEPENDENCY" "STATUS" "DETAILS"
+    printf "  %-18s  %-10s  %s\n" "----------" "------" "-------"
+
+    check() {
+        local name="$1" cmd="$2" required="$3" purpose="$4" install_hint="$5"
+        if command -v "$cmd" >/dev/null 2>&1; then
+            local ver
+            ver=$( ("$cmd" --version 2>/dev/null || "$cmd" -V 2>/dev/null) | head -1 | grep -oE '[0-9]+\.[0-9]+[0-9.]*' | head -1 )
+            printf "  %-18s  ${green}%-10s${reset}  %s\n" "$name" "ok" "$ver"
+            ok=$((ok + 1))
+        elif [ "$required" = "required" ]; then
+            printf "  %-18s  ${red}%-10s${reset}  %s\n" "$name" "MISSING" "$purpose — $install_hint"
+            fail=$((fail + 1))
+        else
+            printf "  %-18s  ${yellow}%-10s${reset}  %s\n" "$name" "optional" "$purpose — $install_hint"
+            warn=$((warn + 1))
+        fi
+    }
+
+    # Core tools
+    check "stow"              stow         required  "symlink manager"            "just install-deps"
+    check "git"               git          required  "version control"            "install git"
+    check "just"              just         required  "task runner"                "brew/cargo install just"
+
+    # Shell
+    check "zsh"               zsh          required  "shell"                      "install zsh"
+    check "tmux"              tmux         optional  "terminal multiplexer"       "brew/apt/pacman install tmux"
+
+    # Claude Code deps
+    check "node"              node         required  "hooks runtime (tsx)"        "install node"
+    check "npx"               npx          required  "runs hook scripts"          "comes with node"
+    check "jq"                jq           required  "statusline JSON parsing"    "brew/apt/pacman install jq"
+    check "gh"                gh           optional  "statusline PR info"         "brew/apt/pacman install gh"
+    check "curl"              curl         required  "statusline usage API"       "brew/apt/pacman install curl"
+
+    # Editors
+    check "nvim"              nvim         optional  "neovim (LazyVIM)"           "brew/apt/pacman install neovim"
+
+    # Terminal / file manager
+    check "kitty"             kitty        optional  "kitty terminal"             "brew/apt/pacman install kitty"
+    check "yazi"              yazi         optional  "file manager"               "cargo install yazi-fm"
+
+    # Linux notifications
+    if [ "$(uname)" != "Darwin" ]; then
+        check "notify-send"   notify-send  required  "hook notifications"         "apt/pacman install libnotify"
+        check "paplay"        paplay       optional  "hook sounds (PulseAudio)"   "apt/pacman install pulseaudio-utils"
+        check "aplay"         aplay        optional  "hook sounds (ALSA)"         "apt/pacman install alsa-utils"
+    fi
+
+    printf "\n  ${green}$ok ok${reset}"
+    [ "$warn" -gt 0 ] && printf "  ${yellow}$warn optional${reset}"
+    [ "$fail" -gt 0 ] && printf "  ${red}$fail MISSING${reset}"
+    printf "\n"
+
+    if [ "$fail" -gt 0 ]; then
+        printf "\n  ${red}Fix required dependencies before running 'just setup'${reset}\n\n"
+        exit 1
+    else
+        printf "\n"
+    fi
+
 # --- Migration ---
 
 # Remove existing manual symlinks so stow can take over (one-time migration)
