@@ -584,4 +584,4 @@ fi
 
 
 # Added by Antigravity
-export PATH="/Users/mikeshevchuk/.antigravity/antigravity/bin:$PATH"
+export PATH="$HOME/.antigravity/antigravity/bin:$PATH"

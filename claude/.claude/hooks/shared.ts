@@ -1,4 +1,4 @@
-import { exec, execSync } from "child_process";
+import { exec } from "child_process";
 import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
