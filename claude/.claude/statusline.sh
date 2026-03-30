@@ -217,6 +217,21 @@ fi
 line2+="${sep}"
 line2+="🪙 ${orange}${used_tokens}/${total_tokens}${reset}"
 
+# Subscription renewal countdown
+renewal_date="2026-04-10"
+renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null)
+if [ -n "$renewal_epoch" ]; then
+  days_left=$(( (renewal_epoch - now_epoch) / 86400 ))
+  if [ "$days_left" -le 0 ]; then
+    line2+="${sep}💳 ${red}renew today!${reset}"
+  elif [ "$days_left" -le 3 ]; then
+    line2+="${sep}💳 ${red}${days_left}d left${reset}"
+  elif [ "$days_left" -le 7 ]; then
+    line2+="${sep}💳 ${yellow}${days_left}d left${reset}"
+  else
+    line2+="${sep}💳 ${dim}${days_left}d left${reset}"
+  fi
+fi
 
 # ===== Cross-platform OAuth token resolution =====
 get_oauth_token() {
@@ -275,8 +290,12 @@ if [ -f "$cache_file" ]; then
   cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
   cache_age=$((now_epoch - cache_mtime))
   if [ "$cache_age" -lt "$cache_max_age" ]; then
-    needs_refresh=false
-    usage_data=$(cat "$cache_file" 2>/dev/null)
+    cached_candidate=$(cat "$cache_file" 2>/dev/null)
+    # Only use cache if it is valid JSON without an error field
+    if echo "$cached_candidate" | jq -e 'has("error") | not' >/dev/null 2>&1; then
+      needs_refresh=false
+      usage_data="$cached_candidate"
+    fi
   fi
 fi
 
@@ -290,13 +309,18 @@ if $needs_refresh; then
       -H "anthropic-beta: oauth-2025-04-20" \
       -H "User-Agent: claude-code/2.1.34" \
       "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
-    if [ -n "$response" ] && echo "$response" | jq . >/dev/null 2>&1; then
+    # Only accept the response if it is valid JSON and does NOT contain an error field
+    if [ -n "$response" ] && echo "$response" | jq -e 'has("error") | not' >/dev/null 2>&1; then
       usage_data="$response"
       echo "$response" >"$cache_file"
     fi
   fi
   if [ -z "$usage_data" ] && [ -f "$cache_file" ]; then
-    usage_data=$(cat "$cache_file" 2>/dev/null)
+    # Discard a stale cache that is itself an error response
+    cached=$(cat "$cache_file" 2>/dev/null)
+    if echo "$cached" | jq -e 'has("error") | not' >/dev/null 2>&1; then
+      usage_data="$cached"
+    fi
   fi
 fi
 
@@ -341,24 +365,154 @@ format_reset_time() {
 
   case "$style" in
   time)
-    date -j -r "$epoch" +"%l:%M%p" 2>/dev/null | sed 's/^ //' | tr '[:upper:]' '[:lower:]' ||
-      date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //'
+    date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //'
     ;;
   datetime)
-    date -j -r "$epoch" +"%b %-d, %l:%M%p" 2>/dev/null | sed 's/  / /g; s/^ //' | tr '[:upper:]' '[:lower:]' ||
-      date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //'
+    date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //'
     ;;
   *)
-    date -j -r "$epoch" +"%b %-d" 2>/dev/null | tr '[:upper:]' '[:lower:]' ||
-      date -d "@$epoch" +"%b %-d" 2>/dev/null
+    date -d "@$epoch" +"%b %-d" 2>/dev/null
     ;;
   esac
 }
 
-# ===== LINE 3: 5h bar | 7d bar | 2x promo | extra =====
+# ===== Pace calculation =====
+# pace = (usage% / elapsed%) where elapsed% = time_elapsed / total_window
+# pace 1.0 = sustainable, >1.0 = burning fast, <1.0 = have headroom
+calc_pace() {
+  local pct=$1
+  local reset_iso=$2
+  local window_secs=$3
+
+  [ "$pct" -eq 0 ] 2>/dev/null && echo "0.0" && return
+  [ -z "$reset_iso" ] || [ "$reset_iso" = "null" ] && echo "0.0" && return
+
+  local reset_epoch
+  reset_epoch=$(iso_to_epoch "$reset_iso")
+  [ -z "$reset_epoch" ] && echo "0.0" && return
+
+  local elapsed_secs=$((window_secs - (reset_epoch - now_epoch)))
+  [ "$elapsed_secs" -le 0 ] && echo "0.0" && return
+
+  local elapsed_pct
+  elapsed_pct=$(awk "BEGIN {printf \"%.4f\", ($elapsed_secs / $window_secs) * 100}")
+
+  awk "BEGIN {
+    ep = $elapsed_pct
+    if (ep <= 0) { printf \"0.0\"; exit }
+    printf \"%.1f\", $pct / ep
+  }"
+}
+
+# Format remaining time estimate
+calc_remaining() {
+  local pct=$1
+  local pace=$2
+  local window_secs=$3
+  local reset_iso=$4
+
+  local reset_epoch
+  reset_epoch=$(iso_to_epoch "$reset_iso")
+  [ -z "$reset_epoch" ] && return
+
+  local remaining_secs=$((reset_epoch - now_epoch))
+  [ "$remaining_secs" -le 0 ] && return
+
+  # At current pace, how long until 100%?
+  local remaining_pct=$((100 - pct))
+  [ "$remaining_pct" -le 0 ] && echo "0m" && return
+
+  local pace_num
+  pace_num=$(echo "$pace" | awk '{printf "%.2f", $1}')
+
+  # If pace is 0 or very low, don't predict
+  local is_low
+  is_low=$(awk "BEGIN {print ($pace_num < 0.1) ? 1 : 0}")
+  [ "$is_low" -eq 1 ] && return
+
+  # Time to exhaust = remaining_pct / (pct / elapsed_secs)
+  local elapsed_secs=$((window_secs - remaining_secs))
+  [ "$elapsed_secs" -le 0 ] && return
+
+  local exhaust_secs
+  exhaust_secs=$(awk "BEGIN {
+    rate = $pct / $elapsed_secs
+    if (rate <= 0) { print 0; exit }
+    printf \"%.0f\", $remaining_pct / rate
+  }")
+
+  if [ "$exhaust_secs" -le 0 ] 2>/dev/null; then
+    echo "0m"
+  elif [ "$exhaust_secs" -lt 3600 ] 2>/dev/null; then
+    echo "$((exhaust_secs / 60))m"
+  elif [ "$exhaust_secs" -lt 86400 ] 2>/dev/null; then
+    local h=$((exhaust_secs / 3600))
+    local m=$(( (exhaust_secs % 3600) / 60 ))
+    if [ "$m" -gt 0 ]; then
+      echo "${h}h${m}m"
+    else
+      echo "${h}h"
+    fi
+  else
+    echo "$((exhaust_secs / 86400))d"
+  fi
+}
+
+format_pace() {
+  local pace=$1
+  local remaining=$2
+  local pace_color
+
+  local pace_int
+  pace_int=$(echo "$pace" | awk '{printf "%.0f", $1 * 10}')
+
+  if [ "$pace_int" -le 4 ]; then
+    pace_color="$blue"
+  elif [ "$pace_int" -le 7 ]; then
+    pace_color="$green"
+  elif [ "$pace_int" -le 10 ]; then
+    pace_color="$cyan"
+  elif [ "$pace_int" -le 20 ]; then
+    pace_color="$yellow"
+  else
+    pace_color="$red"
+  fi
+
+  local result="${pace_color}${pace}x${reset}"
+
+  # Show remaining time when pace > 1.0 (will exhaust before window ends)
+  if [ -n "$remaining" ] && [ "$pace_int" -gt 10 ]; then
+    result+=" ${dim}~${remaining} left${reset}"
+  fi
+
+  echo "$result"
+}
+
+# ===== LINE 3: 5h bar | 7d bar | pace | extra =====
 line3=""
 
-if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
+# Prefer the OAuth API usage_data; fall back to rate_limits from stdin JSON.
+# The stdin JSON provides used_percentage (0-100) and resets_at (Unix epoch seconds).
+use_oauth=false
+use_stdin_limits=false
+
+if [ -n "$usage_data" ] && echo "$usage_data" | jq -e 'has("five_hour") or has("seven_day")' >/dev/null 2>&1; then
+  use_oauth=true
+else
+  # Check if stdin JSON has rate_limits data
+  stdin_five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
+  stdin_seven_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
+  if [ -n "$stdin_five_pct" ] || [ -n "$stdin_seven_pct" ]; then
+    use_stdin_limits=true
+  fi
+fi
+
+# Convert Unix epoch seconds (from stdin rate_limits) to ISO-like string for iso_to_epoch
+epoch_to_iso() {
+  date -d "@$1" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null
+}
+
+if $use_oauth; then
   bar_width=6
 
   # ---- 5-hour (current) ----
@@ -367,16 +521,24 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
   five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
   five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
 
-  line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset}"
+  five_pace=$(calc_pace "$five_hour_pct" "$five_hour_reset_iso" 18000)
+  five_remaining=$(calc_remaining "$five_hour_pct" "$five_pace" 18000 "$five_hour_reset_iso")
+  five_pace_fmt=$(format_pace "$five_pace" "$five_remaining")
+
+  line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
   [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
 
-  # ---- 7-day (weekly) ----
+  # ---- 7-day: bar + pace ----
   seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
   seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
   seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
   seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
 
-  line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset}"
+  seven_pace=$(calc_pace "$seven_day_pct" "$seven_day_reset_iso" 604800)
+  seven_remaining=$(calc_remaining "$seven_day_pct" "$seven_pace" 604800 "$seven_day_reset_iso")
+  seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining")
+
+  line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
   [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
 
   # ---- Extra usage ----
@@ -388,6 +550,49 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e . >/dev/null 2>&1; then
     extra_bar=$(build_bar "$extra_pct" "$bar_width")
 
     line3+="${sep}💳 ${white}extra${reset} ${extra_bar} ${cyan}\$${extra_used}/\$${extra_limit}${reset}"
+  fi
+
+elif $use_stdin_limits; then
+  bar_width=6
+
+  # ---- 5-hour from stdin rate_limits ----
+  if [ -n "$stdin_five_pct" ]; then
+    five_hour_pct=$(printf "%.0f" "$stdin_five_pct" 2>/dev/null || echo "0")
+    stdin_five_resets=$(echo "$input" | jq -r '.rate_limits.five_hour.resets_at // empty')
+    if [ -n "$stdin_five_resets" ]; then
+      five_hour_reset_iso=$(epoch_to_iso "$stdin_five_resets")
+    else
+      five_hour_reset_iso=""
+    fi
+    five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
+    five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
+
+    five_pace=$(calc_pace "$five_hour_pct" "$five_hour_reset_iso" 18000)
+    five_remaining=$(calc_remaining "$five_hour_pct" "$five_pace" 18000 "$five_hour_reset_iso")
+    five_pace_fmt=$(format_pace "$five_pace" "$five_remaining")
+
+    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
+    [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
+  fi
+
+  # ---- 7-day from stdin rate_limits ----
+  if [ -n "$stdin_seven_pct" ]; then
+    seven_day_pct=$(printf "%.0f" "$stdin_seven_pct" 2>/dev/null || echo "0")
+    stdin_seven_resets=$(echo "$input" | jq -r '.rate_limits.seven_day.resets_at // empty')
+    if [ -n "$stdin_seven_resets" ]; then
+      seven_day_reset_iso=$(epoch_to_iso "$stdin_seven_resets")
+    else
+      seven_day_reset_iso=""
+    fi
+    seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
+
+    seven_pace=$(calc_pace "$seven_day_pct" "$seven_day_reset_iso" 604800)
+    seven_remaining=$(calc_remaining "$seven_day_pct" "$seven_pace" 604800 "$seven_day_reset_iso")
+    seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining")
+
+    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
+    [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
   fi
 fi
 
