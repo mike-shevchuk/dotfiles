@@ -197,7 +197,6 @@ health:
     # macOS tools
     if [ "$(uname)" = "Darwin" ]; then
         check "hammerspoon"       hs           optional  "system monitor menubar"     "brew install hammerspoon"
-        check "osx-cpu-temp"      osx-cpu-temp optional  "CPU temperature readout"    "brew install osx-cpu-temp"
     fi
 
     # Linux notifications

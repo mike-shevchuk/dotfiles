@@ -10,6 +10,7 @@ local menubar
 local timer
 local REFRESH_INTERVAL = 10
 local totalMemoryBytes = 0
+local cachedRamPct = 0
 local caffeineState = false
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 local FONT = { name = "Menlo", size = 12 }
@@ -109,47 +110,39 @@ local function getTopProcesses()
 end
 
 local function killProcess(pid, name)
-    local script = string.format([[
-        echo "══════════════════════════════════════"
-        echo "  Process: %s (PID %d)"
-        echo "══════════════════════════════════════"
-        echo ""
-        ps -p %d -o pid,rss,vsz,%%mem,%%cpu,state,start,time,command 2>/dev/null || echo "  Process already exited"
-        echo ""
-        printf "Kill this process? [y/N] "
-        read ans
-        if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
-            kill %d 2>&1 && echo "✓ Killed %s (PID %d)" || echo "✗ Failed — try force kill? [y/N] " && read f && [ "$f" = "y" ] && kill -9 %d 2>&1 && echo "✓ Force killed"
-        else
-            echo "Cancelled"
-        fi
-        echo ""
-        echo "Window closes in 3s..."
-        sleep 3
-    ]], name, pid, pid, pid, name, pid, pid)
+    local btn = hs.dialog.blockAlert(
+        string.format("Kill process: %s (PID %d)?", name, pid),
+        "Send SIGTERM to this process.",
+        "Kill", "Cancel"
+    )
+    if btn ~= "Kill" then return end
 
-    local tmpfile = os.tmpname()
-    local f = io.open(tmpfile, "w")
-    f:write(script)
-    f:close()
+    local ok = os.execute(string.format("kill -15 %d", pid))
+    if ok then
+        hs.alert.show(string.format("Killed %s (PID %d)", name, pid), 2)
+    else
+        -- SIGTERM failed, offer force kill
+        local forceBtn = hs.dialog.blockAlert(
+            string.format("Failed to kill %s (PID %d)", name, pid),
+            "Try force kill (SIGKILL)?",
+            "Force Kill", "Cancel"
+        )
+        if forceBtn == "Force Kill" then
+            os.execute(string.format("kill -9 %d", pid))
+            hs.alert.show(string.format("Force killed %s (PID %d)", name, pid), 2)
+        end
+    end
 
-    shellExec(string.format(
-        'kitty --title "Kill: %s" -o remember_window_size=no -o initial_window_width=80c -o initial_window_height=20c -e bash %s &',
-        name, tmpfile
-    ))
-
-    hs.timer.doAfter(5, M.refresh)
+    hs.timer.doAfter(2, M.refresh)
 end
 
 -- Update only the menubar title (called by pomodoro every second)
+-- Uses cached RAM percentage to avoid spawning vm_stat subprocess each time
 local function updateTitle()
     if not menubar then return end
 
-    local used, total = getMemoryUsage()
-    local pct = total > 0 and math.floor(used / total * 100) or 0
-
     local parts = { guard.enabled and "🔨" or "⛔" }
-    table.insert(parts, string.format("RAM: %d%%", pct))
+    table.insert(parts, string.format("RAM: %d%%", cachedRamPct))
 
     local pomoTitle = pomodoro.getTitle()
     if pomoTitle then
@@ -169,6 +162,7 @@ function M.refresh()
     local swapUsed, swapTotal = getSwap()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
+    cachedRamPct = pct
 
     -- Update title
     updateTitle()
