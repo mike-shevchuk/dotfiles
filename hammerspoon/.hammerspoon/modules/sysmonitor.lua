@@ -61,12 +61,13 @@ local function getTemperature()
 end
 
 local function getTopProcesses()
-    local output = shellExec("ps -eo pid,rss,%mem,%cpu,comm -m | head -11 | tail -10")
+    local output = shellExec("ps -eo pid,user,rss,%mem,%cpu,etime,comm -m | head -11 | tail -10")
     if not output then return {} end
 
     local procs = {}
     for line in output:gmatch("[^\n]+") do
-        local pid, rss, mem, cpu, comm = line:match("(%d+)%s+(%d+)%s+([%d.]+)%s+([%d.]+)%s+(.*)")
+        local pid, user, rss, mem, cpu, etime, comm =
+            line:match("(%d+)%s+(%S+)%s+(%d+)%s+([%d.]+)%s+([%d.]+)%s+(%S+)%s+(.*)")
         if pid then
             local name = (comm:match("([^/]+)$") or comm):gsub("^%s+", ""):gsub("%s+$", "")
             local mb = (tonumber(rss) or 0) / 1024
@@ -74,12 +75,34 @@ local function getTopProcesses()
                 and string.format("%.1f GB", mb / 1024)
                 or string.format("%.0f MB", mb)
 
+            -- Format etime: "21-03:45:12" → "21d 3h", "03:45:12" → "3h 45m", "45:12" → "45m"
+            local etimeStr = etime or ""
+            local days, h, m = etimeStr:match("(%d+)-(%d+):(%d+)")
+            if not days then
+                h, m = etimeStr:match("(%d+):(%d+):%d+")
+                if not h then
+                    m = etimeStr:match("(%d+):%d+")
+                end
+            end
+            local uptime
+            if days then
+                uptime = string.format("%dd %dh", tonumber(days), tonumber(h))
+            elseif h then
+                uptime = string.format("%dh %dm", tonumber(h), tonumber(m))
+            elseif m then
+                uptime = string.format("%dm", tonumber(m))
+            else
+                uptime = etimeStr
+            end
+
             table.insert(procs, {
                 name = name,
                 pid = tonumber(pid),
+                user = user,
                 mem = tonumber(mem) or 0,
                 cpu = tonumber(cpu) or 0,
                 memStr = memStr,
+                uptime = uptime,
             })
         end
     end
@@ -182,19 +205,21 @@ function M.refresh()
 
     -- Process header
     table.insert(menu, {
-        title = string.format("%-4s  %-25s  %7s  %6s", "#", "PROCESS (PID)", "RAM", "CPU%"),
+        title = string.format("%-3s %-20s %7s %5s %-8s %s", "#", "PROCESS", "RAM", "CPU", "UPTIME", "USER"),
         disabled = true,
     })
     table.insert(menu, { title = "-" })
 
-    -- Process list with CPU%
+    -- Process list
     for i, p in ipairs(procs) do
         table.insert(menu, {
-            title = string.format("%-2d.  %-25s  %7s  %5.1f%%",
+            title = string.format("%-2d. %-20s %7s %4.1f%% %-8s %s",
                 i,
-                string.format("%s (%d)", p.name:sub(1, 18), p.pid),
+                string.format("%s (%d)", p.name:sub(1, 12), p.pid),
                 p.memStr,
-                p.cpu),
+                p.cpu,
+                p.uptime,
+                p.user),
             fn = function() killProcess(p.pid, p.name) end,
         })
     end
