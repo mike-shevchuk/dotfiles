@@ -69,15 +69,6 @@ local function getSwap()
     return nil
 end
 
-local function getTemperature()
-    local output = shellExec("osx-cpu-temp 2>/dev/null")
-    if output then
-        local temp = output:match("([%d.]+)")
-        if temp then return tonumber(temp) end
-    end
-    return nil
-end
-
 local function formatUptime(etimeStr)
     if not etimeStr then return "?" end
     local days, h, m = etimeStr:match("(%d+)-(%d+):(%d+)")
@@ -154,14 +145,11 @@ function M.refresh()
     if not menubar then return end
 
     local used, total, details = getMemoryUsage()
-    local temp = getTemperature()
     local procs = getTopProcesses()
     local swapUsed, swapTotal = getSwap()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
-    local title = string.format("RAM: %d%%", pct)
-    if temp then title = title .. string.format(" | %.0f\u{00B0}C", temp) end
-    menubar:setTitle(title)
+    menubar:setTitle(string.format("RAM: %d%%", pct))
 
     local menu = {}
 
@@ -192,12 +180,6 @@ function M.refresh()
         end
         table.insert(menu, { title = styled(swapStr), disabled = true })
     end
-
-    -- Temperature
-    table.insert(menu, {
-        title = styled(temp and string.format("CPU Temp: %.1f\u{00B0}C", temp) or "CPU Temp: N/A"),
-        disabled = true,
-    })
 
     table.insert(menu, { title = "-" })
 
