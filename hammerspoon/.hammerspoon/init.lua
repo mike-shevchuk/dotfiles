@@ -102,8 +102,7 @@ guard.bind(hyper, "Space", launcher.show)
 guard.bind(hyper, "Q", bookmarks.show)
 
 -- ─── Pomodoro ───────────────────────────────────────────────────
--- W = start/stop pomodoro timer (also in menubar)
-pomodoro.start()
+-- W = start/stop pomodoro timer (integrated into sysmonitor menubar)
 guard.bind(hyper, "W", pomodoro.toggle)
 
 -- ─── Screenshot + Annotate ──────────────────────────────────────
@@ -116,7 +115,7 @@ linear.start()
 guard.bind(hyper, "E", linear.toggle)
 
 -- ─── System Monitor ────────────────────────────────────────────
--- Menubar: RAM% | CPU temp, click for top 10 processes + kill
+-- Menubar: RAM% | pomodoro | caffeine, click for processes + controls
 sysmonitor.start()
 
 -- ─── Ctrl-tap-as-Escape ────────────────────────────────────────
@@ -124,9 +123,6 @@ system.startCtrlEscape()
 
 -- ─── Brightness on AC power ────────────────────────────────────
 system.startPowerWatcher()
-
--- ─── Caffeine ───────────────────────────────────────────────────
-caffeine.start()
 
 -- ─── Console & Reload ───────────────────────────────────────────
 guard.bind(hyper, "H", hs.toggleConsole)

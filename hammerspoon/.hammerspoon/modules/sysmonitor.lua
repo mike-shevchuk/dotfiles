@@ -1,13 +1,15 @@
 -- System Monitor Menubar Widget
--- Shows RAM usage, CPU temperature, and top 10 memory-consuming processes
--- Refreshes every 10 seconds
+-- Shows RAM, processes, pomodoro, and caffeine in one menubar item
+-- Refreshes every 10 seconds (pomodoro updates every 1s via callback)
 
 local M = {}
 
+local pomodoro = require("modules.pomodoro")
 local menubar
 local timer
 local REFRESH_INTERVAL = 10
 local totalMemoryBytes = 0
+local caffeineState = false
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 local FONT = { name = "Menlo", size = 12 }
 
@@ -141,6 +143,25 @@ local function killProcess(pid, name)
     hs.timer.doAfter(5, M.refresh)
 end
 
+-- Update only the menubar title (called by pomodoro every second)
+local function updateTitle()
+    if not menubar then return end
+
+    local used, total = getMemoryUsage()
+    local pct = total > 0 and math.floor(used / total * 100) or 0
+
+    local parts = { string.format("RAM: %d%%", pct) }
+
+    local pomoTitle = pomodoro.getTitle()
+    if pomoTitle then
+        table.insert(parts, pomoTitle)
+    end
+
+    table.insert(parts, caffeineState and "☕️" or "💤")
+
+    menubar:setTitle(table.concat(parts, " | "))
+end
+
 function M.refresh()
     if not menubar then return end
 
@@ -149,7 +170,9 @@ function M.refresh()
     local swapUsed, swapTotal = getSwap()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
-    menubar:setTitle(string.format("RAM: %d%%", pct))
+
+    -- Update title
+    updateTitle()
 
     local menu = {}
 
@@ -203,6 +226,25 @@ function M.refresh()
         })
     end
 
+    -- Pomodoro section
+    table.insert(menu, { title = "-" })
+    table.insert(menu, { title = "Pomodoro", disabled = true })
+    local pomoItems = pomodoro.getMenuItems()
+    for _, item in ipairs(pomoItems) do
+        table.insert(menu, item)
+    end
+
+    -- Caffeine section
+    table.insert(menu, { title = "-" })
+    table.insert(menu, {
+        title = caffeineState and "Caffeine: ON ☕️ (click to disable)" or "Caffeine: OFF 💤 (click to enable)",
+        fn = function()
+            caffeineState = hs.caffeinate.toggle("displayIdle")
+            hs.alert.show(caffeineState and "Caffeine ON" or "Caffeine OFF", 1)
+            updateTitle()
+        end,
+    })
+
     table.insert(menu, { title = "-" })
     table.insert(menu, { title = "Refresh Now", fn = M.refresh })
 
@@ -212,6 +254,12 @@ end
 function M.start()
     local memStr = shellExec("sysctl -n hw.memsize")
     totalMemoryBytes = tonumber(memStr) or 0
+    caffeineState = hs.caffeinate.get("displayIdle") or false
+
+    -- Start pomodoro without its own menubar
+    pomodoro.start(true)
+    pomodoro.onUpdate = updateTitle
+
     menubar = hs.menubar.new()
     M.refresh()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
