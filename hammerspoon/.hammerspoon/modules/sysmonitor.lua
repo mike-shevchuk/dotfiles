@@ -83,18 +83,16 @@ local function formatUptime(etimeStr)
 end
 
 local function getTopProcesses()
-    local output = shellExec("ps -eo pid,user,rss,vsz,%cpu,etime,comm -m | head -11 | tail -10")
+    local output = shellExec("ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10")
     if not output then return {} end
 
     local procs = {}
     for line in output:gmatch("[^\n]+") do
-        local pid, user, rss, vsz, cpu, etime, comm =
-            line:match("(%d+)%s+(%S+)%s+(%d+)%s+(%d+)%s+([%d.]+)%s+(%S+)%s+(.*)")
+        local pid, user, rss, cpu, etime, comm =
+            line:match("(%d+)%s+(%S+)%s+(%d+)%s+([%d.]+)%s+(%S+)%s+(.*)")
         if pid then
             local name = (comm:match("([^/]+)$") or comm):gsub("^%s+", ""):gsub("%s+$", "")
             local rssMB = (tonumber(rss) or 0) / 1024
-            local vszMB = (tonumber(vsz) or 0) / 1024
-            local swapMB = math.max(0, vszMB - rssMB)
 
             table.insert(procs, {
                 name = name,
@@ -102,7 +100,6 @@ local function getTopProcesses()
                 user = user,
                 cpu = tonumber(cpu) or 0,
                 ramStr = formatMB(rssMB),
-                swapStr = formatMB(swapMB),
                 uptime = formatUptime(etime),
             })
         end
@@ -209,8 +206,8 @@ function M.refresh()
     -- Process header
     table.insert(menu, {
         title = styled(string.format(
-            "%-3s %-16s %7s  %7s  %5s  %-7s  %s",
-            "#", "PROCESS", "RAM", "VIRT", "CPU", "UPTIME", "USER")),
+            "%-3s %-16s %7s  %5s  %-7s  %s",
+            "#", "PROCESS", "RAM", "CPU", "UPTIME", "USER")),
         disabled = true,
     })
     table.insert(menu, { title = "-" })
@@ -220,8 +217,8 @@ function M.refresh()
         local procName = p.name:sub(1, 14)
         table.insert(menu, {
             title = styled(string.format(
-                "%-3s %-16s %7s  %7s  %4.1f%%  %-7s  %s",
-                i .. ".", procName, p.ramStr, p.swapStr, p.cpu, p.uptime, p.user)),
+                "%-3s %-16s %7s  %4.1f%%  %-7s  %s",
+                i .. ".", procName, p.ramStr, p.cpu, p.uptime, p.user)),
             fn = function() killProcess(p.pid, p.name) end,
         })
     end
