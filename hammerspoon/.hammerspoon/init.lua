@@ -24,8 +24,8 @@ local linear      = require("modules.linear")
 local bookmarks   = require("modules.bookmarks")
 local sysmonitor  = require("modules.sysmonitor")
 
--- ─── Master toggle (menubar icon) ───────────────────────────────
-guard.start()
+-- ─── Master toggle (integrated into sysmonitor menubar) ─────────
+guard.start(true)
 
 -- ─── Hyper modifier ─────────────────────────────────────────────
 local hyper = { "alt", "shift" }

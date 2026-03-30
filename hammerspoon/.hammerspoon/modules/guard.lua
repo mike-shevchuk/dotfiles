@@ -5,14 +5,17 @@ local M = {}
 M.enabled = true
 M.hotkeys = {}  -- list of hs.hotkey objects to manage
 M.menubar = nil
+M.onUpdate = nil  -- external callback for menubar updates
 
 local function updateIcon()
-  if not M.menubar then return end
-  if M.enabled then
-    M.menubar:setTitle("🔨")
-  else
-    M.menubar:setTitle("⛔")
+  if M.menubar then
+    if M.enabled then
+      M.menubar:setTitle("🔨")
+    else
+      M.menubar:setTitle("⛔")
+    end
   end
+  if M.onUpdate then M.onUpdate() end
 end
 
 function M.addHotkey(hk)
@@ -34,12 +37,14 @@ function M.toggle()
   hs.alert.show(M.enabled and "🔨 Hammerspoon ON" or "⛔ Hammerspoon OFF", 1.5)
 end
 
-function M.start()
-  M.menubar = hs.menubar.new()
-  if M.menubar then
-    M.menubar:setClickCallback(M.toggle)
-    updateIcon()
+function M.start(skipMenubar)
+  if not skipMenubar then
+    M.menubar = hs.menubar.new()
+    if M.menubar then
+      M.menubar:setClickCallback(M.toggle)
+    end
   end
+  updateIcon()
 end
 
 -- Convenience: bind a hotkey and register it with the guard

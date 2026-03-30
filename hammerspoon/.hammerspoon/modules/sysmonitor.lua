@@ -5,6 +5,7 @@
 local M = {}
 
 local pomodoro = require("modules.pomodoro")
+local guard = require("modules.guard")
 local menubar
 local timer
 local REFRESH_INTERVAL = 10
@@ -147,7 +148,8 @@ local function updateTitle()
     local used, total = getMemoryUsage()
     local pct = total > 0 and math.floor(used / total * 100) or 0
 
-    local parts = { string.format("RAM: %d%%", pct) }
+    local parts = { guard.enabled and "🔨" or "⛔" }
+    table.insert(parts, string.format("RAM: %d%%", pct))
 
     local pomoTitle = pomodoro.getTitle()
     if pomoTitle then
@@ -231,10 +233,17 @@ function M.refresh()
         table.insert(menu, item)
     end
 
-    -- Caffeine section
+    -- Toggles section
     table.insert(menu, { title = "-" })
     table.insert(menu, {
-        title = caffeineState and "Caffeine: ON ☕️ (click to disable)" or "Caffeine: OFF 💤 (click to enable)",
+        title = guard.enabled and "🔨 Hotkeys: ON (click to disable)" or "⛔ Hotkeys: OFF (click to enable)",
+        fn = function()
+            guard.toggle()
+            updateTitle()
+        end,
+    })
+    table.insert(menu, {
+        title = caffeineState and "☕️ Caffeine: ON (click to disable)" or "💤 Caffeine: OFF (click to enable)",
         fn = function()
             caffeineState = hs.caffeinate.toggle("displayIdle")
             hs.alert.show(caffeineState and "Caffeine ON" or "Caffeine OFF", 1)
@@ -253,9 +262,10 @@ function M.start()
     totalMemoryBytes = tonumber(memStr) or 0
     caffeineState = hs.caffeinate.get("displayIdle") or false
 
-    -- Start pomodoro without its own menubar
+    -- Start pomodoro and guard without their own menubars
     pomodoro.start(true)
     pomodoro.onUpdate = updateTitle
+    guard.onUpdate = updateTitle
 
     menubar = hs.menubar.new()
     M.refresh()
