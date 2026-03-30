@@ -60,19 +60,36 @@ local function formatGB(bytes)
 end
 
 local function killProcess(pid, name)
-    local btn = hs.dialog.blockAlert(
-        "Kill Process",
-        string.format("Kill '%s' (PID %d)?", name, pid),
-        "Kill", "Cancel"
-    )
-    if btn == "Kill" then
-        hs.execute(string.format("kill %d", pid))
-        hs.notify.new({
-            title = "Process Killed",
-            informativeText = string.format("%s (PID %d)", name, pid),
-        }):send()
-        M.refresh()
-    end
+    local script = string.format([[
+        echo "══════════════════════════════════════"
+        echo "  Process: %s (PID %d)"
+        echo "══════════════════════════════════════"
+        echo ""
+        ps -p %d -o pid,rss,%%mem,%%cpu,state,start,time,command 2>/dev/null || echo "  Process already exited"
+        echo ""
+        printf "Kill this process? [y/N] "
+        read ans
+        if [ "$ans" = "y" ] || [ "$ans" = "Y" ]; then
+            kill %d 2>&1 && echo "✓ Killed %s (PID %d)" || echo "✗ Failed — try force kill? [y/N] " && read f && [ "$f" = "y" ] && kill -9 %d 2>&1 && echo "✓ Force killed"
+        else
+            echo "Cancelled"
+        fi
+        echo ""
+        echo "Window closes in 3s..."
+        sleep 3
+    ]], name, pid, pid, pid, name, pid, pid)
+
+    local tmpfile = os.tmpname()
+    local f = io.open(tmpfile, "w")
+    f:write(script)
+    f:close()
+
+    hs.execute(string.format(
+        'kitty --title "Kill: %s" -o remember_window_size=no -o initial_window_width=80c -o initial_window_height=20c -e bash %s &',
+        name, tmpfile
+    ))
+
+    hs.timer.doAfter(5, M.refresh)
 end
 
 function M.refresh()
