@@ -20,9 +20,25 @@ claude:
 zsh:
     stow --no-folding --adopt --restow -t ~ zsh
 
-# Tmux config
+# Tmux config + plugins (tpm can't auto-discover plugins from .tmux.conf.local)
 tmux:
+    #!/usr/bin/env bash
+    set -euo pipefail
     stow --no-folding --adopt --restow -t ~ tmux
+    plugins_dir="$HOME/.tmux/plugins"
+    declare -A plugins=(
+        [tpm]="tmux-plugins/tpm"
+        [tmux-resurrect]="tmux-plugins/tmux-resurrect"
+        [tmux-continuum]="tmux-plugins/tmux-continuum"
+        [tmux-yank]="tmux-plugins/tmux-yank"
+    )
+    for name in "${!plugins[@]}"; do
+        if [ ! -d "$plugins_dir/$name" ]; then
+            echo "  installing $name..."
+            git clone --depth 1 "https://github.com/${plugins[$name]}" "$plugins_dir/$name"
+        fi
+    done
+    echo "tmux config and plugins ready"
 
 # Kitty terminal config
 kitty:
@@ -193,6 +209,24 @@ health:
     # Terminal / file manager
     check "kitty"             kitty        optional  "kitty terminal"             "brew/apt/pacman install kitty"
     check "yazi"              yazi         optional  "file manager"               "cargo install yazi-fm"
+
+    # tmux plugins
+    check_tmux_plugin() {
+        local name="$1" purpose="$2"
+        if [ -d "$HOME/.tmux/plugins/$name" ]; then
+            printf "  %-18s  ${green}%-10s${reset}  %s\n" "tmux:$name" "ok" "$purpose"
+            ok=$((ok + 1))
+        else
+            printf "  %-18s  ${red}%-10s${reset}  %s\n" "tmux:$name" "MISSING" "$purpose — run 'just tmux'"
+            fail=$((fail + 1))
+        fi
+    }
+    if command -v tmux >/dev/null 2>&1; then
+        check_tmux_plugin "tpm"             "plugin manager"
+        check_tmux_plugin "tmux-resurrect"  "session save/restore"
+        check_tmux_plugin "tmux-continuum"  "auto-save sessions"
+        check_tmux_plugin "tmux-yank"       "clipboard integration"
+    fi
 
     # macOS tools
     if [ "$(uname)" = "Darwin" ]; then
