@@ -6,6 +6,7 @@ M.timer = nil
 M.remaining = 0  -- seconds
 M.state = "idle" -- idle, work, break
 M.sessions = 0   -- completed work sessions today
+M.onUpdate = nil  -- external callback for menubar updates
 
 local WORK_MIN = 25
 local BREAK_MIN = 5
@@ -18,14 +19,16 @@ local function formatTime(secs)
 end
 
 local function updateMenubar()
-  if not M.menubar then return end
-  if M.state == "idle" then
-    M.menubar:setTitle("🍅 " .. M.sessions)
-  elseif M.state == "work" then
-    M.menubar:setTitle("🍅 " .. formatTime(M.remaining))
-  elseif M.state == "break" then
-    M.menubar:setTitle("☕ " .. formatTime(M.remaining))
+  if M.menubar then
+    if M.state == "idle" then
+      M.menubar:setTitle("🍅 " .. M.sessions)
+    elseif M.state == "work" then
+      M.menubar:setTitle("🍅 " .. formatTime(M.remaining))
+    elseif M.state == "break" then
+      M.menubar:setTitle("☕ " .. formatTime(M.remaining))
+    end
   end
+  if M.onUpdate then M.onUpdate() end
 end
 
 local function tick()
@@ -56,31 +59,35 @@ local function tick()
   end
 end
 
+local function startWork()
+  M.state = "work"
+  M.remaining = WORK_MIN * 60
+  if M.timer then M.timer:stop() end
+  M.timer = hs.timer.doEvery(1, tick)
+  updateMenubar()
+  hs.alert.show("🍅 Focus time!", 1.5)
+end
+
+local function stopTimer()
+  if M.timer then M.timer:stop(); M.timer = nil end
+  M.state = "idle"
+  M.remaining = 0
+  updateMenubar()
+  hs.alert.show("Pomodoro stopped", 1)
+end
+
 local function buildMenu()
   local items = {}
 
   if M.state == "idle" then
     items[#items + 1] = {
       title = "Start Work (25 min)",
-      fn = function()
-        M.state = "work"
-        M.remaining = WORK_MIN * 60
-        if M.timer then M.timer:stop() end
-        M.timer = hs.timer.doEvery(1, tick)
-        updateMenubar()
-        hs.alert.show("🍅 Focus time!", 1.5)
-      end,
+      fn = startWork,
     }
   else
     items[#items + 1] = {
       title = "Stop",
-      fn = function()
-        if M.timer then M.timer:stop(); M.timer = nil end
-        M.state = "idle"
-        M.remaining = 0
-        updateMenubar()
-        hs.alert.show("Pomodoro stopped", 1)
-      end,
+      fn = stopTimer,
     }
     if M.state == "work" then
       items[#items + 1] = {
@@ -119,28 +126,36 @@ local function buildMenu()
   return items
 end
 
-function M.start()
-  M.menubar = hs.menubar.new()
-  if not M.menubar then return end
-  M.menubar:setMenu(buildMenu)
+function M.start(skipMenubar)
+  if not skipMenubar then
+    M.menubar = hs.menubar.new()
+    if not M.menubar then return end
+    M.menubar:setMenu(buildMenu)
+  end
   updateMenubar()
 end
 
--- Hotkey: start/pause toggle
+function M.getTitle()
+  if M.state == "work" then
+    return "🍅 " .. formatTime(M.remaining)
+  elseif M.state == "break" then
+    return "☕ " .. formatTime(M.remaining)
+  elseif M.sessions > 0 then
+    return "🍅 " .. M.sessions
+  end
+  return nil
+end
+
+function M.getMenuItems()
+  return buildMenu()
+end
+
+-- Hotkey: start/stop toggle
 function M.toggle()
   if M.state == "idle" then
-    M.state = "work"
-    M.remaining = WORK_MIN * 60
-    if M.timer then M.timer:stop() end
-    M.timer = hs.timer.doEvery(1, tick)
-    updateMenubar()
-    hs.alert.show("🍅 Focus time!", 1.5)
-  elseif M.state == "work" or M.state == "break" then
-    if M.timer then M.timer:stop(); M.timer = nil end
-    M.state = "idle"
-    M.remaining = 0
-    updateMenubar()
-    hs.alert.show("Pomodoro stopped", 1)
+    startWork()
+  else
+    stopTimer()
   end
 end
 

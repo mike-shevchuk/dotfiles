@@ -9,7 +9,6 @@ local windows     = require("modules.windows")
 local apps        = require("modules.apps")
 local audio       = require("modules.audio")
 local clipboard   = require("modules.clipboard")
-local caffeine    = require("modules.caffeine")
 local system      = require("modules.system")
 local sidecar     = require("modules.sidecar")
 local mousefinder = require("modules.mousefinder")
@@ -22,9 +21,10 @@ local screenshot  = require("modules.screenshot")
 local dropdown    = require("modules.dropdown")
 local linear      = require("modules.linear")
 local bookmarks   = require("modules.bookmarks")
+local sysmonitor  = require("modules.sysmonitor")
 
--- ─── Master toggle (menubar icon) ───────────────────────────────
-guard.start()
+-- ─── Master toggle (integrated into sysmonitor menubar) ─────────
+guard.start(true)
 
 -- ─── Hyper modifier ─────────────────────────────────────────────
 local hyper = { "alt", "shift" }
@@ -101,8 +101,7 @@ guard.bind(hyper, "Space", launcher.show)
 guard.bind(hyper, "Q", bookmarks.show)
 
 -- ─── Pomodoro ───────────────────────────────────────────────────
--- W = start/stop pomodoro timer (also in menubar)
-pomodoro.start()
+-- W = start/stop pomodoro timer (integrated into sysmonitor menubar)
 guard.bind(hyper, "W", pomodoro.toggle)
 
 -- ─── Screenshot + Annotate ──────────────────────────────────────
@@ -114,14 +113,15 @@ guard.bind(hyper, "A", screenshot.capture)
 linear.start()
 guard.bind(hyper, "E", linear.toggle)
 
+-- ─── System Monitor ────────────────────────────────────────────
+-- Menubar: RAM% | pomodoro | caffeine, click for processes + controls
+sysmonitor.start()
+
 -- ─── Ctrl-tap-as-Escape ────────────────────────────────────────
 system.startCtrlEscape()
 
 -- ─── Brightness on AC power ────────────────────────────────────
 system.startPowerWatcher()
-
--- ─── Caffeine ───────────────────────────────────────────────────
-caffeine.start()
 
 -- ─── Console & Reload ───────────────────────────────────────────
 guard.bind(hyper, "H", hs.toggleConsole)
