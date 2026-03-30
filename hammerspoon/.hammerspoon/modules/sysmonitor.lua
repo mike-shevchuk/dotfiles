@@ -109,7 +109,8 @@ function M.refresh()
 end
 
 function M.start()
-    totalMemoryBytes = tonumber(hs.execute("sysctl -n hw.memsize")) or 0
+    local memStr = hs.execute("sysctl -n hw.memsize")
+    totalMemoryBytes = tonumber(memStr) or 0
     menubar = hs.menubar.new()
     M.refresh()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
