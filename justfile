@@ -14,52 +14,56 @@ install-deps:
 
 # Claude Code settings, hooks, sounds, statusline, commands
 claude:
-    stow --no-folding --restow -t ~ claude
+    stow --no-folding --adopt --restow -t ~ claude
 
 # Zsh config, plugins, spaces
 zsh:
-    stow --no-folding --restow -t ~ zsh
+    stow --no-folding --adopt --restow -t ~ zsh
 
 # Tmux config
 tmux:
-    stow --no-folding --restow -t ~ tmux
+    stow --no-folding --adopt --restow -t ~ tmux
 
 # Kitty terminal config
 kitty:
-    stow --no-folding --restow -t ~ kitty
+    stow --no-folding --adopt --restow -t ~ kitty
 
 # LazyVIM neovim config
 lz:
-    stow --no-folding --restow -t ~ lz
+    stow --no-folding --adopt --restow -t ~ lz
 
 # PWNVIM neovim config
 pnv:
-    stow --no-folding --restow -t ~ pnv
+    stow --no-folding --adopt --restow -t ~ pnv
 
 # TNVIM neovim config
 tnv:
-    stow --no-folding --restow -t ~ tnv
+    stow --no-folding --adopt --restow -t ~ tnv
 
 # Yazi file manager config
 yazi:
-    stow --no-folding --restow -t ~ yazi
+    stow --no-folding --adopt --restow -t ~ yazi
 
 # Todoist config
 todoist:
-    stow --no-folding --restow -t ~ todoist
+    stow --no-folding --adopt --restow -t ~ todoist
 
 # Nerd fonts
 fonts:
-    stow --no-folding --restow -t ~ fonts
+    stow --no-folding --adopt --restow -t ~ fonts
+
+# Hammerspoon system monitor (macOS only)
+hammerspoon:
+    stow --no-folding --adopt --restow -t ~ hammerspoon
 
 # Hyprland config (Linux only)
 hyperland:
-    stow --no-folding --restow -t ~ hyperland
+    stow --no-folding --adopt --restow -t ~ hyperland
 
 # --- Bulk operations ---
 
 # Stow all packages
-all: claude zsh tmux kitty lz pnv tnv yazi todoist fonts hyperland
+all: claude zsh tmux kitty lz pnv tnv yazi todoist fonts hammerspoon hyperland
     @echo "All packages stowed"
 
 # --- Remove ---
@@ -125,6 +129,7 @@ status:
     check_pkg yazi    ".config/yazi/yazi.toml"
     check_pkg todoist ".config/todoist/config.json"
     check_pkg fonts   ".local/share/fonts/HackNerdFont-Regular.ttf"
+    check_pkg hammerspoon ".hammerspoon/init.lua"
     check_pkg hyperland ".run_hyprland"
 
     printf "\n  ${green}$stowed stowed${reset}"
@@ -137,6 +142,14 @@ status:
 health:
     #!/usr/bin/env bash
     green='\033[32m'; yellow='\033[33m'; red='\033[31m'; dim='\033[2m'; reset='\033[0m'
+
+    # Pull latest dotfiles
+    printf "\n  ${dim}Pulling latest dotfiles...${reset}\n"
+    git -C "{{justfile_directory()}}" pull || printf "  ${yellow}pull failed (offline?)${reset}\n"
+    printf "\n  ${dim}Applying claude config...${reset}\n"
+    just claude || printf "  ${yellow}claude stow failed${reset}\n"
+    printf "\n"
+
     ok=0; warn=0; fail=0
 
     printf "\n  %-18s  %-10s  %s\n" "DEPENDENCY" "STATUS" "DETAILS"
@@ -180,6 +193,11 @@ health:
     # Terminal / file manager
     check "kitty"             kitty        optional  "kitty terminal"             "brew/apt/pacman install kitty"
     check "yazi"              yazi         optional  "file manager"               "cargo install yazi-fm"
+
+    # macOS tools
+    if [ "$(uname)" = "Darwin" ]; then
+        check "hammerspoon"       hs           optional  "system monitor menubar"     "brew install hammerspoon"
+    fi
 
     # Linux notifications
     if [ "$(uname)" != "Darwin" ]; then
