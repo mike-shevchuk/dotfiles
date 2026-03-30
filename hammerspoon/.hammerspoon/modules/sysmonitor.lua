@@ -9,9 +9,14 @@ local timer
 local REFRESH_INTERVAL = 10
 local totalMemoryBytes = 0
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+local FONT = { name = "Menlo", size = 12 }
 
 local function shellExec(cmd)
     return hs.execute(string.format("export PATH='%s'; %s", PATH, cmd))
+end
+
+local function styled(text)
+    return hs.styledtext.new(text, { font = FONT })
 end
 
 local function formatGB(bytes)
@@ -162,17 +167,17 @@ function M.refresh()
 
     -- Memory overview
     table.insert(menu, {
-        title = string.format("RAM:\t%s / %s (%d%%)", formatGB(used), formatGB(total), pct),
+        title = styled(string.format("RAM:  %s / %s (%d%%)", formatGB(used), formatGB(total), pct)),
         disabled = true,
     })
     table.insert(menu, {
-        title = string.format("  Active: %s\tWired: %s\tCompressed: %s",
-            formatGB(details.active), formatGB(details.wired), formatGB(details.compressed)),
+        title = styled(string.format("  Active: %-8s  Wired: %-8s  Compressed: %s",
+            formatGB(details.active), formatGB(details.wired), formatGB(details.compressed))),
         disabled = true,
     })
     table.insert(menu, {
-        title = string.format("  Free: %s\tInactive: %s\tPurgeable: %s",
-            formatGB(details.free), formatGB(details.inactive), formatGB(details.purgeable)),
+        title = styled(string.format("  Free:   %-8s  Inactive: %-5s  Purgeable: %s",
+            formatGB(details.free), formatGB(details.inactive), formatGB(details.purgeable))),
         disabled = true,
     })
 
@@ -180,17 +185,17 @@ function M.refresh()
     if swapUsed and swapTotal then
         local swapStr
         if swapTotal > 0 then
-            swapStr = string.format("Swap:\t%s / %s (%.0f%%)",
+            swapStr = string.format("Swap: %s / %s (%.0f%%)",
                 formatMB(swapUsed), formatMB(swapTotal), swapUsed / swapTotal * 100)
         else
-            swapStr = "Swap:\t0 MB"
+            swapStr = "Swap: 0 MB"
         end
-        table.insert(menu, { title = swapStr, disabled = true })
+        table.insert(menu, { title = styled(swapStr), disabled = true })
     end
 
     -- Temperature
     table.insert(menu, {
-        title = temp and string.format("CPU Temp:\t%.1f\u{00B0}C", temp) or "CPU Temp:\tN/A",
+        title = styled(temp and string.format("CPU Temp: %.1f\u{00B0}C", temp) or "CPU Temp: N/A"),
         disabled = true,
     })
 
@@ -198,16 +203,20 @@ function M.refresh()
 
     -- Process header
     table.insert(menu, {
-        title = "#\tPROCESS\tRAM\tVIRT\tCPU\tUPTIME\tUSER",
+        title = styled(string.format(
+            "%-3s %-16s %7s  %7s  %5s  %-7s  %s",
+            "#", "PROCESS", "RAM", "VIRT", "CPU", "UPTIME", "USER")),
         disabled = true,
     })
     table.insert(menu, { title = "-" })
 
     -- Process list
     for i, p in ipairs(procs) do
+        local procName = p.name:sub(1, 14)
         table.insert(menu, {
-            title = string.format("%d.\t%s (%d)\t%s\t%s\t%.1f%%\t%s\t%s",
-                i, p.name:sub(1, 14), p.pid, p.ramStr, p.swapStr, p.cpu, p.uptime, p.user),
+            title = styled(string.format(
+                "%-3s %-16s %7s  %7s  %4.1f%%  %-7s  %s",
+                i .. ".", procName, p.ramStr, p.swapStr, p.cpu, p.uptime, p.user)),
             fn = function() killProcess(p.pid, p.name) end,
         })
     end
