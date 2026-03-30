@@ -14,6 +14,19 @@ local function shellExec(cmd)
     return hs.execute(string.format("export PATH='%s'; %s", PATH, cmd))
 end
 
+local function formatGB(bytes)
+    if not bytes then return "?" end
+    return string.format("%.1f GB", bytes / 1073741824)
+end
+
+local function formatMB(mb)
+    if mb >= 1024 then
+        return string.format("%.1f GB", mb / 1024)
+    else
+        return string.format("%.0f MB", mb)
+    end
+end
+
 local function getMemoryUsage()
     local output = shellExec("vm_stat")
     if not output then return 0, totalMemoryBytes, {} end
@@ -60,63 +73,43 @@ local function getTemperature()
     return nil
 end
 
+local function formatUptime(etimeStr)
+    if not etimeStr then return "?" end
+    local days, h, m = etimeStr:match("(%d+)-(%d+):(%d+)")
+    if days then return string.format("%dd %dh", tonumber(days), tonumber(h)) end
+    h, m = etimeStr:match("(%d+):(%d+):%d+")
+    if h then return string.format("%dh %dm", tonumber(h), tonumber(m)) end
+    m = etimeStr:match("(%d+):%d+")
+    if m then return string.format("%dm", tonumber(m)) end
+    return etimeStr
+end
+
 local function getTopProcesses()
-    local output = shellExec("ps -eo pid,user,rss,%mem,%cpu,etime,comm -m | head -11 | tail -10")
+    local output = shellExec("ps -eo pid,user,rss,vsz,%cpu,etime,comm -m | head -11 | tail -10")
     if not output then return {} end
 
     local procs = {}
     for line in output:gmatch("[^\n]+") do
-        local pid, user, rss, mem, cpu, etime, comm =
-            line:match("(%d+)%s+(%S+)%s+(%d+)%s+([%d.]+)%s+([%d.]+)%s+(%S+)%s+(.*)")
+        local pid, user, rss, vsz, cpu, etime, comm =
+            line:match("(%d+)%s+(%S+)%s+(%d+)%s+(%d+)%s+([%d.]+)%s+(%S+)%s+(.*)")
         if pid then
             local name = (comm:match("([^/]+)$") or comm):gsub("^%s+", ""):gsub("%s+$", "")
-            local mb = (tonumber(rss) or 0) / 1024
-            local memStr = mb >= 1024
-                and string.format("%.1f GB", mb / 1024)
-                or string.format("%.0f MB", mb)
-
-            -- Format etime: "21-03:45:12" → "21d 3h", "03:45:12" → "3h 45m", "45:12" → "45m"
-            local etimeStr = etime or ""
-            local days, h, m = etimeStr:match("(%d+)-(%d+):(%d+)")
-            if not days then
-                h, m = etimeStr:match("(%d+):(%d+):%d+")
-                if not h then
-                    m = etimeStr:match("(%d+):%d+")
-                end
-            end
-            local uptime
-            if days then
-                uptime = string.format("%dd %dh", tonumber(days), tonumber(h))
-            elseif h then
-                uptime = string.format("%dh %dm", tonumber(h), tonumber(m))
-            elseif m then
-                uptime = string.format("%dm", tonumber(m))
-            else
-                uptime = etimeStr
-            end
+            local rssMB = (tonumber(rss) or 0) / 1024
+            local vszMB = (tonumber(vsz) or 0) / 1024
+            local swapMB = math.max(0, vszMB - rssMB)
 
             table.insert(procs, {
                 name = name,
                 pid = tonumber(pid),
                 user = user,
-                mem = tonumber(mem) or 0,
                 cpu = tonumber(cpu) or 0,
-                memStr = memStr,
-                uptime = uptime,
+                ramStr = formatMB(rssMB),
+                swapStr = formatMB(swapMB),
+                uptime = formatUptime(etime),
             })
         end
     end
     return procs
-end
-
-local function formatGB(bytes)
-    if not bytes then return "?" end
-    local gb = bytes / 1073741824
-    if gb >= 1 then
-        return string.format("%.1f GB", gb)
-    else
-        return string.format("%.0f MB", bytes / 1048576)
-    end
 end
 
 local function killProcess(pid, name)
@@ -125,7 +118,7 @@ local function killProcess(pid, name)
         echo "  Process: %s (PID %d)"
         echo "══════════════════════════════════════"
         echo ""
-        ps -p %d -o pid,rss,%%mem,%%cpu,state,start,time,command 2>/dev/null || echo "  Process already exited"
+        ps -p %d -o pid,rss,vsz,%%mem,%%cpu,state,start,time,command 2>/dev/null || echo "  Process already exited"
         echo ""
         printf "Kill this process? [y/N] "
         read ans
@@ -169,17 +162,16 @@ function M.refresh()
 
     -- Memory overview
     table.insert(menu, {
-        title = string.format("RAM: %s / %s (%d%%)", formatGB(used), formatGB(total), pct),
+        title = string.format("RAM:\t%s / %s (%d%%)", formatGB(used), formatGB(total), pct),
         disabled = true,
     })
-    -- Memory breakdown
     table.insert(menu, {
-        title = string.format("  Active: %s  |  Wired: %s  |  Compressed: %s",
+        title = string.format("  Active: %s\tWired: %s\tCompressed: %s",
             formatGB(details.active), formatGB(details.wired), formatGB(details.compressed)),
         disabled = true,
     })
     table.insert(menu, {
-        title = string.format("  Free: %s  |  Inactive: %s  |  Purgeable: %s",
+        title = string.format("  Free: %s\tInactive: %s\tPurgeable: %s",
             formatGB(details.free), formatGB(details.inactive), formatGB(details.purgeable)),
         disabled = true,
     })
@@ -188,16 +180,17 @@ function M.refresh()
     if swapUsed and swapTotal then
         local swapStr
         if swapTotal > 0 then
-            swapStr = string.format("Swap: %.0f MB / %.0f MB (%.0f%%)", swapUsed, swapTotal, swapUsed / swapTotal * 100)
+            swapStr = string.format("Swap:\t%s / %s (%.0f%%)",
+                formatMB(swapUsed), formatMB(swapTotal), swapUsed / swapTotal * 100)
         else
-            swapStr = "Swap: 0 MB"
+            swapStr = "Swap:\t0 MB"
         end
         table.insert(menu, { title = swapStr, disabled = true })
     end
 
     -- Temperature
     table.insert(menu, {
-        title = temp and string.format("CPU Temp: %.1f\u{00B0}C", temp) or "CPU Temp: N/A",
+        title = temp and string.format("CPU Temp:\t%.1f\u{00B0}C", temp) or "CPU Temp:\tN/A",
         disabled = true,
     })
 
@@ -205,7 +198,7 @@ function M.refresh()
 
     -- Process header
     table.insert(menu, {
-        title = string.format("%-3s %-20s %7s %5s %-8s %s", "#", "PROCESS", "RAM", "CPU", "UPTIME", "USER"),
+        title = "#\tPROCESS\tRAM\tVIRT\tCPU\tUPTIME\tUSER",
         disabled = true,
     })
     table.insert(menu, { title = "-" })
@@ -213,13 +206,8 @@ function M.refresh()
     -- Process list
     for i, p in ipairs(procs) do
         table.insert(menu, {
-            title = string.format("%-2d. %-20s %7s %4.1f%% %-8s %s",
-                i,
-                string.format("%s (%d)", p.name:sub(1, 12), p.pid),
-                p.memStr,
-                p.cpu,
-                p.uptime,
-                p.user),
+            title = string.format("%d.\t%s (%d)\t%s\t%s\t%.1f%%\t%s\t%s",
+                i, p.name:sub(1, 14), p.pid, p.ramStr, p.swapStr, p.cpu, p.uptime, p.user),
             fn = function() killProcess(p.pid, p.name) end,
         })
     end
