@@ -1,0 +1,24 @@
+{
+  "keys": {
+    "t": {
+      "action": "launch-or-focus",
+      "program": "Terminal"
+    },
+    "g": {
+      "action": "launch-or-focus",
+      "program": "Ghostty"
+    },
+    "s": {
+      "action": "launch-or-focus",
+      "program": "Safari"
+    },
+    "w": {
+      "keys": {
+        "f": { "action": "make-window-full-screen" },
+        "c": { "action": "center-window" },
+        "l": { "action": "lay-out-window", "layout": "left-half" },
+        "r": { "action": "lay-out-window", "layout": "right-half" }
+      }
+    }
+  }
+}
