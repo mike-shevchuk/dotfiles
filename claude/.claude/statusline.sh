@@ -219,7 +219,8 @@ line2+="🪙 ${orange}${used_tokens}/${total_tokens}${reset}"
 
 # Subscription renewal countdown
 renewal_date="2026-04-10"
-renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null)
+renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null || \
+  date -j -f "%Y-%m-%d" "$renewal_date" +%s 2>/dev/null)
 if [ -n "$renewal_epoch" ]; then
   days_left=$(( (renewal_epoch - now_epoch) / 86400 ))
   if [ "$days_left" -le 0 ]; then
@@ -365,13 +366,13 @@ format_reset_time() {
 
   case "$style" in
   time)
-    date -d "@$epoch" +"%l:%M%P" 2>/dev/null | sed 's/^ //'
+    (date -d "@$epoch" +"%l:%M%P" 2>/dev/null || date -r "$epoch" +"%l:%M%P" 2>/dev/null) | sed 's/^ //'
     ;;
   datetime)
-    date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null | sed 's/  / /g; s/^ //'
+    (date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null || date -r "$epoch" +"%b %-d, %l:%M%P" 2>/dev/null) | sed 's/  / /g; s/^ //'
     ;;
   *)
-    date -d "@$epoch" +"%b %-d" 2>/dev/null
+    (date -d "@$epoch" +"%b %-d" 2>/dev/null || date -r "$epoch" +"%b %-d" 2>/dev/null)
     ;;
   esac
 }
@@ -509,7 +510,8 @@ fi
 
 # Convert Unix epoch seconds (from stdin rate_limits) to ISO-like string for iso_to_epoch
 epoch_to_iso() {
-  date -d "@$1" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null
+  date -d "@$1" +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null || \
+    date -r "$1" -u +"%Y-%m-%dT%H:%M:%SZ" 2>/dev/null
 }
 
 if $use_oauth; then
