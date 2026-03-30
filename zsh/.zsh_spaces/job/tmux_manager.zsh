@@ -1,92 +1,58 @@
-# 💡 TMUX Project Manager (Сесії та Демони) з детальним логуванням
+# TMUX Project Manager — pick a project dir with fzf, create/attach a tmux session
 ts() {
-    echo "--- [DEBUG: ts() START] ---"
-
-    # 1. Шляхи для сканування
+    # Directories to scan for projects
     local project_dirs=(
         "$HOME/projects"
         "$HOME/dotfiles"
         "$HOME/work"
     )
-    echo "DEBUG: Scanning directories: ${project_dirs[*]}"
 
-    # 2. Інтерактивний вибір каталогу
+    # Build list: "." (current dir) + top-level subdirs of each project_dir
     local project_list
     project_list=$(
-        echo "."  # Дозволяє створити сесію у поточному каталозі
+        echo "."
         for dir in "${project_dirs[@]}"; do
-             if [ -d "$dir" ]; then
-                 find "$dir" -mindepth 1 -maxdepth 1 -type d
-             fi
+             [ -d "$dir" ] && find "$dir" -mindepth 1 -maxdepth 1 -type d
         done
     )
-    
-    # ПЕРЕВІРКА: Чи fzf отримав список
+
     if [[ -z "$project_list" ]]; then
-        echo "ERROR: Project list is empty. Check if directories exist or if fzf is working."
+        echo "ts: no project directories found" >&2
         return 1
     fi
 
+    # Pick a directory with fzf
     local target_dir
-    target_dir=$(echo "$project_list" | fzf --prompt="Select project directory (ts): " --border --height=40%)
+    target_dir=$(echo "$project_list" | fzf --prompt="Select project: " --border --height=40%)
+    [[ -z "$target_dir" ]] && return 0  # user cancelled
 
-    if [[ -z "$target_dir" ]]; then
-        echo "DEBUG: Selection cancelled by user."
-        echo "--- [DEBUG: ts() END] ---"
-        return 0
-    fi
-    
-    # Обробка вибору поточної директорії
-    if [[ "$target_dir" == "." ]]; then
-        target_dir="$PWD"
-    fi
+    [[ "$target_dir" == "." ]] && target_dir="$PWD"
 
-    echo "DEBUG: Target directory selected: $target_dir"
-
+    # Session name = directory basename (dots replaced with underscores)
     local session_name
-    # Використовуємо ім'я каталогу як назву сесії
     session_name=$(basename "$target_dir" | tr . _)
-    echo "DEBUG: Calculated session name: $session_name"
 
-    # 3. Перевірка існування сесії
+    # If session already exists, just attach to it
     if tmux has-session -t "$session_name" 2>/dev/null; then
-        # СЕСІЯ ІСНУЄ
-        echo "INFO: Session '$session_name' found. Attaching..."
-        tmux switch-client -t "$session_name"
-        echo "--- [DEBUG: ts() END] ---"
+        echo "ts: attaching to existing session '$session_name'"
+        tmux switch-client -t "$session_name" 2>/dev/null || tmux attach-session -t "$session_name"
         return 0
     fi
-    
-    echo "INFO: Session '$session_name' does NOT exist."
 
-    # 4. СЕСІЯ НЕ ІСНУЄ: Перевіряємо наявність скрипта налаштування
+    # Create a new detached session in the target directory
+    tmux new-session -ds "$session_name" -c "$target_dir" -n 'Shell'
+
+    # If a .tmux_setup.sh exists, run it inside the session
     local setup_script="$target_dir/.tmux_setup.sh"
-    echo "DEBUG: Checking for setup script: $setup_script"
-
     if [ -f "$setup_script" ]; then
-        # СЦЕНАРІЙ: Файл налаштування знайдено. Створюємо сесію та запускаємо скрипт.
-        echo "INFO: Setup script found. Creating session and running setup."
-
-        # 5a. Створення нової сесії
-        tmux new-session -ds "$session_name" -c "$target_dir" -n 'Shell'
-        echo "DEBUG: New detached session created: $session_name"
-
-        # 5b. Запуск скрипта налаштування
+        echo "ts: running setup script for '$session_name'"
         tmux send-keys -t "$session_name:0" "zsh $setup_script" C-m
-        echo "DEBUG: Sent command 'zsh $setup_script' to window 0."
-        
-        # 5c. Приєднання
-        tmux attach-session -t "$session_name"
-        echo "INFO: Attached to session '$session_name'."
-        echo "--- [DEBUG: ts() END] ---"
-        return 0
     else
-        # СЦЕНАРІЙ: Файл налаштування не знайдено. НЕ СТВОРЮЄМО сесію.
-        echo "WARNING: No existing session and no .tmux_setup.sh found."
-        echo "INFO: Aborting session creation."
-        echo "--- [DEBUG: ts() END] ---"
-        return 1
+        echo "ts: created basic session '$session_name' (no .tmux_setup.sh found)"
     fi
+
+    # Attach to the new session
+    tmux switch-client -t "$session_name" 2>/dev/null || tmux attach-session -t "$session_name"
 }
 
 

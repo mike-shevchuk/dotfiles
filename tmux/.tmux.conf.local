@@ -1,4 +1,79 @@
-# -- plugins -------------------------------------------------------------------
+# -- .tmux.conf.local ----------------------------------------------------------
+# Local overrides for gpakosz/.tmux base config
+# Sourced automatically by .tmux.conf (line 156)
 
-set -g @plugin 'sandudorogan/tmux-sidebar'
-set -g @plugin 'sainnhe/tmux-fzf'
+
+# -- TPM (Tmux Plugin Manager) ------------------------------------------------
+
+# Auto-install TPM if missing
+if "test ! -d ~/.tmux/plugins/tpm" \
+   "run 'git clone https://github.com/tmux-plugins/tpm ~/.tmux/plugins/tpm && ~/.tmux/plugins/tpm/bin/install_plugins'"
+
+# Plugins
+set -g @plugin 'tmux-plugins/tpm'
+set -g @plugin 'tmux-plugins/tmux-resurrect'
+set -g @plugin 'tmux-plugins/tmux-continuum'
+set -g @plugin 'tmux-plugins/tmux-yank'
+
+
+# -- Session persistence ------------------------------------------------------
+
+# tmux-resurrect
+set -g @resurrect-capture-pane-contents 'on'
+set -g @resurrect-strategy-nvim 'session'
+
+# tmux-continuum (auto-save every 15 min)
+set -g @continuum-restore 'on'
+set -g @continuum-save-interval '15'
+
+
+# -- Status bar (catppuccin-inspired) ------------------------------------------
+
+set -g status-position bottom
+set -g status-justify left
+set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
+
+# Left: session name
+set -g status-left-length 40
+set -g status-left '#[bg=#89b4fa,fg=#1e1e2e,bold] #S #[bg=#1e1e2e] '
+
+# Right: AWS profile | kubectl context | time
+set -g status-right-length 120
+set -g status-right '\
+#[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}\
+#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null),  #(kubectl config current-context) ,}\
+#[fg=#cdd6f4] %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold] %d-%b '
+
+# Window tabs
+set -g window-status-format '#[fg=#6c7086] #I:#W '
+set -g window-status-current-format '#[bg=#313244,fg=#89b4fa,bold] #I:#W '
+set -g window-status-separator ''
+
+# Pane borders
+set -g pane-border-style 'fg=#313244'
+set -g pane-active-border-style 'fg=#89b4fa'
+
+# Message style
+set -g message-style 'bg=#313244 fg=#cdd6f4'
+
+
+# -- DevOps layout bindings ----------------------------------------------------
+
+# prefix + D → 3-pane devops layout (editor top, logs + shell bottom)
+bind D split-window -v -p 30 \; \
+     split-window -h -p 50 \; \
+     select-pane -t 0 \; \
+     display "DevOps layout: editor | logs | shell"
+
+# prefix + C-d → 4-pane quad layout for log tailing
+bind C-d split-window -v -p 50 \; \
+       split-window -h -p 50 \; \
+       select-pane -t 0 \; \
+       split-window -h -p 50 \; \
+       select-pane -t 0 \; \
+       display "Quad layout for log tailing"
+
+
+# -- Initialize TPM (keep at bottom) ------------------------------------------
+
+run '~/.tmux/plugins/tpm/tpm'

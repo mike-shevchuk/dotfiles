@@ -1,7 +1,9 @@
 # SSH Space Loader
 # This file loads SSH-related functions and aliases
 
-SSH_DIR="$HOME/dotfiles/zsh/.zsh_spaces/ssh"
+# Try stow symlink path first (~/.zsh_spaces/ssh/), fall back to repo path for non-stow setups
+SSH_DIR="$HOME/.zsh_spaces/ssh"
+[ ! -d "$SSH_DIR" ] && SSH_DIR="$HOME/dotfiles/zsh/.zsh_spaces/ssh"
 
 # Load all .zsh files in this space (except this loader)
 for file in "$SSH_DIR"/*.zsh; do
