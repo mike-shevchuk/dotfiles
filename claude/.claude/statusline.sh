@@ -63,6 +63,46 @@ build_bar() {
   printf "${bar_color}${filled_str}${dim}${empty_str}${reset}"
 }
 
+# Cross-platform ISO to epoch conversion
+iso_to_epoch() {
+  local iso_str="$1"
+
+  local epoch
+  epoch=$(date -d "${iso_str}" +%s 2>/dev/null)
+  if [ -n "$epoch" ]; then
+    echo "$epoch"
+    return 0
+  fi
+
+  local stripped="${iso_str%%.*}"
+  stripped="${stripped%%Z}"
+  stripped="${stripped%%+*}"
+  stripped="${stripped%%-[0-9][0-9]:[0-9][0-9]}"
+
+  if [[ "$iso_str" == *"Z"* ]] || [[ "$iso_str" == *"+00:00"* ]] || [[ "$iso_str" == *"-00:00"* ]]; then
+    epoch=$(env TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
+  else
+    epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
+  fi
+
+  if [ -n "$epoch" ]; then
+    echo "$epoch"
+    return 0
+  fi
+
+  return 1
+}
+
+# Check if a reset time (ISO string) has already passed
+is_reset_past() {
+  local iso_str="$1"
+  [ -z "$iso_str" ] || [ "$iso_str" = "null" ] && return 1
+  local epoch
+  epoch=$(iso_to_epoch "$iso_str")
+  [ -z "$epoch" ] && return 1
+  [ "$epoch" -le "$now_epoch" ]
+}
+
 # ===== Extract data from JSON =====
 model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 
@@ -281,7 +321,7 @@ get_oauth_token() {
 
 # ===== Usage data (cached) =====
 cache_file="/tmp/claude/statusline-usage-cache.json"
-cache_max_age=60
+cache_max_age=180
 mkdir -p /tmp/claude
 
 needs_refresh=true
@@ -294,8 +334,18 @@ if [ -f "$cache_file" ]; then
     cached_candidate=$(cat "$cache_file" 2>/dev/null)
     # Only use cache if it is valid JSON without an error field
     if echo "$cached_candidate" | jq -e 'has("error") | not' >/dev/null 2>&1; then
-      needs_refresh=false
-      usage_data="$cached_candidate"
+      # Invalidate if 5h reset time has passed (window rolled over, data is stale)
+      _cached_reset=$(echo "$cached_candidate" | jq -r '.five_hour.resets_at // empty')
+      if is_reset_past "$_cached_reset"; then
+        needs_refresh=true
+      else
+        needs_refresh=false
+        usage_data="$cached_candidate"
+        # Record snapshot from cache for recent pace (dedup handles repeated values)
+        _snap_five=$(echo "$cached_candidate" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
+        _snap_seven=$(echo "$cached_candidate" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
+        record_usage_snapshot "$_snap_five" "$_snap_seven"
+      fi
     fi
   fi
 fi
@@ -314,6 +364,10 @@ if $needs_refresh; then
     if [ -n "$response" ] && echo "$response" | jq -e 'has("error") | not' >/dev/null 2>&1; then
       usage_data="$response"
       echo "$response" >"$cache_file"
+      # Record snapshot for recent pace calculation
+      _snap_five=$(echo "$response" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
+      _snap_seven=$(echo "$response" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
+      record_usage_snapshot "$_snap_five" "$_snap_seven"
     fi
   fi
   if [ -z "$usage_data" ] && [ -f "$cache_file" ]; then
@@ -324,36 +378,6 @@ if $needs_refresh; then
     fi
   fi
 fi
-
-# Cross-platform ISO to epoch conversion
-iso_to_epoch() {
-  local iso_str="$1"
-
-  local epoch
-  epoch=$(date -d "${iso_str}" +%s 2>/dev/null)
-  if [ -n "$epoch" ]; then
-    echo "$epoch"
-    return 0
-  fi
-
-  local stripped="${iso_str%%.*}"
-  stripped="${stripped%%Z}"
-  stripped="${stripped%%+*}"
-  stripped="${stripped%%-[0-9][0-9]:[0-9][0-9]}"
-
-  if [[ "$iso_str" == *"Z"* ]] || [[ "$iso_str" == *"+00:00"* ]] || [[ "$iso_str" == *"-00:00"* ]]; then
-    epoch=$(env TZ=UTC date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
-  else
-    epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$stripped" +%s 2>/dev/null)
-  fi
-
-  if [ -n "$epoch" ]; then
-    echo "$epoch"
-    return 0
-  fi
-
-  return 1
-}
 
 format_reset_time() {
   local iso_str="$1"
@@ -375,6 +399,65 @@ format_reset_time() {
     (date -d "@$epoch" +"%b %-d" 2>/dev/null || date -r "$epoch" +"%b %-d" 2>/dev/null)
     ;;
   esac
+}
+
+# ===== Usage snapshot history (for recent pace) =====
+history_file="/tmp/claude/statusline-usage-history.txt"
+
+# Append a snapshot; prune entries older than 24h
+# Deduplicates: skip if last entry has same values and is < 60s old
+record_usage_snapshot() {
+  local five_pct=$1 seven_pct=$2
+  if [ -f "$history_file" ]; then
+    local last_line
+    last_line=$(tail -1 "$history_file")
+    local last_epoch last_five last_seven
+    last_epoch=$(echo "$last_line" | cut -d: -f1)
+    last_five=$(echo "$last_line" | cut -d: -f2)
+    last_seven=$(echo "$last_line" | cut -d: -f3)
+    # Skip if same values and less than 60s ago
+    if [ "$last_five" = "$five_pct" ] && [ "$last_seven" = "$seven_pct" ] && \
+       [ -n "$last_epoch" ] && [ $((now_epoch - last_epoch)) -lt 60 ]; then
+      return
+    fi
+  fi
+  echo "${now_epoch}:${five_pct}:${seven_pct}" >> "$history_file"
+  local cutoff=$((now_epoch - 86400))
+  awk -F: -v c="$cutoff" '$1 >= c' "$history_file" > "${history_file}.tmp" && \
+    mv "${history_file}.tmp" "$history_file"
+}
+
+# Recent pace over a lookback window
+# Usage: calc_recent_pace <current_pct> <window_secs> <lookback_secs> <col>
+# col: 2=five_hour, 3=seven_day
+calc_recent_pace() {
+  local current_pct=$1 window_secs=$2 lookback_secs=$3 col=$4
+  [ ! -f "$history_file" ] && return
+
+  local cutoff=$((now_epoch - lookback_secs))
+  local oldest_line
+  oldest_line=$(awk -F: -v c="$cutoff" '$1 >= c' "$history_file" | head -1)
+  [ -z "$oldest_line" ] && return
+
+  local old_epoch old_pct
+  old_epoch=$(echo "$oldest_line" | cut -d: -f1)
+  old_pct=$(echo "$oldest_line" | cut -d: -f"$col")
+  [ -z "$old_epoch" ] || [ -z "$old_pct" ] && return
+
+  local time_delta=$((now_epoch - old_epoch))
+  # Need at least 2 min AND 10% of lookback window for meaningful rate
+  [ "$time_delta" -lt 120 ] && return
+  local min_span=$((lookback_secs / 10))
+  [ "$min_span" -lt 120 ] && min_span=120
+  [ "$time_delta" -lt "$min_span" ] && return
+
+  awk "BEGIN {
+    delta_pct = $current_pct - $old_pct
+    if (delta_pct < 0) exit  # window reset happened
+    delta_elapsed_pct = ($time_delta / $window_secs) * 100
+    if (delta_elapsed_pct <= 0) exit
+    printf \"%.2f\", delta_pct / delta_elapsed_pct
+  }"
 }
 
 # ===== Pace calculation =====
@@ -401,7 +484,7 @@ calc_pace() {
   awk "BEGIN {
     ep = $elapsed_pct
     if (ep <= 0) { printf \"0.0\"; exit }
-    printf \"%.1f\", $pct / ep
+    printf \"%.2f\", $pct / ep
   }"
 }
 
@@ -459,29 +542,48 @@ calc_remaining() {
   fi
 }
 
-format_pace() {
+# Cold-to-hot color gradient for pace values
+# 0.0–0.4 icy blue, 0.5–0.7 cool cyan, 0.8–1.0 green (sustainable),
+# 1.1–1.5 yellow (warm), 1.6–2.0 orange (hot), 2.0+ red (burning)
+pace_color_for() {
   local pace=$1
-  local remaining=$2
-  local pace_color
-
   local pace_int
   pace_int=$(echo "$pace" | awk '{printf "%.0f", $1 * 10}')
 
   if [ "$pace_int" -le 4 ]; then
-    pace_color="$blue"
+    printf '\033[38;2;80;160;255m'    # icy blue
   elif [ "$pace_int" -le 7 ]; then
-    pace_color="$green"
+    printf '\033[38;2;46;200;200m'    # cool cyan
   elif [ "$pace_int" -le 10 ]; then
-    pace_color="$cyan"
+    printf '\033[38;2;0;200;80m'      # green (sustainable)
+  elif [ "$pace_int" -le 15 ]; then
+    printf '\033[38;2;230;200;0m'     # yellow (warm)
   elif [ "$pace_int" -le 20 ]; then
-    pace_color="$yellow"
+    printf '\033[38;2;255;140;40m'    # orange (hot)
   else
-    pace_color="$red"
+    printf '\033[38;2;255;60;60m'     # red (burning)
+  fi
+}
+
+format_pace() {
+  local pace=$1
+  local remaining=$2
+  local recent_pace=$3
+  local pace_color
+  pace_color=$(pace_color_for "$pace")
+
+  local result="${dim}~${reset}${pace_color}${pace}x${reset}"
+
+  # Show recent pace when available
+  if [ -n "$recent_pace" ]; then
+    local recent_color
+    recent_color=$(pace_color_for "$recent_pace")
+    result+=" ${white}⚡${reset}${recent_color}${recent_pace}x${reset}"
   fi
 
-  local result="${pace_color}${pace}x${reset}"
-
   # Show remaining time when pace > 1.0 (will exhaust before window ends)
+  local pace_int
+  pace_int=$(echo "$pace" | awk '{printf "%.0f", $1 * 10}')
   if [ -n "$remaining" ] && [ "$pace_int" -gt 10 ]; then
     result+=" ${dim}~${remaining} left${reset}"
   fi
@@ -520,28 +622,52 @@ if $use_oauth; then
   # ---- 5-hour (current) ----
   five_hour_pct=$(echo "$usage_data" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
   five_hour_reset_iso=$(echo "$usage_data" | jq -r '.five_hour.resets_at // empty')
-  five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
-  five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
 
-  five_pace=$(calc_pace "$five_hour_pct" "$five_hour_reset_iso" 18000)
-  five_remaining=$(calc_remaining "$five_hour_pct" "$five_pace" 18000 "$five_hour_reset_iso")
-  five_pace_fmt=$(format_pace "$five_pace" "$five_remaining")
+  if is_reset_past "$five_hour_reset_iso"; then
+    five_hour_bar=$(build_bar 0 "$bar_width")
+    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${dim}↻${reset}"
+  else
+    five_hour_reset=$(format_reset_time "$five_hour_reset_iso" "time")
+    five_hour_bar=$(build_bar "$five_hour_pct" "$bar_width")
 
-  line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
-  [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
+    five_pace=$(calc_pace "$five_hour_pct" "$five_hour_reset_iso" 18000)
+    five_remaining=$(calc_remaining "$five_hour_pct" "$five_pace" 18000 "$five_hour_reset_iso")
+    five_recent=$(calc_recent_pace "$five_hour_pct" 18000 1800 2)
+    five_pace_fmt=$(format_pace "$five_pace" "$five_remaining" "$five_recent")
+
+    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
+    [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
+
+    # Suggest throttling when recent 5h pace is very high
+    if [ -n "$five_recent" ]; then
+      _recent_int=$(echo "$five_recent" | awk '{printf "%.0f", $1 * 10}')
+      if [ "$_recent_int" -ge 35 ]; then
+        line3+=" ${yellow}💡/model sonnet${reset}"
+      elif [ "$_recent_int" -ge 25 ]; then
+        line3+=" ${dim}💡effort↓${reset}"
+      fi
+    fi
+  fi
 
   # ---- 7-day: bar + pace ----
   seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
   seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
-  seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
-  seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
 
-  seven_pace=$(calc_pace "$seven_day_pct" "$seven_day_reset_iso" 604800)
-  seven_remaining=$(calc_remaining "$seven_day_pct" "$seven_pace" 604800 "$seven_day_reset_iso")
-  seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining")
+  if is_reset_past "$seven_day_reset_iso"; then
+    seven_day_bar=$(build_bar 0 "$bar_width")
+    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${dim}↻${reset}"
+  else
+    seven_day_reset=$(format_reset_time "$seven_day_reset_iso" "datetime")
+    seven_day_bar=$(build_bar "$seven_day_pct" "$bar_width")
 
-  line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
-  [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
+    seven_pace=$(calc_pace "$seven_day_pct" "$seven_day_reset_iso" 604800)
+    seven_remaining=$(calc_remaining "$seven_day_pct" "$seven_pace" 604800 "$seven_day_reset_iso")
+    seven_recent=$(calc_recent_pace "$seven_day_pct" 604800 60480 3)
+    seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining" "$seven_recent")
+
+    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
+    [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
+  fi
 
   # ---- Extra usage ----
   extra_enabled=$(echo "$usage_data" | jq -r '.extra_usage.is_enabled // false')
@@ -571,7 +697,8 @@ elif $use_stdin_limits; then
 
     five_pace=$(calc_pace "$five_hour_pct" "$five_hour_reset_iso" 18000)
     five_remaining=$(calc_remaining "$five_hour_pct" "$five_pace" 18000 "$five_hour_reset_iso")
-    five_pace_fmt=$(format_pace "$five_pace" "$five_remaining")
+    five_recent=$(calc_recent_pace "$five_hour_pct" 18000 1800 2)
+    five_pace_fmt=$(format_pace "$five_pace" "$five_remaining" "$five_recent")
 
     line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
     [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
@@ -591,7 +718,8 @@ elif $use_stdin_limits; then
 
     seven_pace=$(calc_pace "$seven_day_pct" "$seven_day_reset_iso" 604800)
     seven_remaining=$(calc_remaining "$seven_day_pct" "$seven_pace" 604800 "$seven_day_reset_iso")
-    seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining")
+    seven_recent=$(calc_recent_pace "$seven_day_pct" 604800 60480 3)
+    seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining" "$seven_recent")
 
     line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
     [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
