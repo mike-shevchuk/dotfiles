@@ -13,14 +13,14 @@ local lsp_old = {
     "nvim-lua/plenary.nvim", -- needed for null-ls
     "j-hui/fidget.nvim", -- status UI
     "ray-x/lsp_signature.nvim", -- inline arg hints
-    "folke/neodev.nvim", -- better Lua dev
+    "folke/lazydev.nvim", -- better Lua dev (replaces neodev)
   },
 
   config = function()
     -- === Setup core plugins ===
     require("mason").setup()
     require("fidget").setup()
-    require("neodev").setup({})
+    require("lazydev").setup({})
 
     local lspconfig = require("lspconfig")
     local mason_lspconfig = require("mason-lspconfig")
@@ -33,7 +33,7 @@ local lsp_old = {
     local servers = {
       lua_ls = {},
       pyright = {},
-      tsserver = {},
+      ts_ls = {},
       html = {},
       cssls = {},
       jsonls = {},
@@ -111,7 +111,7 @@ local merg_lsp = {
       "williamboman/mason-lspconfig.nvim",
       "hrsh7th/cmp-nvim-lsp",
       "ray-x/lsp_signature.nvim",
-      "folke/neodev.nvim",
+      "folke/lazydev.nvim",
       "mrjones2014/legendary.nvim", -- or commander.nvim (your choice)
     },
     config = function()
@@ -131,13 +131,13 @@ local merg_lsp = {
           "html",
           "cssls",
           "jsonls",
-          "tsserver",
+          "ts_ls",
           "marksman",
         },
         automatic_installation = true,
       })
 
-      require("neodev").setup({})
+      require("lazydev").setup({})
 
       local capabilities = cmp_nvim_lsp.default_capabilities()
 
@@ -172,8 +172,8 @@ local merg_lsp = {
           },
 
           -- Diagnostics
-          { keys = { "n", "[d" }, cmd = vim.diagnostic.goto_prev, desc = "LSP: Prev Diagnostic" },
-          { keys = { "n", "]d" }, cmd = vim.diagnostic.goto_next, desc = "LSP: Next Diagnostic" },
+          { keys = { "n", "[d" }, cmd = function() vim.diagnostic.jump({ count = -1 }) end, desc = "LSP: Prev Diagnostic" },
+          { keys = { "n", "]d" }, cmd = function() vim.diagnostic.jump({ count = 1 }) end, desc = "LSP: Next Diagnostic" },
           { keys = { "n", "<leader>dl" }, cmd = vim.diagnostic.open_float, desc = "LSP: Show Line Diagnostic" },
         })
       end
