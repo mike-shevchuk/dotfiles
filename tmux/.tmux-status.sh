@@ -59,7 +59,7 @@ claude-state)
     # Capture last 3 lines — look for the input prompt (❯ or >)
     last=$(tmux capture-pane -t "$pane_id" -p -S -3 -E -1 2>/dev/null)
     case "$last" in
-        *❯*|*\>*) printf "waiting" ;;
+        *❯*) printf "waiting" ;;
         *)         printf "working" ;;
     esac
     ;;
