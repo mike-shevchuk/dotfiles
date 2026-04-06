@@ -31,6 +31,7 @@ tmux:
         [tmux-resurrect]="tmux-plugins/tmux-resurrect"
         [tmux-continuum]="tmux-plugins/tmux-continuum"
         [tmux-yank]="tmux-plugins/tmux-yank"
+        [tmux-sidebar]="tmux-plugins/tmux-sidebar"
     )
     for name in "${!plugins[@]}"; do
         if [ ! -d "$plugins_dir/$name" ]; then
@@ -226,6 +227,7 @@ health:
         check_tmux_plugin "tmux-resurrect"  "session save/restore"
         check_tmux_plugin "tmux-continuum"  "auto-save sessions"
         check_tmux_plugin "tmux-yank"       "clipboard integration"
+        check_tmux_plugin "tmux-sidebar"    "file tree sidebar"
     fi
 
     # macOS tools

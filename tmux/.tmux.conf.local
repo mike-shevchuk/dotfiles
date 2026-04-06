@@ -14,6 +14,7 @@ set -g @plugin 'tmux-plugins/tpm'
 set -g @plugin 'tmux-plugins/tmux-resurrect'
 set -g @plugin 'tmux-plugins/tmux-continuum'
 set -g @plugin 'tmux-plugins/tmux-yank'
+set -g @plugin 'tmux-plugins/tmux-sidebar'
 
 
 # -- Session persistence ------------------------------------------------------
@@ -73,6 +74,24 @@ bind C-d split-window -v -p 50 \; \
        split-window -h -p 50 \; \
        select-pane -t 0 \; \
        display "Quad layout for log tailing"
+
+
+# -- Popup windows (tmux 3.2+) ------------------------------------------------
+
+# prefix + g → lazygit
+bind g display-popup -E -w 85% -h 85% "lazygit"
+
+# prefix + y → yazi file manager
+bind y display-popup -E -w 85% -h 85% "yazi"
+
+# prefix + s → dotfiles stow status
+bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
+
+# prefix + T → tmux project switcher (ts)
+bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
+
+# prefix + B → btop system monitor
+bind B display-popup -E -w 85% -h 85% "btop"
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
