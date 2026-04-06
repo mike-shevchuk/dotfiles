@@ -17,7 +17,7 @@ ram)
         total=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
         free_pages=$(vm_stat | awk '/Pages free/ {gsub(/\./,"",$3); print $3}')
         inactive_pages=$(vm_stat | awk '/Pages inactive/ {gsub(/\./,"",$3); print $3}')
-        free_bytes=$(( (free_pages + inactive_pages) * page_size ))
+        free_bytes=$(( (${free_pages:-0} + ${inactive_pages:-0}) * page_size ))
         used_pct=$(awk "BEGIN {printf \"%.0f%%\", (1 - $free_bytes/$total) * 100}")
         printf "%s" "$used_pct"
     else
@@ -25,8 +25,8 @@ ram)
     fi
     ;;
 claude)
-    # Running claude processes
-    count=$(pgrep -f "claude" 2>/dev/null | wc -l | tr -d ' ')
+    # Running claude processes (exact match to avoid false positives)
+    count=$(pgrep -x claude 2>/dev/null | wc -l | tr -d ' ')
     if [ "$count" -gt 0 ]; then
         # 5h usage from cache
         cache="/tmp/claude/statusline-usage-cache.json"
@@ -34,7 +34,7 @@ claude)
             pct=$(jq -r '.five_hour.utilization // empty' "$cache" 2>/dev/null)
             if [ -n "$pct" ] && [ "$pct" != "null" ]; then
                 pct_fmt=$(printf "%.0f" "$pct")
-                printf "%s|%s%%" "$count" "$pct_fmt"
+                printf "%s|5h:%s%%" "$count" "$pct_fmt"
                 exit 0
             fi
         fi
