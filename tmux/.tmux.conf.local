@@ -34,13 +34,16 @@ set -g status-position bottom
 set -g status-justify left
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
 
-# Left: session name
-set -g status-left-length 40
-set -g status-left '#[bg=#89b4fa,fg=#1e1e2e,bold] #S #[bg=#1e1e2e] '
+# Left: prefix indicator + session name + session count
+set -g status-left-length 50
+set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086](#(~/.tmux-status.sh sessions)) '
 
-# Right: AWS profile | kubectl context | time
-set -g status-right-length 120
+# Right: claude | cpu/ram | AWS | kubectl | resurrect | time | date
+set -g status-right-length 160
 set -g status-right '\
+#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7] #(~/.tmux-status.sh claude) ,}\
+#[fg=#94e2d5] #(~/.tmux-status.sh cpu) \
+#[fg=#74c7ec] #(~/.tmux-status.sh ram) \
 #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}\
 #[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null),  #(kubectl config current-context) ,}\
 #[fg=#6c7086] #(readlink ~/.local/share/tmux/resurrect/last 2>/dev/null | sed "s/.*_\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)T\([0-9]\{2\}\)\([0-9]\{2\}\).*/\4:\5/" || echo "?") \
