@@ -91,7 +91,7 @@ bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read 
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
 
 # prefix + j → switch between existing tmux sessions
-bind j display-popup -E -w 50% -h 40% "tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border | xargs -r tmux switch-client -t"
+bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
