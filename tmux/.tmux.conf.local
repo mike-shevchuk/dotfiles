@@ -34,13 +34,16 @@ set -g status-position bottom
 set -g status-justify left
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4'
 
-# Left: session name
-set -g status-left-length 40
-set -g status-left '#[bg=#89b4fa,fg=#1e1e2e,bold] #S #[bg=#1e1e2e] '
+# Left: prefix indicator + session name + session count
+set -g status-left-length 50
+set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086](#(~/.tmux-status.sh sessions)) '
 
-# Right: AWS profile | kubectl context | time
-set -g status-right-length 120
+# Right: claude | cpu/ram | AWS | kubectl | resurrect | time | date
+set -g status-right-length 160
 set -g status-right '\
+#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7] #(~/.tmux-status.sh claude) ,}\
+#[fg=#94e2d5] #(~/.tmux-status.sh cpu) \
+#[fg=#74c7ec] #(~/.tmux-status.sh ram) \
 #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}\
 #[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null),  #(kubectl config current-context) ,}\
 #[fg=#6c7086] #(readlink ~/.local/share/tmux/resurrect/last 2>/dev/null | sed "s/.*_\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)T\([0-9]\{2\}\)\([0-9]\{2\}\).*/\4:\5/" || echo "?") \
@@ -87,8 +90,11 @@ bind y display-popup -E -w 85% -h 85% "yazi"
 # prefix + s → dotfiles stow status
 bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
 
-# prefix + T → tmux project switcher (ts)
+# prefix + T → tmux project switcher (ts — create/attach session from project dirs)
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
+
+# prefix + j → switch between existing tmux sessions
+bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
