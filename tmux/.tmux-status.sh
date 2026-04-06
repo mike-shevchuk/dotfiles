@@ -44,4 +44,23 @@ claude)
 sessions)
     tmux list-sessions 2>/dev/null | wc -l | tr -d ' '
     ;;
+claude-state)
+    # Detect claude state in a specific pane: working / waiting / none
+    # Usage: .tmux-status.sh claude-state %<pane_id>
+    pane_id="$2"
+    [ -z "$pane_id" ] && printf "none" && exit 0
+
+    fg=$(tmux display-message -t "$pane_id" -p '#{pane_current_command}' 2>/dev/null)
+    if [ "$fg" != "claude" ]; then
+        printf "none"
+        exit 0
+    fi
+
+    # Capture last 3 lines — look for the input prompt (❯ or >)
+    last=$(tmux capture-pane -t "$pane_id" -p -S -3 -E -1 2>/dev/null)
+    case "$last" in
+        *❯*|*\>*) printf "waiting" ;;
+        *)         printf "working" ;;
+    esac
+    ;;
 esac
