@@ -56,3 +56,18 @@ mise-ls:
 # Показати доступні версії neovim
 nvim-versions:
     @mise ls-remote neovim | tail -20
+
+# Встановити ruff (Python linter+formatter) через mise
+ruff-install:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v mise >/dev/null 2>&1; then
+        echo "mise не знайдено. Спочатку: just mise-install"
+        exit 1
+    fi
+    echo "Встановлюю ruff через mise..."
+    mise install ruff
+    mise use -g ruff
+    echo ""
+    echo "Готово! ruff $(ruff --version)"
+    echo "Замінює: black, flake8, isort, pyflakes, pycodestyle"

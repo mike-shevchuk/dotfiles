@@ -75,6 +75,17 @@ bind C-d split-window -v -p 50 \; \
        display "Quad layout for log tailing"
 
 
+# -- Claude Code layout --------------------------------------------------------
+
+# prefix + C → 3-pane Claude Code layout (nvim top, claude + shell bottom)
+bind C split-window -v -p 35 \; \
+     split-window -h -p 50 \; \
+     select-pane -t 1 \; \
+     send-keys 'claude' Enter \; \
+     select-pane -t 0 \; \
+     display "Claude layout: nvim | claude code | shell"
+
+
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
 run '~/.tmux/plugins/tpm/tpm'
