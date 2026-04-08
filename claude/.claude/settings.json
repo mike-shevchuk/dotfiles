@@ -48,7 +48,9 @@
     "playwright@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
     "huggingface-skills@claude-plugins-official": true,
-    "claude-md-management@claude-plugins-official": true
+    "claude-md-management@claude-plugins-official": true,
+    "telegram@claude-plugins-official": true,
+    "linear@claude-plugins-official": true
   },
   "effortLevel": "high",
   "voiceEnabled": true

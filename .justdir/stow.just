@@ -27,6 +27,27 @@ tmux:
             git clone --depth 1 "https://github.com/${plugins[$name]}" "$plugins_dir/$name"
         fi
     done
+    # opensessions: clone + install deps + apply patches
+    os_dir="$plugins_dir/opensessions"
+    if [ ! -d "$os_dir" ]; then
+        echo "  installing opensessions..."
+        git clone "https://github.com/Ataraxy-Labs/opensessions.git" "$os_dir"
+    fi
+    if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
+        BUN="${HOME}/.bun/bin/bun"
+        (cd "$os_dir" && "$BUN" install --frozen-lockfile 2>/dev/null || "$BUN" install 2>/dev/null) >/dev/null
+    fi
+    chmod +x "$os_dir"/integrations/tmux-plugin/scripts/*.sh 2>/dev/null || true
+    # Apply local patches
+    for patch in "{{justfile_directory()}}"/tmux/patches/*.patch; do
+        [ -f "$patch" ] || continue
+        if ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+            echo "  patch already applied: $(basename "$patch")"
+        else
+            git -C "$os_dir" apply "$patch"
+            echo "  applied: $(basename "$patch")"
+        fi
+    done
     echo "tmux config and plugins ready"
 
 # Kitty terminal config

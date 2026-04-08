@@ -138,6 +138,8 @@ health:
         check_tmux_plugin "tmux-continuum"  "auto-save sessions"
         check_tmux_plugin "tmux-yank"       "clipboard integration"
         check_tmux_plugin "tmux-sidebar"    "file tree sidebar"
+        check_tmux_plugin "opensessions"    "session sidebar + agent status"
+        check "bun"               bun          optional  "opensessions runtime"       "curl -fsSL https://bun.sh/install | bash"
     fi
 
     # macOS tools
