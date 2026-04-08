@@ -1,35 +1,125 @@
 # Dotfiles
 
-macOS + Linux dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/).
+macOS + Linux dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow/) and [just](https://github.com/casey/just).
 
 ## Quick Start
 
 ```bash
 cd ~/dotfiles
 
-# Symlink a package (e.g. zsh configs → ~/.zshrc, ~/.zsh_zinit, etc.)
-stow zsh
+# Setup everything on a new machine
+just setup
 
-# Symlink everything
-stow kitty yazi zsh tmux hammerspoon
+# Or stow individual packages
+just zsh
+just tmux
+just lz
 
-# Dry run — see what would be linked without changing anything
-stow --dry-run -v zsh
+# Check system health
+just health
+
+# See all available commands
+just
 ```
 
 ## Packages
 
 | Package | Stows to | What |
 |---------|----------|------|
+| `claude` | `~/.claude/` | Claude Code settings, hooks, sounds, statusline |
 | `zsh` | `~/.zshrc`, `~/.zsh_zinit`, `~/.zsh_spaces/` | ZSH config, zinit plugins, spaces (job/ssh modules) |
 | `tmux` | `~/.tmux.conf`, `~/.tmux.conf.local` | tmux base config + local overrides with TPM |
 | `kitty` | `~/.config/kitty/` | Kitty terminal config |
-| `hammerspoon` | `~/.hammerspoon/` | Hammerspoon window mgmt, launchers, tools |
+| `lz` | `~/.config/LazyVIM/` | LazyVIM neovim config (primary IDE) |
+| `tnv` | `~/.config/TNVIM/` | TNVIM neovim config (lightweight) |
+| `pnv` | `~/.config/PWNVIM/` | PWNVIM neovim config |
 | `yazi` | `~/.config/yazi/` | Yazi file manager config |
+| `todoist` | `~/.config/todoist/` | Todoist config |
+| `fonts` | `~/.local/share/fonts/` | Nerd fonts |
+| `hammerspoon` | `~/.hammerspoon/` | Hammerspoon window mgmt, launchers (macOS) |
 | `hyperland` | `~/.config/hypr/` | Hyprland WM config (Linux) |
-| `lz` | `~/.config/LazyVIM/` | LazyVIM neovim config |
-| `tnv` | `~/.config/tnvim/` | TNVIM neovim config |
-| `pnv` | `~/.config/pwnvim/` | PWNVIM neovim config |
+
+## Justfile Structure
+
+Justfile is modular — recipes split into `.justdir/`:
+
+```
+justfile                   # core: setup, migrate, install-deps
+.justdir/
+  stow.just                # all stow package recipes + all + remove
+  health.just              # status + health diagnostics
+  mise.just                # mise tool manager + nvim/ruff install
+```
+
+### Key Commands
+
+| Command | What |
+|---------|------|
+| `just setup` | Install deps + stow core packages |
+| `just health` | Check all dependencies |
+| `just status` | Show stow status of all packages |
+| `just all` | Stow everything |
+| `just remove <pkg>` | Unstow a package |
+| `just migrate` | Remove manual symlinks (one-time) |
+
+---
+
+## Mise (Tool Version Manager)
+
+[mise](https://mise.jdx.dev) manages tool versions (like pyenv/nvm but for everything).
+
+### Commands
+
+| Command | What |
+|---------|------|
+| `just mise-install` | Install mise |
+| `just nvim-install` | Install Neovim 0.12 via mise |
+| `just nvim-install 0.11.3` | Install specific version |
+| `just nvim-versions` | Show available neovim versions |
+| `just ruff-install` | Install ruff (Python linter+formatter) |
+| `just mise-ls` | Show all installed tools |
+
+### Mise Cheatsheet
+
+```bash
+mise install <tool>@<ver>    # install a version
+mise use <tool>@<ver>        # install + pin in .mise.toml (project-local)
+mise use -g <tool>@<ver>     # install + set global default
+mise ls                      # list installed tools
+mise ls-remote <tool>        # list available versions
+mise current                 # show active versions
+mise up                      # upgrade all tools
+mise prune                   # remove unused versions
+mise rm <tool>               # remove tool completely
+```
+
+mise auto-switches versions per directory via `.mise.toml`.
+
+---
+
+## Claude Code
+
+Claude Code CLI with custom hooks, statusline, and sound notifications.
+
+### Hooks
+
+| Hook | Trigger | Action |
+|------|---------|--------|
+| Notification | Claude sends notification | Sound + OS notification |
+| Stop | Chat response finished | Sound + message preview |
+| SubagentStop | Subagent completes | Sound + agent type info |
+
+### Statusline (3 lines)
+
+1. **Git status** — repo, branch, dirty state, ahead/behind, last commit age
+2. **Model + tokens** — model name, PR number, token usage, subscription countdown
+3. **Rate limits** — 5h/7d windows with progress bars, pace multiplier, reset times
+
+### Settings
+
+- Effort level: high
+- Voice: enabled
+- Plugins: context7, code-review, code-simplifier, playwright, superpowers, huggingface, claude-md-management
 
 ---
 
@@ -68,7 +158,7 @@ Prefix is `C-a` (ctrl+a).
 | `prefix p` | Paste buffer |
 | `prefix P` | Choose buffer |
 
-### Plugins (TPM — via `.tmux.conf.local`)
+### Plugins (TPM)
 
 | Plugin | What |
 |--------|------|
@@ -78,25 +168,93 @@ Prefix is `C-a` (ctrl+a).
 
 Install plugins: `prefix + I`
 
-### DevOps Layouts
+### Layouts
 
 | Key | Layout |
 |-----|--------|
 | `prefix D` | 3-pane: editor top, logs + shell bottom |
 | `prefix C-d` | 4-pane quad: for log tailing |
+| `prefix C` | 3-pane Claude Code: nvim top, claude + shell bottom |
 
-### Session Manager (`ts`)
+### Session Manager (`tma`)
 
 ```bash
-ts    # fzf-pick a project dir → create/attach tmux session
-      # if .tmux_setup.sh exists in the dir, it runs automatically
+tma    # fzf-pick a tmux session to attach
 ```
 
 ---
 
-## Hammerspoon Cheatsheet
+## Neovim (LazyVIM)
 
-All hotkeys use **Alt+Shift** as modifier (referred to as `hyper` below).
+Primary config: `lz` package. Requires Neovim 0.12+.
+
+### LSP Servers
+
+| Server | Language |
+|--------|----------|
+| `lua_ls` | Lua |
+| `pyright` | Python (types) |
+| `ruff` | Python (lint + format, replaces flake8+black) |
+| `ts_ls` | TypeScript/JavaScript |
+| `html` | HTML |
+| `cssls` | CSS |
+| `jsonls` | JSON |
+| `yamlls` | YAML |
+| `bashls` | Bash |
+| `dockerls` | Docker |
+| `marksman` | Markdown |
+
+### Python Toolchain
+
+- **ruff** — primary linter + formatter (fast, Rust-based)
+- **black** — fallback formatter (commented in config)
+- **flake8** — fallback linter (commented in config)
+
+Switch by uncommenting in `lz/.config/LazyVIM/lua/plugins/lsp.lua`.
+
+### Key Plugins
+
+| Plugin | What |
+|--------|------|
+| `nvim-lspconfig` + `mason` | LSP auto-setup |
+| `nvim-cmp` | Completion engine |
+| `telescope.nvim` | Fuzzy finder |
+| `neo-tree.nvim` | File explorer |
+| `windsurf.nvim` | AI code completion |
+| `codecompanion.nvim` | AI chat (GPT-4o) |
+| `diffview.nvim` | Git diff viewer |
+| `noice.nvim` | UI enhancements |
+| `lualine.nvim` | Status bar with system monitor |
+| `treesitter` | Syntax highlighting |
+
+### LSP Keybindings
+
+| Key | Action |
+|-----|--------|
+| `K` | Hover |
+| `<leader>gd` | Go to definition |
+| `<leader>gD` | Go to declaration |
+| `<leader>gi` | Go to implementation |
+| `<leader>gr` | Find references |
+| `<leader>ca` | Code action |
+| `<leader>rn` | Rename symbol |
+| `<leader>lf` | Format file |
+| `[d` / `]d` | Prev / next diagnostic |
+| `<leader>dl` | Show line diagnostic |
+
+### Switching Configs
+
+```bash
+NVIM_APPNAME=LazyVIM nvim    # LazyVIM (full IDE)
+NVIM_APPNAME=TNVIM nvim      # TNVIM (lightweight)
+NVIM_APPNAME=PWNVIM nvim     # PWNVIM
+```
+
+---
+
+## Hammerspoon Cheatsheet (macOS)
+
+All hotkeys use **Alt+Shift** (`hyper`).
 
 ### App Launchers
 
@@ -106,7 +264,7 @@ All hotkeys use **Alt+Shift** as modifier (referred to as `hyper` below).
 | `hyper + G` | Toggle Ghostty |
 | `hyper + B` | Toggle Thorium |
 | `hyper + S` | Toggle Safari |
-| `hyper + Space` | Command palette (fuzzy app launcher) |
+| `hyper + Space` | Command palette |
 
 ### Window Management
 
@@ -115,91 +273,51 @@ All hotkeys use **Alt+Shift** as modifier (referred to as `hyper` below).
 | `hyper + Left/Right` | Left / right half |
 | `hyper + Up` | Maximize |
 | `hyper + Down` | Center |
-| `ctrl+alt+shift + Left/Right` | Left / right third |
-| `ctrl+alt+shift + Up/Down` | Left / right two-thirds |
-| `hyper + [` / `]` | Move window to left / right screen |
+| `hyper + [` / `]` | Move to left / right screen |
 
 ### Tools
 
 | Key | Action |
 |-----|--------|
 | `hyper + V` | Clipboard history |
-| `hyper + K` | Paste bypass (type clipboard to defeat paste-blockers) |
-| `hyper + J` | Scratchpad (floating notepad) |
-| `hyper + Z` | Zettelkasten notetaker |
-| `hyper + Q` | URL bookmarks |
-| `hyper + W` | Pomodoro timer |
+| `hyper + K` | Paste bypass |
+| `hyper + J` | Scratchpad |
+| `hyper + Z` | Zettelkasten |
+| `hyper + W` | Pomodoro |
 | `hyper + A` | Screenshot + annotate |
-| `hyper + E` | Linear tasks widget |
-| `hyper + D` | Brightness sliders |
-| `hyper + F` | Mouse finder (flash crosshair) |
-
-### System
-
-| Key | Action |
-|-----|--------|
-| `hyper + L` | Toggle dark mode |
-| `hyper + T` | Empty trash |
-| `hyper + P` | Toggle pinch zoom |
-| `hyper + M` | Toggle mute |
-| `hyper + I` | Pick main display |
-| `hyper + N` | Toggle mirror/extend displays |
-| `hyper + H` | Hammerspoon console |
 | `hyper + R` | Reload config |
-
-Menubar: hammer icon = enabled, stop icon = all hotkeys disabled (guard toggle).
 
 ---
 
-## ZSH Cheatsheet
+## ZSH
 
 ### Spaces Architecture
 
-ZSH config is split into "spaces" loaded from `~/.zsh_spaces/`:
+ZSH config split into "spaces" loaded from `~/.zsh_spaces/`:
 
 - **job/** — work tools: AWS logs, git helpers, tmux manager, project auto-env
 - **ssh/** — SSH utilities
 
-### Job Space — AWS Logs
+### Project Auto-Environment
 
-| Command | Action |
-|---------|--------|
-| `bb_aws_logs` | Interactive log stream picker with fzf preview |
-| `bb_aws_logs_flow` | Live tail with ARN resolution |
-| `bb_aws_fast_api` | Quick logs: fast-api lambda |
-| `bb_aws_extractor` | Quick logs: data extractor lambda |
-| `bb_aws_processor` | Quick logs: data processor lambda |
-| `bb_aws_notify` | Quick logs: notification processor |
-| `bb_aws_mqtt` | Quick logs: MQTT worker |
-| `bb_aws_list` | List all configured log streams |
-| `bb_aws_since <time>` | Set default time range (10m, 1h, 2d) |
+Auto-activates on `cd` based on marker files:
 
-Inside fzf log viewer: `ctrl+e` open in nvim, `ctrl+f` filter ERRORs, `ctrl+w` filter WARNs, `ctrl+i` filter INFOs.
-
-### Job Space — Git
-
-| Command | Action |
-|---------|--------|
-| `bb_git_push_origin [branch]` | Push branch with `-u` (fzf picker if no arg) |
-
-### Job Space — Project Auto-Environment
-
-Auto-activates on `cd` based on marker files in the directory:
-
-| Marker file | Action |
-|-------------|--------|
-| `.venv/` | Activate Python virtualenv (deactivate on leave) |
-| `.aws-profile` | Set `AWS_PROFILE` from file contents |
+| Marker | Action |
+|--------|--------|
+| `.venv/` | Activate Python virtualenv |
+| `.aws-profile` | Set `AWS_PROFILE` |
 | `.docker-context` | Switch docker context |
 | `.kube-context` | Switch kubectl context |
 
-### SSH Utilities
+### AWS Log Viewer
 
-| Command | Action |
-|---------|--------|
-| `ssh-add-all` | Add all private keys from `~/.ssh/` |
-| `ssh-tunnel <host> <port> [remote]` | Quick SSH port forward |
-| `ssh-hosts` | fzf picker from `~/.ssh/config` |
+```bash
+bb_aws_logs        # Interactive log stream picker with fzf
+bb_aws_logs_flow   # Live tail with ARN resolution
+bb_aws_since 1h    # Set default time range
+```
+
+Inside fzf: `ctrl+e` open in nvim, `ctrl+f` filter ERRORs, `ctrl+w` WARNs, `ctrl+i` INFOs.
 
 ---
 
@@ -207,98 +325,50 @@ Auto-activates on `cd` based on marker files in the directory:
 
 Prefix is `ctrl+a`.
 
-### Splits & Windows
+### Splits & Tabs
 
 | Key | Action |
 |-----|--------|
 | `ctrl+a s` | Split horizontal |
 | `ctrl+a v` | Split vertical |
-| `ctrl+a x` | Close pane (confirm) |
-| `ctrl+a z` | Toggle zoom (stack layout) |
+| `ctrl+a x` | Close pane |
+| `ctrl+a z` | Toggle zoom |
 | `ctrl+h/j/k/l` | Navigate panes |
-| `ctrl+a shift+h/j/k/l` | Move pane |
-| `ctrl+shift+h/j/k/l` | Resize pane |
-
-### Tabs
-
-| Key | Action |
-|-----|--------|
 | `ctrl+a n` | New tab |
-| `ctrl+a ,` | Rename tab |
-| `ctrl+a !` | Detach pane to new tab |
 | `cmd+1-9` | Go to tab N |
-| `cmd+[` / `]` | Previous / next tab |
-| `ctrl+q` | Last tab |
 
 ### Scrollback
 
 | Key | Action |
 |-----|--------|
-| `alt+j` / `k` | Scroll down / up |
-| `alt+i` / `u` | Page up / down |
-| `alt+shift+k` / `j` | Jump to prev / next prompt |
+| `alt+j/k` | Scroll down/up |
 | `ctrl+a Enter` | Open scrollback in nvim |
 | `ctrl+a k` | Last command output in nvim |
 | `ctrl+a /` | Search scrollback in nvim |
-
-### Copy / Paste
-
-| Key | Action |
-|-----|--------|
-| `cmd+c` | Copy last command output |
-| `cmd+v` | Paste |
-| `cmd+shift+c` | Copy selection |
 
 ---
 
 ## Yazi Cheatsheet
 
-### Navigation
-
 | Key | Action |
 |-----|--------|
-| `h` / `l` | Parent dir / open |
-| `j` / `k` | Down / up |
-| `gg` / `G` | First / last |
-| `ctrl+d` / `u` | Page down / up |
+| `h/l` | Parent dir / open |
+| `j/k` | Down / up |
 | `/` | Search |
-| `n` / `N` | Next / previous match |
-| `.` | Toggle hidden files |
-
-### File Operations
-
-| Key | Action |
-|-----|--------|
-| `a` | Create file |
-| `A` | Create directory |
+| `.` | Toggle hidden |
+| `a` / `A` | Create file / directory |
 | `r` | Rename |
 | `dd` | Delete |
-| `yy` | Yank (copy) |
-| `pp` | Paste |
-| `x` | Cut |
-| `u` / `U` | Undo / redo |
-| `z` / `Z` | Zip / unzip |
-| `yw` | Copy filename |
+| `yy` / `pp` | Copy / paste |
 | `yp` | Copy absolute path |
-| `ss` | Create symlink |
-
-### Tabs & Panes
-
-| Key | Action |
-|-----|--------|
 | `T` | New tab |
-| `gt` / `gT` | Next / previous tab |
-| `ctrl+h/j/k/l` | Focus pane |
-| `tab` | Toggle preview |
 | `q` | Quit |
 
 ---
 
-## Hyprland Cheatsheet
+## Hyprland Cheatsheet (Linux)
 
 Super = Windows/Meta key.
-
-### Core
 
 | Key | Action |
 |-----|--------|
@@ -306,59 +376,8 @@ Super = Windows/Meta key.
 | `Super+D` | App launcher (rofi) |
 | `Super+Q` | Kill window |
 | `Super+F` | Fullscreen |
-| `Super+Shift+F` | Toggle floating |
-| `Super+E` | Quick edit Hyprland config |
-
-### Navigation
-
-| Key | Action |
-|-----|--------|
-| `Super+Left/Right/Up/Down` | Focus window |
 | `Super+1-0` | Switch workspace |
-| `Super+Tab` / `Shift+Tab` | Next / previous workspace |
-| `Alt+Tab` | Cycle group |
-| `Super+U` | Toggle special workspace |
-
-### Window Management
-
-| Key | Action |
-|-----|--------|
 | `Super+Shift+Left/Right/Up/Down` | Resize window |
 | `Super+Ctrl+Left/Right/Up/Down` | Move window |
-| `Super+Shift+1-0` | Move window to workspace |
-| `Super+G` | Toggle group |
-| `Super+M` | Split ratio |
-| `Super+LMB drag` | Move window |
-| `Super+RMB drag` | Resize window |
-
-### Utilities
-
-| Key | Action |
-|-----|--------|
 | `Super+Print` | Screenshot |
-| `Super+Shift+S` | Screenshot area (swappy) |
-| `Ctrl+Alt+L` | Lock screen |
-| `Ctrl+Alt+P` | Logout menu |
-| `Super+B` | Toggle waybar |
-| `Super+W` | Wallpaper selector |
-| `Super+Alt+V` | Clipboard manager |
-| `Super+H` | Key hints |
-
----
-
-## Neovim Configs
-
-Three configs available, switchable via `NVIM_APPNAME`:
-
-```bash
-# LazyVIM (default full IDE)
-NVIM_APPNAME=LazyVIM nvim
-
-# TNVIM (lightweight)
-NVIM_APPNAME=tnvim nvim
-
-# PWNVIM
-NVIM_APPNAME=pwnvim nvim
-```
-
-Stow packages: `lz` (LazyVIM), `tnv` (TNVIM), `pnv` (PWNVIM).
+| `Super+Shift+S` | Screenshot area |

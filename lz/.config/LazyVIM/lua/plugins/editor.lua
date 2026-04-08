@@ -25,13 +25,7 @@ local diffview = {
 local macros = {
   "ecthelionvi/NeoComposer.nvim",
   dependencies = { "kkharji/sqlite.lua" },
-  config = function()
-    require("NeoComposer").setup()
-
-    local cmp = require("cmp")
-
-    cmp.setup({})
-  end,
+  opts = {},
 }
 
 local dfview = {
