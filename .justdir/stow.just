@@ -19,6 +19,7 @@ tmux:
         [tmux-resurrect]="tmux-plugins/tmux-resurrect"
         [tmux-continuum]="tmux-plugins/tmux-continuum"
         [tmux-yank]="tmux-plugins/tmux-yank"
+        [tmux-sidebar]="tmux-plugins/tmux-sidebar"
     )
     for name in "${!plugins[@]}"; do
         if [ ! -d "$plugins_dir/$name" ]; then

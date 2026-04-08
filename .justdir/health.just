@@ -137,6 +137,7 @@ health:
         check_tmux_plugin "tmux-resurrect"  "session save/restore"
         check_tmux_plugin "tmux-continuum"  "auto-save sessions"
         check_tmux_plugin "tmux-yank"       "clipboard integration"
+        check_tmux_plugin "tmux-sidebar"    "file tree sidebar"
     fi
 
     # macOS tools
