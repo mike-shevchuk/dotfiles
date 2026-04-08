@@ -20,6 +20,7 @@ local pomodoro    = require("modules.pomodoro")
 local screenshot  = require("modules.screenshot")
 local dropdown    = require("modules.dropdown")
 local linear      = require("modules.linear")
+local todoist     = require("modules.todoist")
 local bookmarks   = require("modules.bookmarks")
 local sysmonitor  = require("modules.sysmonitor")
 
@@ -108,10 +109,33 @@ guard.bind(hyper, "W", pomodoro.toggle)
 -- A = capture area, annotate with arrows/rects/text, copy
 guard.bind(hyper, "A", screenshot.capture)
 
--- ─── Linear Widget ──────────────────────────────────────────────
--- E = toggle Linear tasks widget on desktop
+-- ─── Task Widgets (Linear + Todoist) ────────────────────────────
+-- Menubar: "Tasks" dropdown to toggle/switch individual widgets
+-- E = toggle both widgets at once
 linear.start()
-guard.bind(hyper, "E", linear.toggle)
+todoist.start(linear)
+guard.bind(hyper, "E", function()
+  linear.toggle()
+  todoist.toggle()
+end)
+
+-- ─── Show Desktop ───────────────────────────────────────────────
+-- C = toggle show desktop (minimize all / restore all)
+local _minimizedWindows = {}
+guard.bind(hyper, "C", function()
+  if #_minimizedWindows > 0 then
+    -- Restore previously minimized windows
+    for _, w in ipairs(_minimizedWindows) do
+      if w:isMinimized() then w:unminimize() end
+    end
+    _minimizedWindows = {}
+  else
+    -- Minimize all visible windows
+    local wins = hs.window.orderedWindows()
+    _minimizedWindows = wins
+    for _, w in ipairs(wins) do w:minimize() end
+  end
+end)
 
 -- ─── System Monitor ────────────────────────────────────────────
 -- Menubar: RAM% | pomodoro | caffeine, click for processes + controls

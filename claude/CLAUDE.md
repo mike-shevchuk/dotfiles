@@ -14,6 +14,11 @@
 - Project-specific notes: `~/zettelkasten/claude_code/rescue-serverless/` with subdirs (alerts/, architecture/, models/, signals/)
 - Do NOT write to `~/zettelkasten/b2b/rescue/` (legacy manual notes)
 
+# Python linting
+
+- Use `ruff check --fix <file>` for Python syntax/lint checks, NOT `python3 -c "import ast; ast.parse(...)"`.
+- A PostToolUse hook runs `ruff --fix` automatically after every Edit/Write on `.py` files — trust it for syntax validation.
+
 # Private extensions
 
 If `~/zetelekasten/claude_code/CLAUDE.md` exists, read and follow the instructions there as well. It contains private project context and knowledge.

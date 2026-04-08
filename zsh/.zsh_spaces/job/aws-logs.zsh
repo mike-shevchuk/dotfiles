@@ -8,6 +8,7 @@ AWS_LOG_STREAMS=(
     "/aws/apprunner/dev-rescue-serverless-mqtt-worker/6ce023ee88034697b34d2452f9b98a2a/application"
     "/aws/lambda/dev-rescue-serverless-fast-api"
     "/aws/lambda/dev-rescue-serverless-notify-integration"
+    "/aws/lambda/dev-rescue-serverless-declare-notify-emergency-worker"
     "/aws/lambda/dev-rescue-serverless-particle-webhook"
     "/aws/lambda/dev-rescue-serverless-mqtt-webhook"
     "/aws/lambda/dev-rescue-serverless-rapidsos-integration"
