@@ -134,11 +134,10 @@ health:
     }
     if command -v tmux >/dev/null 2>&1; then
         check_tmux_plugin "tpm"             "plugin manager"
-        check_tmux_plugin "tmux-resurrect"  "session save/restore"
-        check_tmux_plugin "tmux-continuum"  "auto-save sessions"
         check_tmux_plugin "tmux-yank"       "clipboard integration"
         check_tmux_plugin "tmux-sidebar"    "file tree sidebar"
         check_tmux_plugin "opensessions"    "session sidebar + agent status"
+        # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
         check "bun"               bun          optional  "opensessions runtime"       "curl -fsSL https://bun.sh/install | bash"
     fi
 

@@ -16,11 +16,12 @@ tmux:
     plugins_dir="$HOME/.tmux/plugins"
     plugins="
         tpm=tmux-plugins/tpm
-        tmux-resurrect=tmux-plugins/tmux-resurrect
-        tmux-continuum=tmux-plugins/tmux-continuum
         tmux-yank=tmux-plugins/tmux-yank
         tmux-sidebar=tmux-plugins/tmux-sidebar
     "
+    # Disabled plugins (uncomment in .tmux.conf.local to re-enable):
+    #   tmux-resurrect=tmux-plugins/tmux-resurrect  — session save/restore across reboots
+    #   tmux-continuum=tmux-plugins/tmux-continuum   — auto-saves sessions every N min
     for entry in $plugins; do
         name="${entry%%=*}"
         repo="${entry#*=}"

@@ -1,0 +1,192 @@
+diff --git a/apps/tui/src/index.tsx b/apps/tui/src/index.tsx
+index a6f931b..aacf580 100644
+--- a/apps/tui/src/index.tsx
++++ b/apps/tui/src/index.tsx
+@@ -788,6 +788,28 @@ function App() {
+         }
+         break;
+       }
++      case "w": {
++        const data = focusedData();
++        if (!data || !data.windowList || data.windowList.length <= 1) break;
++        const currentIdx = data.windowList.findIndex((w) => w.active);
++        const nextIdx = (currentIdx + 1) % data.windowList.length;
++        const nextWin = data.windowList[nextIdx];
++        if (nextWin) {
++          send({ type: "switch-window", session: data.name, windowIndex: nextWin.index });
++        }
++        break;
++      }
++      case "W": {
++        const data = focusedData();
++        if (!data || !data.windowList || data.windowList.length <= 1) break;
++        const currentIdx = data.windowList.findIndex((w) => w.active);
++        const prevIdx = (currentIdx - 1 + data.windowList.length) % data.windowList.length;
++        const prevWin = data.windowList[prevIdx];
++        if (prevWin) {
++          send({ type: "switch-window", session: data.name, windowIndex: prevWin.index });
++        }
++        break;
++      }
+       case "n":
+       case "c":
+         createNewSession();
+@@ -930,6 +952,9 @@ function App() {
+                   threadName: agent.threadName,
+                 });
+               }}
++              onSelectWindow={(windowIndex) => {
++                send({ type: "switch-window", session: data().name, windowIndex });
++              }}
+               isResizeHover={isDetailResizeHover()}
+               isResizing={isDetailResizing()}
+               onResizeStart={beginDetailResize}
+@@ -965,6 +990,7 @@ function App() {
+             <span style={{ fg: P().overlay1 }}>{" agents  "}</span>
+             <span style={{ fg: P().overlay0 }}>{"f"}</span>
+             <span style={{ fg: P().overlay1 }}>{" filter  "}</span>
++            <span style={{ attributes: DIM }}>{"w"}</span>{" win  "}
+             <span style={{ fg: P().overlay0 }}>{"d"}</span>
+             <span style={{ fg: P().overlay1 }}>{" hide  "}</span>
+             <span style={{ fg: P().overlay0 }}>{"x"}</span>
+@@ -1207,6 +1233,7 @@ interface DetailPanelProps {
+   focusedAgentIdx: number;
+   onDismissAgent: (agent: SessionData["agents"][number]) => void;
+   onFocusAgentPane: (agent: SessionData["agents"][number]) => void;
++  onSelectWindow: (windowIndex: number) => void;
+   isResizeHover: boolean;
+   isResizing: boolean;
+   onResizeStart: (event: MouseEvent) => void;
+@@ -1282,6 +1309,21 @@ function DetailPanel(props: DetailPanelProps) {
+         <span style={{ fg: P().overlay0, attributes: DIM }}>{truncDir()}</span>
+       </text>
+ 
++      {/* Windows — compact row */}
++      <Show when={(props.session.windowList?.length ?? 0) > 1}>
++        <box flexDirection="row" flexWrap="wrap">
++          <For each={props.session.windowList}>
++            {(win) => (
++              <text flexShrink={0} onMouseDown={() => props.onSelectWindow(win.index)}>
++                <span style={{ fg: win.active ? P().green : P().overlay0, attributes: win.active ? BOLD : undefined }}>
++                  {win.active ? "▸" : " "}{win.index}:{win.name}{"  "}
++                </span>
++              </text>
++            )}
++          </For>
++        </box>
++      </Show>
++
+       {/* Agent instances */}
+       <Show when={hasAgents()}>
+         <For each={agents()}>
+@@ -1659,6 +1701,7 @@ function SessionCard(props: SessionCardProps) {
+         </box>
+       </box>
+ 
++
+       {/* Breathing room — 1 empty line between cards */}
+       <box height={1} />
+     </box>
+diff --git a/integrations/tmux-plugin/scripts/focus.sh b/integrations/tmux-plugin/scripts/focus.sh
+old mode 100644
+new mode 100755
+diff --git a/integrations/tmux-plugin/scripts/server-common.sh b/integrations/tmux-plugin/scripts/server-common.sh
+old mode 100644
+new mode 100755
+diff --git a/packages/runtime/src/server/index.ts b/packages/runtime/src/server/index.ts
+index 68d979b..ef0f6f6 100644
+--- a/packages/runtime/src/server/index.ts
++++ b/packages/runtime/src/server/index.ts
+@@ -450,6 +450,22 @@ export function startServer(mux: MuxProvider, extraProviders?: MuxProvider[], wa
+       }
+     }
+ 
++    // Fetch all tmux windows once (not per-provider) for sidebar window display
++    const windowListMap = new Map<string, import("../shared").WindowItem[]>();
++    try {
++      const raw = Bun.spawnSync(["tmux", "list-windows", "-a", "-F", "#{session_name}|#{window_index}|#{window_name}|#{window_active}"], { stdout: "pipe", stderr: "pipe" });
++      for (const line of raw.stdout.toString().trim().split("\n").filter(Boolean)) {
++        const [sess, idx, wName, active] = line.split("|");
++        if (!sess || !idx) continue;
++        if (!windowListMap.has(sess)) windowListMap.set(sess, []);
++        windowListMap.get(sess)!.push({
++          index: parseInt(idx, 10),
++          name: wName || "",
++          active: active === "1",
++        });
++      }
++    } catch {}
++
+     const sessions: SessionData[] = orderedMuxSessions.map(({ name, createdAt, windows, dir, provider }) => {
+       sessionProviders.set(name, provider);
+       const git = getGitInfo(dir);
+@@ -479,6 +495,7 @@ export function startServer(mux: MuxProvider, extraProviders?: MuxProvider[], wa
+         ports: getSessionPorts(name),
+         localLinks: buildLocalLinks(getSessionPorts(name), portlessState),
+         windows,
++        windowList: windowListMap.get(name) ?? [],
+         uptime,
+         agentState: tracker.getState(name),
+         agents: tracker.getAgents(name),
+@@ -1291,6 +1308,28 @@ export function startServer(mux: MuxProvider, extraProviders?: MuxProvider[], wa
+         switchToVisibleIndex(cmd.index, tty);
+         break;
+       }
++      case "switch-window": {
++        const target = `${cmd.session}:${cmd.windowIndex}`;
++        log("switch-window", "selecting", { session: cmd.session, windowIndex: cmd.windowIndex, target });
++        const clientSess = clientSessionNames.get(ws);
++        let swTty: string | undefined;
++        try {
++          const raw = Bun.spawnSync(["tmux", "list-clients", "-F", "#{client_tty}|#{session_name}"], { stdout: "pipe", stderr: "pipe" });
++          for (const line of raw.stdout.toString().trim().split("\n").filter(Boolean)) {
++            const [cTty, cSess] = line.split("|");
++            if (cSess === clientSess && cTty) { swTty = cTty; break; }
++          }
++        } catch {}
++        const tty = swTty
++          ?? (clientSess ? clientTtyBySession.get(clientSess) : undefined)
++          ?? clientTtys.get(ws);
++        if (cmd.session !== clientSess) {
++          const p = sessionProviders.get(cmd.session) ?? mux;
++          p.switchSession(cmd.session, tty);
++        }
++        shell(["tmux", "select-window", "-t", target]);
++        break;
++      }
+       case "new-session":
+         mux.createSession();
+         broadcastState();
+diff --git a/packages/runtime/src/shared.ts b/packages/runtime/src/shared.ts
+index fef054a..3eee195 100644
+--- a/packages/runtime/src/shared.ts
++++ b/packages/runtime/src/shared.ts
+@@ -15,6 +15,12 @@ export interface LocalLink {
+   label: string;
+ }
+ 
++export interface WindowItem {
++  index: number;
++  name: string;
++  active: boolean;
++}
++
+ export interface SessionData {
+   name: string;
+   createdAt: number;
+@@ -27,6 +33,7 @@ export interface SessionData {
+   ports: number[];
+   localLinks: LocalLink[];
+   windows: number;
++  windowList: WindowItem[];
+   uptime: string;
+   agentState: AgentEvent | null;
+   agents: AgentEvent[];
+@@ -106,6 +113,7 @@ export interface SessionMetadata {
+ export type ClientCommand =
+   | { type: "switch-session"; name: string; clientTty?: string }
+   | { type: "switch-index"; index: number }
++  | { type: "switch-window"; session: string; windowIndex: number }
+   | { type: "new-session" }
+   | { type: "hide-session"; name: string }
+   | { type: "show-all-sessions" }
