@@ -24,7 +24,7 @@ status:
             local link_target
             link_target=$(readlink "$full_path")
             case "$link_target" in
-                *"$dotfiles_dir/$pkg/"*|*"/dotfiles/$pkg/"*)
+                *"$dotfiles_dir/$pkg/"*|*"/dotfiles/$pkg/"*|"dotfiles/$pkg/"*)
                     if [ -e "$full_path" ]; then
                         printf "  %-12s  ${green}%-8s${reset}  %s\n" "$pkg" "stowed" "~/$target"
                         stowed=$((stowed + 1))
