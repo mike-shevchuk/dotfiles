@@ -28,7 +28,7 @@ export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
 
 if command -v mise >/dev/null 2>&1; then
   export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
-  eval "$($HOME/.local/bin/mise activate zsh)"
+  eval "$(mise activate zsh)"
 fi
 
 # Python environment
