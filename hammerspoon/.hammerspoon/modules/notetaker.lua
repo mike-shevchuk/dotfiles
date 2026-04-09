@@ -23,6 +23,36 @@ local TABS = {
     end,
   },
   {
+    id = "sport",
+    label = "🏋️",
+    dir = VAULT .. "/comb-notes/daily_sport/" .. os.date("%Y"),
+    filename = function() return os.date("%Y-%m-%d") .. ".md" end,
+    template = function()
+      return string.format("#sport #health #%s\n\n# Sport / Health — %s\n\n## Recommendations\n\n- [ ] \n\n## Results (fill EOD)\n- Steps:\n- Sleep:\n- Exercises done:\n- Calories:\n- Notes:\n",
+        os.date("%Y-%m-%d"), os.date("%A, %B %d"))
+    end,
+  },
+  {
+    id = "digest",
+    label = "📰",
+    dir = VAULT .. "/claude_code/learnforge/ai_scheduled/digests",
+    filename = function() return os.date("%Y-%m-%d") .. ".md" end,
+    template = function()
+      return string.format("---\ntags: [digest, daily]\ndate: %s\n---\n# Daily Digest — %s\n\nRun `just digest` to generate\n",
+        os.date("%Y-%m-%d"), os.date("%Y-%m-%d"))
+    end,
+  },
+  {
+    id = "standup",
+    label = "📋",
+    dir = VAULT .. "/claude_code/learnforge/ai_scheduled/standups",
+    filename = function() return os.date("%Y-%m-%d") .. ".md" end,
+    template = function()
+      return string.format("---\ntags: [standup, daily]\ndate: %s\n---\n# Standup — %s\n\nRun `just standup` to generate\n",
+        os.date("%Y-%m-%d"), os.date("%Y-%m-%d"))
+    end,
+  },
+  {
     id = "weekly",
     label = "Weekly",
     dir = VAULT .. "/comb-notes/weekly_staff",
@@ -288,8 +318,8 @@ local function buildHTML(tabData, todayDate, weekLabel)
         e.preventDefault();
         save();
       }
-      // Cmd+1-5 to switch tabs
-      if (e.metaKey && e.key >= '1' && e.key <= '5') {
+      // Cmd+1-8 to switch tabs
+      if (e.metaKey && e.key >= '1' && e.key <= '8') {
         e.preventDefault();
         let tabs = %s;
         let idx = parseInt(e.key) - 1;
