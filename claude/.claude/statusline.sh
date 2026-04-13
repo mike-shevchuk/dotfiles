@@ -219,18 +219,21 @@ if [ -n "$cwd" ]; then
   fi
 fi
 
-# ===== 5h token count cache (async background refresh) =====
-_tokens_5h_cache="/tmp/claude/tokens-5h-count.txt"
-_tokens_5h_stamp="/tmp/claude/tokens-5h-count.stamp"
-_tokens_5h_script="/tmp/claude/tokens-5h.py"
+# ===== Token usage cache (5h + 7d, async background refresh) =====
+# Cache file has 2 lines: line1=5h count, line2=7d count
+_tokens_cache="/tmp/claude/tokens-usage.txt"
+_tokens_stamp="/tmp/claude/tokens-usage.stamp"
+_tokens_script="/tmp/claude/tokens-usage.py"
 
 # Write the Python scanner script once (idempotent)
 mkdir -p /tmp/claude
-cat > "$_tokens_5h_script" <<'PYEOF'
+cat > "$_tokens_script" <<'PYEOF'
 import json, os, glob
 from datetime import datetime, timezone, timedelta
-cutoff = datetime.now(timezone.utc) - timedelta(hours=5)
-total, seen = 0, set()
+now = datetime.now(timezone.utc)
+cut5h  = now - timedelta(hours=5)
+cut7d  = now - timedelta(days=7)
+t5h, t7d, seen = 0, 0, set()
 for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
     try:
         with open(path) as f:
@@ -240,33 +243,37 @@ for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recur
                     msg = obj.get('message', {})
                     mid, ts_str = msg.get('id', ''), obj.get('timestamp', '')
                     if not ts_str or not mid or mid in seen: continue
-                    if datetime.fromisoformat(ts_str.replace('Z', '+00:00')) < cutoff: continue
+                    ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    if ts < cut7d: continue
                     seen.add(mid)
                     u = msg.get('usage', {})
-                    total += u.get('input_tokens', 0) + u.get('output_tokens', 0)
+                    toks = u.get('input_tokens', 0) + u.get('output_tokens', 0)
+                    t7d += toks
+                    if ts >= cut5h: t5h += toks
                 except: pass
     except: pass
-if total >= 1_000_000: s = f'{total/1000000:.1f}M'
-elif total >= 1000: s = f'{total//1000}k'
-elif total > 0: s = str(total)
-else: s = ''
-print(s)
+def fmt(n):
+    if n >= 1_000_000: return f'{n/1000000:.1f}M'
+    if n >= 1000: return f'{n//1000}k'
+    return str(n) if n > 0 else ''
+print(fmt(t5h))
+print(fmt(t7d))
 PYEOF
 
-refresh_tokens_5h() {
+refresh_tokens_usage() {
   local now_s stamp_val stamp_age=999999
   now_s=$(date +%s)
-  if [ -f "$_tokens_5h_stamp" ]; then
-    stamp_val=$(cat "$_tokens_5h_stamp" 2>/dev/null)
+  if [ -f "$_tokens_stamp" ]; then
+    stamp_val=$(cat "$_tokens_stamp" 2>/dev/null)
     stamp_age=$(( now_s - stamp_val ))
   fi
   if [ "$stamp_age" -gt 300 ]; then
-    echo "$now_s" > "$_tokens_5h_stamp"
-    python3 "$_tokens_5h_script" > "$_tokens_5h_cache" 2>/dev/null &
+    echo "$now_s" > "$_tokens_stamp"
+    python3 "$_tokens_script" > "$_tokens_cache" 2>/dev/null &
   fi
 }
 
-refresh_tokens_5h
+refresh_tokens_usage
 
 # ===== LINE 2: Model | PR | tokens | thinking =====
 line2=""
@@ -428,13 +435,12 @@ if $needs_refresh; then
   fi
 fi
 
-# ===== Append 5h token count to LINE 2 (from async cache) =====
-_l2_five_val=""
-if [ -f "$_tokens_5h_cache" ]; then
-  _l2_five_val=$(cat "$_tokens_5h_cache" 2>/dev/null | tr -d '[:space:]')
-fi
-if [ -n "$_l2_five_val" ]; then
-  line2+="${sep}⏱ ${yellow}5h: ${_l2_five_val}${reset}"
+# ===== Append 5h + 7d token counts to LINE 2 (from async cache) =====
+if [ -f "$_tokens_cache" ]; then
+  _l2_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  _l2_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_l2_5h" ] && line2+="${sep}⏱ ${yellow}5h: ${_l2_5h}${reset}"
+  [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
 fi
 
 format_reset_time() {
