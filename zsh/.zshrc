@@ -23,17 +23,16 @@ setopt PROMPT_SUBST
 # =============================================================================
 
 export EDITOR='nvim'
-# export PATH="$HOME/.local/bin:$PATH"
-export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+export PATH="$HOME/.local/bin:$PATH"
 
+# mise — manages JS, Go, tools; activate BEFORE pyenv so pyenv shims win for python
 if command -v mise >/dev/null 2>&1; then
-  export PATH="$HOME/.local/share/mise/shims:$HOME/.local/bin:$PATH"
-  eval "$($HOME/.local/bin/mise activate zsh)"
+  eval "$(mise activate zsh)"
 fi
 
-# Python environment
+# pyenv — manages Python + virtualenv; activate AFTER mise so its shims take priority
 export PYENV_ROOT="$HOME/.pyenv"
-export PATH="$PYENV_ROOT/bin:$PATH"
+[ -d "$PYENV_ROOT/bin" ] && export PATH="$PYENV_ROOT/bin:$PATH"
 export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
 
 # ZPlug configuration
@@ -74,18 +73,54 @@ eval "$(pyenv virtualenv-init -)" 2>/dev/null
 # CLIPBOARD UTILITIES
 # =============================================================================
 
-# Enhanced clipboard functions
+# Universal clipboard — works on macOS (pbcopy), Wayland (wl-copy), X11 (xclip/xsel)
+# Usage: clip <text>  OR  command | clip
 clip() {
-    if command -v wl-copy >/dev/null 2>&1; then
-        wl-copy "$@"
-    elif command -v xclip >/dev/null 2>&1; then
-        echo "$@" | xclip -selection clipboard
-    elif command -v xsel >/dev/null 2>&1; then
-        echo "$@" | xsel --clipboard --input
+    local data
+    if [ -p /dev/stdin ] || ! [ -t 0 ]; then
+        data="$(cat)"
+    elif [ $# -gt 0 ]; then
+        data="$*"
     else
-        echo "No clipboard utility found"
+        echo "Usage: clip <text>  or  command | clip" >&2
         return 1
     fi
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        printf '%s' "$data" | pbcopy
+    elif command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$data" | wl-copy
+    elif command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$data" | xclip -selection clipboard
+    elif command -v xsel >/dev/null 2>&1; then
+        printf '%s' "$data" | xsel --clipboard --input
+    else
+        echo "clip: no clipboard tool found. Run 'clip-health' for options." >&2
+        return 1
+    fi
+}
+
+# Show clipboard tool availability and install hints
+clip-health() {
+    echo "Clipboard tools:"
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "  ✅ macOS: pbcopy/pbpaste (built-in)"; return 0
+    fi
+    command -v wl-copy >/dev/null 2>&1 \
+        && echo "  ✅ wl-copy  (Wayland)" \
+        || echo "  ❌ wl-copy  → sudo pacman -S wl-clipboard"
+    command -v xclip >/dev/null 2>&1 \
+        && echo "  ✅ xclip   (X11)" \
+        || echo "  ❌ xclip   → sudo pacman -S xclip"
+    command -v xsel >/dev/null 2>&1 \
+        && echo "  ✅ xsel    (X11)" \
+        || echo "  ❌ xsel    → sudo pacman -S xsel"
+    echo ""
+    local active
+    active=$(command -v wl-copy >/dev/null 2>&1 && echo "wl-copy" || \
+             command -v xclip   >/dev/null 2>&1 && echo "xclip"   || \
+             command -v xsel    >/dev/null 2>&1 && echo "xsel"    || echo "none")
+    echo "  Active: $active"
+    [[ "$active" == "none" ]] && echo "  ⚠️  clip will fail — install one of the above"
 }
 
 # Copy current directory to clipboard
@@ -102,7 +137,7 @@ alias lc="fc -ln -1 | clip"
 alias syu='sudo pacman -Syu'
 alias pau='sudo reboot now'
 alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
-alias open="xdg-open"
+[[ "$OSTYPE" == linux* ]] && alias open="xdg-open"
 
 # Shell management
 alias szsh='source ~/.zshrc'
@@ -259,7 +294,6 @@ alias jf='fjob'
 # --namespace
 
 alias td="todoist-cli --color --namespace --indent --project-namespace"
-alias cl="clear"
 
 # Tmux management
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
@@ -392,7 +426,40 @@ prompt_git_arrows() {
 }
 
 
+# ── mise prompt segment ────────────────────────────────────────
+# Shows active tools from local .mise.toml / .tool-versions
+# Skips python (pyenv-virtualenv handles that). Cached per directory.
+_MISE_PROMPT_INFO=""
+_MISE_PROMPT_PWD=""
+
+_mise_prompt_refresh() {
+    [[ "$PWD" == "$_MISE_PROMPT_PWD" ]] && return
+    _MISE_PROMPT_PWD="$PWD"
+    _MISE_PROMPT_INFO=""
+
+    # Walk up to find a local config (avoids running mise in every dir)
+    local dir="$PWD"
+    while [[ "$dir" != "/" ]]; do
+        if [[ -f "$dir/.mise.toml" || -f "$dir/.tool-versions" ]]; then
+            _MISE_PROMPT_INFO=$(mise current 2>/dev/null \
+                | grep -v 'python\|^\s*$' \
+                | awk '{print $1"@"$2}' \
+                | tr '\n' ' ' \
+                | sed 's/ $//')
+            break
+        fi
+        dir="${dir:h}"
+    done
+}
+add-zsh-hook precmd _mise_prompt_refresh
+
+prompt_mise() {
+    [[ -z "$_MISE_PROMPT_INFO" ]] && return
+    prompt_segment cyan black " ⚡ $_MISE_PROMPT_INFO "
+}
+
 # Configure prompt segments
+AGNOSTER_PROMPT_SEGMENTS+=("prompt_mise")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_git_arrows")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_duration")
 AGNOSTER_PROMPT_SEGMENTS+=("prompt_time")
@@ -516,7 +583,7 @@ TMATE_SOCKET_LOCATION="/tmp/tmate-pair.sock"
 # Get current tmate connection url
 tmate-url() {
     url="$(tmate -S $TMATE_SOCKET_LOCATION display -p '#{tmate_ssh}')"
-    echo "$url" | tr -d '\n' | pbcopy
+    echo -n "$url" | clip
     echo "Copied tmate url for $TMATE_PAIR_NAME:"
     echo "$url"
 }
@@ -591,9 +658,9 @@ fi
 # Added by Antigravity
 export PATH="$HOME/.antigravity/antigravity/bin:$PATH"
 
-# bun completions
-[ -s "/Users/mikeshevchuk/.bun/_bun" ] && source "/Users/mikeshevchuk/.bun/_bun"
-
 # bun
-export BUN_INSTALL="$HOME/.bun"
-export PATH="$BUN_INSTALL/bin:$PATH"
+if [ -d "$HOME/.bun" ]; then
+  export BUN_INSTALL="$HOME/.bun"
+  export PATH="$BUN_INSTALL/bin:$PATH"
+  [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
+fi
