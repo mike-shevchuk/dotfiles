@@ -142,6 +142,7 @@ alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
 # Shell management
 alias szsh='source ~/.zshrc'
 alias cl='clear'
+alias cc='claude'
 
 # File operations
 alias l='ls'
