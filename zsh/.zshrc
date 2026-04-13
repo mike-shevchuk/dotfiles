@@ -51,9 +51,13 @@ ZINITRC="$HOME/.zsh_zinit"
 [ -f "$HOME/.asdf/asdf.sh" ] && . "$HOME/.asdf/asdf.sh"
 fpath=(${ASDF_DIR}/completions $fpath)
 
-# Initialize completion system (once, after all fpath modifications)
+# Initialize completion system — skip security audit if dump is <24h old
 autoload -Uz compinit
-compinit
+if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
+    compinit
+else
+    compinit -C
+fi
 
 # =============================================================================
 # PLUGIN MANAGEMENT

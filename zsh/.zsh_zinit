@@ -22,8 +22,8 @@ source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
 # STARTUP TIMER
 # =============================================================================
 
-# Record startup time (integer seconds to avoid affecting $SECONDS elsewhere)
-STARTUP_START=$EPOCHSECONDS
+# Record startup time with float precision
+typeset -F STARTUP_START=$EPOCHREALTIME
 
 # =============================================================================
 # ESSENTIAL PLUGINS (LOADED IMMEDIATELY)
@@ -125,7 +125,8 @@ setup_clipboard
 # Report startup time on first prompt
 autoload -Uz add-zsh-hook
 _zinit_report_startup_time() {
-    local startup_time=$(( EPOCHSECONDS - STARTUP_START ))
+    local startup_time
+    printf -v startup_time '%.2f' $(( EPOCHREALTIME - STARTUP_START ))
     echo "🚀 Shell startup time: ${startup_time}s"
     add-zsh-hook -d precmd _zinit_report_startup_time
 }
