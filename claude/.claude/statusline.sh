@@ -219,6 +219,53 @@ if [ -n "$cwd" ]; then
   fi
 fi
 
+# ===== 5h token count cache (async background refresh) =====
+_tokens_5h_cache="/tmp/claude/tokens-5h-count.txt"
+_tokens_5h_stamp="/tmp/claude/tokens-5h-count.stamp"
+
+refresh_tokens_5h() {
+  mkdir -p /tmp/claude
+  local now_s
+  now_s=$(date +%s)
+  local stamp_age=999999
+  if [ -f "$_tokens_5h_stamp" ]; then
+    local stamp_val
+    stamp_val=$(cat "$_tokens_5h_stamp" 2>/dev/null)
+    stamp_age=$(( now_s - stamp_val ))
+  fi
+  if [ "$stamp_age" -gt 300 ]; then
+    echo "$now_s" > "$_tokens_5h_stamp"
+    python3 - > "$_tokens_5h_cache" 2>/dev/null <<'PYEOF' &
+import json, os, glob
+from datetime import datetime, timezone, timedelta
+cutoff = datetime.now(timezone.utc) - timedelta(hours=5)
+total, seen = 0, set()
+for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    msg = obj.get('message', {})
+                    mid, ts_str = msg.get('id', ''), obj.get('timestamp', '')
+                    if not ts_str or not mid or mid in seen: continue
+                    if datetime.fromisoformat(ts_str.replace('Z', '+00:00')) < cutoff: continue
+                    seen.add(mid)
+                    u = msg.get('usage', {})
+                    total += u.get('input_tokens', 0) + u.get('output_tokens', 0)
+                except: pass
+    except: pass
+if total >= 1_000_000: s = f'{total/1000000:.1f}M'
+elif total >= 1000: s = f'{total//1000}k'
+elif total > 0: s = str(total)
+else: s = ''
+print(s)
+PYEOF
+  fi
+}
+
+refresh_tokens_5h
+
 # ===== LINE 2: Model | PR | tokens | thinking =====
 line2=""
 line2+="🤖 ${blue}${model_name}${reset}"
@@ -230,7 +277,7 @@ pr_cache_max_age=120
 needs_pr_refresh=true
 pr_number=""
 if [ -f "$pr_cache_file" ]; then
-  pr_cache_mtime=$(stat -f %m "$pr_cache_file" 2>/dev/null || stat -c %Y "$pr_cache_file" 2>/dev/null)
+  pr_cache_mtime=$(stat -c %Y "$pr_cache_file" 2>/dev/null || stat -f %m "$pr_cache_file" 2>/dev/null)
   pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
@@ -328,7 +375,7 @@ needs_refresh=true
 usage_data=""
 
 if [ -f "$cache_file" ]; then
-  cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
+  cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
   cache_age=$((now_epoch - cache_mtime))
   if [ "$cache_age" -lt "$cache_max_age" ]; then
     cached_candidate=$(cat "$cache_file" 2>/dev/null)
@@ -377,6 +424,15 @@ if $needs_refresh; then
       usage_data="$cached"
     fi
   fi
+fi
+
+# ===== Append 5h token count to LINE 2 (from async cache) =====
+_l2_five_val=""
+if [ -f "$_tokens_5h_cache" ]; then
+  _l2_five_val=$(cat "$_tokens_5h_cache" 2>/dev/null | tr -d '[:space:]')
+fi
+if [ -n "$_l2_five_val" ]; then
+  line2+="${sep}⏱ ${yellow}5h: ${_l2_five_val}${reset}"
 fi
 
 format_reset_time() {
