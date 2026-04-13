@@ -155,6 +155,14 @@ alias nv='nvim'
 alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
 
 # Git
+alias gs='git status'
+alias ga='git add'
+alias gc='git commit'
+alias gp='git push'
+alias gl='git pull'
+alias gd='git diff'
+alias gco='git checkout'
+alias gb='git branch'
 alias git_dog="git log --all --decorate --oneline --graph"
 
 # Python
