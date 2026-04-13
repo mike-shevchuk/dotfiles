@@ -222,20 +222,11 @@ fi
 # ===== 5h token count cache (async background refresh) =====
 _tokens_5h_cache="/tmp/claude/tokens-5h-count.txt"
 _tokens_5h_stamp="/tmp/claude/tokens-5h-count.stamp"
+_tokens_5h_script="/tmp/claude/tokens-5h.py"
 
-refresh_tokens_5h() {
-  mkdir -p /tmp/claude
-  local now_s
-  now_s=$(date +%s)
-  local stamp_age=999999
-  if [ -f "$_tokens_5h_stamp" ]; then
-    local stamp_val
-    stamp_val=$(cat "$_tokens_5h_stamp" 2>/dev/null)
-    stamp_age=$(( now_s - stamp_val ))
-  fi
-  if [ "$stamp_age" -gt 300 ]; then
-    echo "$now_s" > "$_tokens_5h_stamp"
-    python3 - > "$_tokens_5h_cache" 2>/dev/null <<'PYEOF' &
+# Write the Python scanner script once (idempotent)
+mkdir -p /tmp/claude
+cat > "$_tokens_5h_script" <<'PYEOF'
 import json, os, glob
 from datetime import datetime, timezone, timedelta
 cutoff = datetime.now(timezone.utc) - timedelta(hours=5)
@@ -261,6 +252,17 @@ elif total > 0: s = str(total)
 else: s = ''
 print(s)
 PYEOF
+
+refresh_tokens_5h() {
+  local now_s stamp_val stamp_age=999999
+  now_s=$(date +%s)
+  if [ -f "$_tokens_5h_stamp" ]; then
+    stamp_val=$(cat "$_tokens_5h_stamp" 2>/dev/null)
+    stamp_age=$(( now_s - stamp_val ))
+  fi
+  if [ "$stamp_age" -gt 300 ]; then
+    echo "$now_s" > "$_tokens_5h_stamp"
+    python3 "$_tokens_5h_script" > "$_tokens_5h_cache" 2>/dev/null &
   fi
 }
 
