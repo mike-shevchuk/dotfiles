@@ -269,7 +269,9 @@ refresh_tokens_usage() {
   fi
   if [ "$stamp_age" -gt 300 ]; then
     echo "$now_s" > "$_tokens_stamp"
-    python3 "$_tokens_script" > "$_tokens_cache" 2>/dev/null &
+    # Write to tmp then rename — avoids truncating cache to 0 before Python finishes
+    ( python3 "$_tokens_script" > "${_tokens_cache}.tmp" 2>/dev/null && mv "${_tokens_cache}.tmp" "$_tokens_cache" ) &
+    disown $!
   fi
 }
 
