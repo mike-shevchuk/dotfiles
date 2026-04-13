@@ -313,6 +313,14 @@ fi
 line2+="${sep}"
 line2+="🪙 ${orange}${used_tokens}/${total_tokens}${reset}"
 
+# 5h + 7d session token counts (from async Python cache)
+if [ -f "$_tokens_cache" ]; then
+  _l2_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  _l2_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_l2_5h" ] && line2+="${sep}⏱ ${yellow}5h: ${_l2_5h}${reset}"
+  [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
+fi
+
 # Subscription renewal countdown
 renewal_date="2026-04-10"
 renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null || \
@@ -435,13 +443,6 @@ if $needs_refresh; then
   fi
 fi
 
-# ===== Append 5h + 7d token counts to LINE 2 (from async cache) =====
-if [ -f "$_tokens_cache" ]; then
-  _l2_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
-  _l2_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$_l2_5h" ] && line2+="${sep}⏱ ${yellow}5h: ${_l2_5h}${reset}"
-  [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
-fi
 
 format_reset_time() {
   local iso_str="$1"
