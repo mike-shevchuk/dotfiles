@@ -231,8 +231,22 @@ cat > "$_tokens_script" <<'PYEOF'
 import json, os, glob
 from datetime import datetime, timezone, timedelta
 now = datetime.now(timezone.utc)
-cut5h  = now - timedelta(hours=5)
-cut7d  = now - timedelta(days=7)
+cut5h = now - timedelta(hours=5)
+cut7d = now - timedelta(days=7)
+# Sync with API window boundaries when available (written by statusline after OAuth fetch)
+try:
+    wf = '/tmp/claude/tokens-windows.txt'
+    if os.path.exists(wf):
+        wlines = open(wf).read().strip().splitlines()
+        if len(wlines) >= 2 and wlines[0] and wlines[1]:
+            r5h = datetime.fromisoformat(wlines[0].replace('Z', '+00:00'))
+            r7d = datetime.fromisoformat(wlines[1].replace('Z', '+00:00'))
+            if r5h > now:   # window hasn't reset yet — use its start as cutoff
+                cut5h = r5h - timedelta(hours=5)
+            if r7d > now:
+                cut7d = r7d - timedelta(days=7)
+except Exception:
+    pass
 t5h, t7d, seen = 0, 0, set()
 for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
     try:
@@ -719,6 +733,12 @@ if $use_oauth; then
   # ---- 7-day: bar + pace ----
   seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
   seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
+
+  # Write API window boundaries so token scanner can align to same windows
+  if [ -n "$five_hour_reset_iso" ] && [ "$five_hour_reset_iso" != "null" ] && \
+     [ -n "$seven_day_reset_iso" ] && [ "$seven_day_reset_iso" != "null" ]; then
+    printf "%s\n%s\n" "$five_hour_reset_iso" "$seven_day_reset_iso" > "/tmp/claude/tokens-windows.txt"
+  fi
 
   if is_reset_past "$seven_day_reset_iso"; then
     seven_day_bar=$(build_bar 0 "$bar_width")
