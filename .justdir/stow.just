@@ -14,17 +14,20 @@ tmux:
     set -euo pipefail
     stow --no-folding --adopt --restow -t ~ tmux
     plugins_dir="$HOME/.tmux/plugins"
-    declare -A plugins=(
-        [tpm]="tmux-plugins/tpm"
-        [tmux-resurrect]="tmux-plugins/tmux-resurrect"
-        [tmux-continuum]="tmux-plugins/tmux-continuum"
-        [tmux-yank]="tmux-plugins/tmux-yank"
-        [tmux-sidebar]="tmux-plugins/tmux-sidebar"
-    )
-    for name in "${!plugins[@]}"; do
+    plugins="
+        tpm=tmux-plugins/tpm
+        tmux-yank=tmux-plugins/tmux-yank
+        tmux-sidebar=tmux-plugins/tmux-sidebar
+    "
+    # Disabled plugins (uncomment in .tmux.conf.local to re-enable):
+    #   tmux-resurrect=tmux-plugins/tmux-resurrect  — session save/restore across reboots
+    #   tmux-continuum=tmux-plugins/tmux-continuum   — auto-saves sessions every N min
+    for entry in $plugins; do
+        name="${entry%%=*}"
+        repo="${entry#*=}"
         if [ ! -d "$plugins_dir/$name" ]; then
             echo "  installing $name..."
-            git clone --depth 1 "https://github.com/${plugins[$name]}" "$plugins_dir/$name"
+            git clone --depth 1 "https://github.com/$repo" "$plugins_dir/$name"
         fi
     done
     # opensessions: clone + install deps + apply patches

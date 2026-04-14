@@ -3,6 +3,13 @@
 # Sourced automatically by .tmux.conf (line 156)
 
 
+# -- Terminal features ---------------------------------------------------------
+
+# Allow passthrough for image preview (yazi, kitty graphics protocol)
+set -g allow-passthrough on
+set -ga update-environment TERM
+set -ga update-environment TERM_PROGRAM
+
 # -- TPM (Tmux Plugin Manager) ------------------------------------------------
 
 # Auto-install TPM if missing
@@ -11,21 +18,17 @@ if "test ! -d ~/.tmux/plugins/tpm" \
 
 # Plugins
 set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-resurrect'
-set -g @plugin 'tmux-plugins/tmux-continuum'
 set -g @plugin 'tmux-plugins/tmux-yank'
 set -g @plugin 'Ataraxy-Labs/opensessions'
 
-
-# -- Session persistence ------------------------------------------------------
-
-# tmux-resurrect
-set -g @resurrect-capture-pane-contents 'on'
-set -g @resurrect-strategy-nvim 'session'
-
-# tmux-continuum (auto-save every 15 min)
-set -g @continuum-restore 'on'
-set -g @continuum-save-interval '15'
+# Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
+# To re-enable, uncomment below:
+# set -g @plugin 'tmux-plugins/tmux-resurrect'
+# set -g @plugin 'tmux-plugins/tmux-continuum'
+# set -g @resurrect-capture-pane-contents 'on'
+# set -g @resurrect-strategy-nvim 'session'
+# set -g @continuum-restore 'on'
+# set -g @continuum-save-interval '15'
 
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
@@ -38,10 +41,9 @@ set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 set -g status-left-length 50 #!important
 set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
 
-# Right: claude | cpu | ram | AWS | kubectl | resurrect | time | date
-#   󰚩 claude  cpu  ram   AWS  k8s  resurrect   time   date
+# Right: claude | cpu | ram | AWS | kubectl | time | date
 set -g status-right-length 160 #!important
-set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#6c7086] #(readlink ~/.local/share/tmux/resurrect/last 2>/dev/null | sed "s/.*_\([0-9]\{4\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)T\([0-9]\{2\}\)\([0-9]\{2\}\).*/\4:\5/" || echo "?") #[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
 # Window tabs — 󰚩 icon when claude is the foreground process
 set -g window-status-format '#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#[fg=#6c7086]#I:#W ' #!important
@@ -93,8 +95,8 @@ bind C split-window -v -p 35 \; \
 # prefix + g → lazygit
 bind g display-popup -E -w 85% -h 85% "lazygit"
 
-# prefix + y → yazi file manager
-bind y display-popup -E -w 85% -h 85% "yazi"
+# prefix + o → yazi file manager (new-window: display-popup lacks passthrough, see sxyazi/yazi#2308)
+bind o new-window -n yazi "yazi"
 
 # prefix + s → dotfiles stow status
 bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
@@ -107,6 +109,17 @@ bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_n
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
+
+
+# -- Duplicate popup section (disabled, kept as reference) ---------------------
+# These were duplicated during rebase. The active bindings are above.
+
+# bind g display-popup -E -w 85% -h 85% "lazygit"
+# bind o new-window -n yazi "yazi; tmux wait-for -S yazi-done" \; set-option -w remain-on-exit off
+# bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
+# bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
+# bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
+# bind B display-popup -E -w 85% -h 85% "btop"
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------

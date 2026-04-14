@@ -14,7 +14,7 @@ prepend_keymap = [
 [preview]
 max_width = 1000
 max_height = 1000
-ueberzug = true
+# ueberzug = true  # не працює в tmux, використовуй allow-passthrough замість
 prepend_meta = true
 
 [status]
