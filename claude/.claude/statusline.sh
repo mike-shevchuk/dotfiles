@@ -219,6 +219,64 @@ if [ -n "$cwd" ]; then
   fi
 fi
 
+# ===== Token usage cache (5h + 7d, async background refresh) =====
+# Cache file has 2 lines: line1=5h count, line2=7d count
+_tokens_cache="/tmp/claude/tokens-usage.txt"
+_tokens_stamp="/tmp/claude/tokens-usage.stamp"
+_tokens_script="/tmp/claude/tokens-usage.py"
+
+# Write the Python scanner script once (idempotent)
+mkdir -p /tmp/claude
+cat > "$_tokens_script" <<'PYEOF'
+import json, os, glob
+from datetime import datetime, timezone, timedelta
+now = datetime.now(timezone.utc)
+cut5h  = now - timedelta(hours=5)
+cut7d  = now - timedelta(days=7)
+t5h, t7d, seen = 0, 0, set()
+for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
+    try:
+        with open(path) as f:
+            for line in f:
+                try:
+                    obj = json.loads(line)
+                    msg = obj.get('message', {})
+                    mid, ts_str = msg.get('id', ''), obj.get('timestamp', '')
+                    if not ts_str or not mid or mid in seen: continue
+                    ts = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                    if ts < cut7d: continue
+                    seen.add(mid)
+                    u = msg.get('usage', {})
+                    toks = u.get('input_tokens', 0) + u.get('output_tokens', 0)
+                    t7d += toks
+                    if ts >= cut5h: t5h += toks
+                except: pass
+    except: pass
+def fmt(n):
+    if n >= 1_000_000: return f'{n/1000000:.1f}M'
+    if n >= 1000: return f'{n//1000}k'
+    return str(n) if n > 0 else ''
+print(fmt(t5h))
+print(fmt(t7d))
+PYEOF
+
+refresh_tokens_usage() {
+  local now_s stamp_val stamp_age=999999
+  now_s=$(date +%s)
+  if [ -f "$_tokens_stamp" ]; then
+    stamp_val=$(cat "$_tokens_stamp" 2>/dev/null)
+    stamp_age=$(( now_s - stamp_val ))
+  fi
+  if [ "$stamp_age" -gt 300 ]; then
+    echo "$now_s" > "$_tokens_stamp"
+    # Write to tmp then rename — avoids truncating cache to 0 before Python finishes
+    ( python3 "$_tokens_script" > "${_tokens_cache}.tmp" 2>/dev/null && mv "${_tokens_cache}.tmp" "$_tokens_cache" ) &
+    disown $!
+  fi
+}
+
+refresh_tokens_usage
+
 # ===== LINE 2: Model | PR | tokens | thinking =====
 line2=""
 line2+="🤖 ${blue}${model_name}${reset}"
@@ -230,7 +288,7 @@ pr_cache_max_age=120
 needs_pr_refresh=true
 pr_number=""
 if [ -f "$pr_cache_file" ]; then
-  pr_cache_mtime=$(stat -f %m "$pr_cache_file" 2>/dev/null || stat -c %Y "$pr_cache_file" 2>/dev/null)
+  pr_cache_mtime=$(stat -c %Y "$pr_cache_file" 2>/dev/null || stat -f %m "$pr_cache_file" 2>/dev/null)
   pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
@@ -256,6 +314,14 @@ fi
 
 line2+="${sep}"
 line2+="🪙 ${orange}${used_tokens}/${total_tokens}${reset}"
+
+# 5h + 7d session token counts (from async Python cache)
+if [ -f "$_tokens_cache" ]; then
+  _l2_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  _l2_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  [ -n "$_l2_5h" ] && line2+="${sep}⏱ ${yellow}5h: ${_l2_5h}${reset}"
+  [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
+fi
 
 # Subscription renewal countdown
 renewal_date="2026-04-10"
@@ -328,7 +394,7 @@ needs_refresh=true
 usage_data=""
 
 if [ -f "$cache_file" ]; then
-  cache_mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)
+  cache_mtime=$(stat -c %Y "$cache_file" 2>/dev/null || stat -f %m "$cache_file" 2>/dev/null)
   cache_age=$((now_epoch - cache_mtime))
   if [ "$cache_age" -lt "$cache_max_age" ]; then
     cached_candidate=$(cat "$cache_file" 2>/dev/null)
@@ -378,6 +444,7 @@ if $needs_refresh; then
     fi
   fi
 fi
+
 
 format_reset_time() {
   local iso_str="$1"
