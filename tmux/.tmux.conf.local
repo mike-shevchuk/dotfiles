@@ -3,6 +3,13 @@
 # Sourced automatically by .tmux.conf (line 156)
 
 
+# -- Terminal features ---------------------------------------------------------
+
+# Allow passthrough for image preview (yazi, kitty graphics protocol)
+set -g allow-passthrough on
+set -ga update-environment TERM
+set -ga update-environment TERM_PROGRAM
+
 # -- TPM (Tmux Plugin Manager) ------------------------------------------------
 
 # Auto-install TPM if missing
@@ -88,8 +95,8 @@ bind C split-window -v -p 35 \; \
 # prefix + g → lazygit
 bind g display-popup -E -w 85% -h 85% "lazygit"
 
-# prefix + y → yazi file manager
-bind y display-popup -E -w 85% -h 85% "yazi"
+# prefix + o → yazi file manager (new-window: display-popup lacks passthrough, see sxyazi/yazi#2308)
+bind o new-window -n yazi "yazi"
 
 # prefix + s → dotfiles stow status
 bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
@@ -102,6 +109,17 @@ bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_n
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
+
+
+# -- Duplicate popup section (disabled, kept as reference) ---------------------
+# These were duplicated during rebase. The active bindings are above.
+
+# bind g display-popup -E -w 85% -h 85% "lazygit"
+# bind o new-window -n yazi "yazi; tmux wait-for -S yazi-done" \; set-option -w remain-on-exit off
+# bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
+# bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
+# bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
+# bind B display-popup -E -w 85% -h 85% "btop"
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
