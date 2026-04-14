@@ -41,6 +41,9 @@ local function selectBest(devices, priority_list, setCb)
 end
 
 function M.start()
+  -- Stop any existing watcher before (re)starting to prevent
+  -- "theWatcher is nil" errors when config reloads
+  hs.audiodevice.watcher.stop()
   hs.audiodevice.watcher.setCallback(function(event)
     if event ~= "dev#" then return end
 
@@ -61,6 +64,11 @@ function M.start()
     end)
   end)
   hs.audiodevice.watcher.start()
+end
+
+function M.stop()
+  hs.audiodevice.watcher.stop()
+  hs.audiodevice.watcher.setCallback(nil)
 end
 
 function M.toggleMute()

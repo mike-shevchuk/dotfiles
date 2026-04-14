@@ -157,4 +157,9 @@ guard.addHotkey(hs.hotkey.bind({ "shift" }, "delete", function()
   hs.eventtap.keyStroke({}, "forwarddelete", 0)
 end))
 
+-- Stop watchers cleanly before config reload to avoid stale callbacks
+hs.shutdownCallback = function()
+  audio.stop()
+end
+
 hs.alert.show("🔨 Hammerspoon loaded", 1.5)
