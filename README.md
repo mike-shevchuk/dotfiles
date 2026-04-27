@@ -18,8 +18,11 @@ just lz
 # Check system health
 just health
 
-# See all available commands
-just
+# Browse recipes interactively (fzf-powered, runs on Enter)
+just help
+
+# Pull + push both ~/dotfiles and ~/zettelkasten
+just sync
 ```
 
 ## Packages
@@ -49,18 +52,134 @@ justfile                   # core: setup, migrate, install-deps
   stow.just                # all stow package recipes + all + remove
   health.just              # status + health diagnostics
   mise.just                # mise tool manager + nvim/ruff install
+  sync.just                # multi-machine sync, fzf help, claudes/ symlinks, hooks-install
+.githooks/
+  pre-push                 # warns when ~/zettelkasten has unpushed commits (dotfiles only)
 ```
 
 ### Key Commands
 
 | Command | What |
 |---------|------|
-| `just setup` | Install deps + stow core packages |
+| `just` (no args) | Open fzf recipe picker (alias for `just help`) |
+| `just help` | Browse all recipes with fzf preview, run on Enter |
+| `just setup` | Install deps + stow core packages + link CLAUDE.md files |
+| `just sync` | `git pull --rebase --autostash` + push for both repos |
+| `just sync-pull` | Pull-only variant (safe to run from shell startup hooks) |
+| `just claudes-link` | (Re)create CLAUDE.md symlinks from `claudes/*/.target` |
+| `just claudes-status` | Show health of every linked CLAUDE.md |
+| `just claudes-add <name> <path>` | Register a new repo's CLAUDE.md under `claudes/` |
+| `just hooks-install` | Activate `.githooks/` for ~/dotfiles (pre-push zettelkasten check) |
 | `just health` | Check all dependencies |
 | `just status` | Show stow status of all packages |
 | `just all` | Stow everything |
 | `just remove <pkg>` | Unstow a package |
 | `just migrate` | Remove manual symlinks (one-time) |
+
+---
+
+## Multi-machine Sync
+
+Two machines (Mac + Linux) share `~/dotfiles` (this repo) and `~/zettelkasten`
+(private notes). Both are git-backed; `just sync` keeps them aligned.
+
+### Daily workflow
+
+```bash
+just sync     # pull --rebase --autostash + push, for BOTH repos
+```
+
+`sync` is verbose by design — it announces each step, prints the resolved
+`git` command before running, and indents the output so you can see exactly
+what happened. If a rebase conflict shows up, sync stops and you resolve
+it manually (`git rebase --continue` / `--abort`), then re-run.
+
+### Auto-pull on shell startup (opt-in)
+
+`zsh/.zsh_spaces/sync/sync-space.zsh` runs a background pull on every new
+interactive shell — pulls only, never pushes, so it's safe to leave on.
+Enable in your `~/.zshrc` (or any sourced file):
+
+```zsh
+export DOTFILES_AUTO_PULL=1
+```
+
+To customize repos:
+
+```zsh
+export DOTFILES_AUTO_PULL_REPOS="$HOME/dotfiles $HOME/zettelkasten $HOME/work-notes"
+```
+
+To disable for a single shell: `DOTFILES_AUTO_PULL=0 zsh`.
+
+### CLAUDE.md storage — `claudes/` in zettelkasten
+
+Source-of-truth for every `CLAUDE.md` (global + per-repo) lives under
+`~/zettelkasten/claude_code/claudes/{name}/`:
+
+```
+~/zettelkasten/claude_code/claudes/
+  global/
+    CLAUDE.md          # ~/CLAUDE.md content
+    .target            # "~/CLAUDE.md"
+  rescue-serverless/
+    CLAUDE.md
+    .target            # "~/code/rescue-serverless/CLAUDE.md"
+```
+
+`.target` is a single line saying where the symlink should live (`~` is
+expanded at runtime, so the same file works on every machine). On a fresh
+checkout:
+
+```bash
+just claudes-link        # reads every .target, makes the symlinks
+just claudes-status      # green = OK, yellow = drift, red = broken
+```
+
+### Adding a new repo to the sync
+
+```bash
+cd ~/code/some-repo
+just -f ~/dotfiles/justfile claudes-add some-repo ./CLAUDE.md
+# → moves CLAUDE.md into zettelkasten, replaces it with a symlink,
+#   writes .target, commits + pushes zettelkasten
+```
+
+Now every machine that runs `just sync && just claudes-link` will have the
+same `CLAUDE.md` at `~/code/some-repo/CLAUDE.md`.
+
+### Pre-push hook — warns if zettelkasten is behind
+
+`just hooks-install` (run automatically by `just setup`) sets
+`core.hooksPath` to `~/dotfiles/.githooks/`. The included `pre-push`
+script blocks no pushes — it just warns when `~/zettelkasten` has
+unpushed commits, so you don't ship dotfiles changes that reference
+content the second machine can't fetch yet:
+
+```
+⚠  ~/zettelkasten has 2 unpushed commit(s)
+
+   a1b2c3d Register rescue-serverless CLAUDE.md under claudes/
+   d4e5f6a Update global CLAUDE.md week numbering note
+
+   If your dotfiles changes reference new claudes/ content,
+   push zettelkasten first or the second machine will see stale content.
+
+Push ~/zettelkasten now? [y/N/a=abort]
+```
+
+Bypass for one push:  `DOTFILES_SKIP_ZK_CHECK=1 git push`
+Disable entirely:     `git -C ~/dotfiles config --unset core.hooksPath`
+
+### Avoiding overwrites between machines
+
+| Risk | Mitigation |
+|------|------------|
+| Editing without pulling first → divergence | `just sync` (or auto-pull on shell start) |
+| Force-push wiping the other machine's commits | Never `--force` to master; PR for shared changes |
+| Machine-specific tweaks polluting the synced file | Keep them in `~/.claude/settings.local.json` (gitignored) |
+| Symlink drift between machines | `just claudes-status` flags it; `just claudes-link` fixes it |
+| Pushing dotfiles before zettelkasten | `pre-push` hook warns and offers to push zettelkasten first |
 
 ---
 
