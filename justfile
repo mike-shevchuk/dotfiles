@@ -1,6 +1,7 @@
 import '.justdir/stow.just'
 import '.justdir/health.just'
 import '.justdir/mise.just'
+import '.justdir/claude.just'
 
 default:
     @just --list

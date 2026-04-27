@@ -1,8 +1,28 @@
 {
   "model": "sonnet",
   "hooks": {
-    "PreToolUse": [],
-    "PostToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/format.ts"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "",
@@ -21,6 +41,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/stop.ts --chat"
+          },
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/cost-logger.ts"
           }
         ]
       }
