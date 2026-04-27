@@ -110,6 +110,28 @@ bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_n
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
 
+# prefix + G → lazygit on Branches view (compare current vs main: <space> on main)
+bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
+
+# ─── Diff/Compare popups (delegate to ~/dotfiles/tmux/scripts/git-compare.sh) ─
+# EVERY binding starts with fzf branch picker (default branch pre-selected).
+# Hit Enter for the common case; arrow/type to compare against another branch.
+# (prefix A was removed — use prefix V which now does the same fzf flow)
+unbind A
+
+# prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting) vs picked branch
+# To use legacy DiffView instead: ~/dotfiles/tmux/scripts/git-compare.sh diffview
+bind V display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh codediff"
+
+# prefix + M → delta side-by-side pager vs picked branch (fallback if delta missing)
+bind M display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh delta"
+
+# prefix + N → difftastic semantic diff vs picked branch (fallback if difft missing)
+bind N display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh difftastic"
+
+# prefix + O → pick branch → fzf list of changed files → open picked file in DiffView
+bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh files"
+
 
 # -- Duplicate popup section (disabled, kept as reference) ---------------------
 # These were duplicated during rebase. The active bindings are above.
