@@ -5,7 +5,8 @@
 local M = {}
 
 local pomodoro = require("modules.pomodoro")
-local guard = require("modules.guard")
+local guard    = require("modules.guard")
+local system   = require("modules.system")
 local menubar
 local timer
 local REFRESH_INTERVAL = 10
@@ -225,6 +226,33 @@ function M.refresh()
     local pomoItems = pomodoro.getMenuItems()
     for _, item in ipairs(pomoItems) do
         table.insert(menu, item)
+    end
+
+    -- Trackpad section
+    table.insert(menu, { title = "-" })
+    table.insert(menu, { title = "Trackpad", disabled = true })
+    table.insert(menu, {
+        title = system.isPinchZoomBlocked()
+            and "🤏 Pinch Zoom: BLOCKED  (click to allow)"
+            or  "🤏 Pinch Zoom: allowed  (click to block)",
+        fn = function()
+            system.togglePinchZoom()
+            M.refresh()
+        end,
+    })
+    local currentMult = system.getScrollMultiplier()
+    table.insert(menu, {
+        title = string.format("↕  Scroll Speed: %.1fx  →  (slider)", currentMult),
+        fn    = function() system.showScrollPanel() end,
+    })
+    for _, mult in ipairs({ 0.5, 1.0, 1.5, 2.0, 3.0 }) do
+        table.insert(menu, {
+            title = string.format("↕  Scroll %.1fx%s", mult, currentMult == mult and " ✓" or ""),
+            fn = function()
+                system.setScrollMultiplier(mult)
+                M.refresh()
+            end,
+        })
     end
 
     -- Toggles section
