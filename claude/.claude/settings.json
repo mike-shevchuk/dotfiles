@@ -1,5 +1,4 @@
 {
-  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -8,17 +7,6 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
-          }
-        ]
-      }
-    ],
-    "PostToolUse": [
-      {
-        "matcher": "Edit|Write",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "npx tsx ~/.claude/hooks/format.ts"
           }
         ]
       }
