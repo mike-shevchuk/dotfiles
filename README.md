@@ -52,7 +52,9 @@ justfile                   # core: setup, migrate, install-deps
   stow.just                # all stow package recipes + all + remove
   health.just              # status + health diagnostics
   mise.just                # mise tool manager + nvim/ruff install
-  sync.just                # multi-machine sync, fzf help, claudes/ symlinks
+  sync.just                # multi-machine sync, fzf help, claudes/ symlinks, hooks-install
+.githooks/
+  pre-push                 # warns when ~/zettelkasten has unpushed commits (dotfiles only)
 ```
 
 ### Key Commands
@@ -67,6 +69,7 @@ justfile                   # core: setup, migrate, install-deps
 | `just claudes-link` | (Re)create CLAUDE.md symlinks from `claudes/*/.target` |
 | `just claudes-status` | Show health of every linked CLAUDE.md |
 | `just claudes-add <name> <path>` | Register a new repo's CLAUDE.md under `claudes/` |
+| `just hooks-install` | Activate `.githooks/` for ~/dotfiles (pre-push zettelkasten check) |
 | `just health` | Check all dependencies |
 | `just status` | Show stow status of all packages |
 | `just all` | Stow everything |
@@ -145,6 +148,29 @@ just -f ~/dotfiles/justfile claudes-add some-repo ./CLAUDE.md
 Now every machine that runs `just sync && just claudes-link` will have the
 same `CLAUDE.md` at `~/code/some-repo/CLAUDE.md`.
 
+### Pre-push hook — warns if zettelkasten is behind
+
+`just hooks-install` (run automatically by `just setup`) sets
+`core.hooksPath` to `~/dotfiles/.githooks/`. The included `pre-push`
+script blocks no pushes — it just warns when `~/zettelkasten` has
+unpushed commits, so you don't ship dotfiles changes that reference
+content the second machine can't fetch yet:
+
+```
+⚠  ~/zettelkasten has 2 unpushed commit(s)
+
+   a1b2c3d Register rescue-serverless CLAUDE.md under claudes/
+   d4e5f6a Update global CLAUDE.md week numbering note
+
+   If your dotfiles changes reference new claudes/ content,
+   push zettelkasten first or the second machine will see stale content.
+
+Push ~/zettelkasten now? [y/N/a=abort]
+```
+
+Bypass for one push:  `DOTFILES_SKIP_ZK_CHECK=1 git push`
+Disable entirely:     `git -C ~/dotfiles config --unset core.hooksPath`
+
 ### Avoiding overwrites between machines
 
 | Risk | Mitigation |
@@ -153,6 +179,7 @@ same `CLAUDE.md` at `~/code/some-repo/CLAUDE.md`.
 | Force-push wiping the other machine's commits | Never `--force` to master; PR for shared changes |
 | Machine-specific tweaks polluting the synced file | Keep them in `~/.claude/settings.local.json` (gitignored) |
 | Symlink drift between machines | `just claudes-status` flags it; `just claudes-link` fixes it |
+| Pushing dotfiles before zettelkasten | `pre-push` hook warns and offers to push zettelkasten first |
 
 ---
 

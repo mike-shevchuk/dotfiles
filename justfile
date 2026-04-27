@@ -9,7 +9,7 @@ default:
     @just help
 
 # Setup core packages on a new system
-setup: install-deps claude zsh tmux kitty lz yazi claudes-link
+setup: install-deps claude zsh tmux kitty lz yazi claudes-link hooks-install
     @echo "Core packages stowed successfully"
 
 # Install stow if missing

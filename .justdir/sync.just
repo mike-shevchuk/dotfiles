@@ -125,6 +125,36 @@ sync:
     done
     echo "" >&2
 
+# Wire ~/dotfiles git hooks to .githooks/ (pre-push warns about unpushed zettelkasten)
+hooks-install:
+    #!/usr/bin/env bash
+    # Sets core.hooksPath so version-controlled hooks under ~/dotfiles/.githooks/
+    # are used instead of the default per-clone .git/hooks/. Idempotent — safe
+    # to re-run from `just setup`.
+    set -e
+    repo="$HOME/dotfiles"
+    hooks_dir="$repo/.githooks"
+    if [ ! -d "$hooks_dir" ]; then
+        echo "FAIL — $hooks_dir does not exist" >&2
+        exit 1
+    fi
+    current=$(git -C "$repo" config --get core.hooksPath 2>/dev/null || echo "")
+    if [ "$current" = "$hooks_dir" ]; then
+        echo "  OK — core.hooksPath already set to $hooks_dir" >&2
+    else
+        echo "→ git -C $repo config core.hooksPath $hooks_dir" >&2
+        git -C "$repo" config core.hooksPath "$hooks_dir"
+        echo "  installed" >&2
+    fi
+    # Ensure scripts are executable (some filesystems / clones lose +x)
+    for f in "$hooks_dir"/*; do
+        [ -f "$f" ] || continue
+        if [ ! -x "$f" ]; then
+            chmod +x "$f"
+            echo "  chmod +x $(basename "$f")" >&2
+        fi
+    done
+
 # Pull-only variant — use when you don't want to push (e.g. on shell startup)
 sync-pull:
     #!/usr/bin/env bash
