@@ -311,6 +311,25 @@ alias td="todoist-cli --color --namespace --indent --project-namespace"
 # Tmux management
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
 
+# Find file by content: rg -> fzf (live) -> open in $EDITOR at line
+# Usage: rgf [query] [path]
+rgf() {
+  local query=${1:-}
+  local search_path=${2:-.}
+  local rg_cmd="rg --column --line-number --no-heading --color=always --ignore-case"
+  local result
+  result=$(
+    FZF_DEFAULT_COMMAND="${rg_cmd} -- ${(q)query} ${(q)search_path}" \
+    fzf --ansi --disabled --query "$query" \
+        --bind "change:reload:sleep 0.1; ${rg_cmd} -- {q} ${(q)search_path} || true" \
+        --delimiter : \
+        --preview 'bat --style=numbers --color=always --highlight-line {2} {1}' \
+        --preview-window 'right,60%,border-left,+{2}/2'
+  ) || return
+  local file=${result%%:*} line=${${result#*:}%%:*}
+  ${EDITOR:-nvim} "$file" "+${line}"
+}
+
 
 # =============================================================================
 # NEOVIM CONFIGURATIONS
