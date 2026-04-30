@@ -59,7 +59,7 @@ set -g window-status-style 'fg=#6c7086' #!important
 set -g window-status-current-style 'fg=#89b4fa,bold,underscore' #!important
 set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
 set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
-set -g window-status-separator '   ' #!important
+set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
 # Pane borders — color reflects claude state
 #   amber (#f9e2af) = claude thinking/working
