@@ -46,11 +46,13 @@ set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bo
 set -g status-right-length 200 #!important
 set -g status-right '#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
-# Row 1 (bottom of the 2-row status bar): visually empty, but each tab
-# column carries an active range=window|<idx> click zone — so a click
-# slightly below an active tab still switches windows. Text is rendered
-# with fg matching bg (#1e1e2e) and no underline/bold, so nothing shows.
-set -g status-format[1] '#[align=left,fg=#1e1e2e,bg=#1e1e2e,nobold,nounderscore]#{W:#[range=window|#{window_index}] #I:#W #[norange]#{?loop_last_flag,,#{window-status-separator}},#[range=window|#{window_index}] #I:#W #[norange]#{?loop_last_flag,,#{window-status-separator}}}' #!important
+# Row 1 (bottom of the 2-row status bar): one dot per window, centred.
+# Inactive windows render ' · ', the active one renders ' ● ' in the
+# active-tab blue. Each dot carries a range=window|<idx> click zone,
+# so clicking a dot switches to that window — same hitbox idea as the
+# previous invisible-row, but with a useful pagination-style indicator
+# instead of a hidden text dummy.
+set -g status-format[1] '#[align=centre,fg=#45475a,bg=#1e1e2e,nobold,nounderscore]#{W:#[range=window|#{window_index}] · #[norange]#{?loop_last_flag,, │ },#[range=window|#{window_index}]#[fg=#89b4fa,bold] ● #[norange,fg=#45475a,nobold]#{?loop_last_flag,, │ }}' #!important
 
 # Window tabs — active tab is underlined (no bg block) so the gap with
 # inactive tabs is clearly visible; separator inherits window-status-style
