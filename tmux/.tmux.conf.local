@@ -41,9 +41,9 @@ set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 set -g status-left-length 50 #!important
 set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
 
-# Right: claude | cpu | ram | AWS | kubectl | time | date
-set -g status-right-length 160 #!important
-set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+# Right: python | claude | cpu | ram | AWS | kubectl | time | date
+set -g status-right-length 200 #!important
+set -g status-right '#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
 # Window tabs — 󰚩 icon when claude is the foreground process
 set -g window-status-format '#[fg=#6c7086]  #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W  ' #!important
