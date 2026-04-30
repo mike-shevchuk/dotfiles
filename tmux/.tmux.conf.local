@@ -33,6 +33,7 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
 
+set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
