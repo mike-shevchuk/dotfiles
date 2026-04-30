@@ -33,7 +33,6 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
 
-set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
@@ -47,9 +46,9 @@ set -g status-right-length 160 #!important
 set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
 # Window tabs — 󰚩 icon when claude is the foreground process
-set -g window-status-format '#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#[fg=#6c7086]#I:#W ' #!important
-set -g window-status-current-format '#{?#{==:#{pane_current_command},claude},#[bg=#313244,fg=#cba6f7,bold]󰚩 ,}#[bg=#313244,fg=#89b4fa,bold]#I:#W ' #!important
-set -g window-status-separator '' #!important
+set -g window-status-format '#[fg=#6c7086]  #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W  ' #!important
+set -g window-status-current-format '#[bg=#313244,fg=#89b4fa,bold]  #{?#{==:#{pane_current_command},claude},#[bg=#313244,fg=#cba6f7,bold]󰚩 ,}#I:#W  ' #!important
+set -g window-status-separator ' ' #!important
 
 # Pane borders — color reflects claude state
 #   amber (#f9e2af) = claude thinking/working
