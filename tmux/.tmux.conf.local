@@ -67,6 +67,11 @@ set -g window-status-separator '   ' #!important
 #   blue  (#89b4fa) = no claude / default
 set -g pane-border-style 'fg=#313244' #!important
 set -g pane-active-border-style '#{?#{==:#{pane_current_command},claude},fg=#cba6f7,fg=#89b4fa}' #!important
+# Light ASCII border (-|+) instead of solid box-drawing (─│┌┐) so the
+# active pane reads as a non-solid underline rather than a heavy frame.
+set -g pane-border-lines simple #!important
+# Colour the corners of the active pane so it's still easy to spot.
+set -g pane-border-indicators colour #!important
 set -g pane-border-status top #!important
 set -g pane-border-format ' #{?#{==:#{pane_current_command},claude},#{?#{==:#(~/.tmux-status.sh claude-state #{pane_id}),waiting},#[fg=#a6e3a1]󰚩 ready,#[fg=#f9e2af]󰚩 thinking} #[fg=#6c7086]│ ⏱ #(~/.tmux-status.sh claude-uptime #{pane_id}) │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}) ,}#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,},#[fg=#6c7086]#{pane_current_command} │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}) ,}#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}} ' #!important
 
