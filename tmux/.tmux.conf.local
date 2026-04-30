@@ -33,18 +33,21 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
 
-set -g status on #!important
+set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 
-# Left: prefix indicator + session name + session count
+# Left: prefix indicator + session name + session count (row 0)
 set -g status-left-length 50 #!important
 set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
 
-# Right: python | claude | cpu | ram | AWS | kubectl | time | date
+# Right (row 0) is empty — system info lives on row 1 (status-format[1]).
 set -g status-right-length 200 #!important
-set -g status-right '#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+set -g status-right '' #!important
+
+# Row 1 (bottom of the 2-row status bar): python | claude | cpu | ram | AWS | kubectl | time | date
+set -g status-format[1] '#[align=right,fg=#cdd6f4,bg=#1e1e2e]#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
 # Window tabs — active tab is underlined (no bg block) so the gap with
 # inactive tabs is clearly visible; separator inherits window-status-style
