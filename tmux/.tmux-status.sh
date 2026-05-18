@@ -1,7 +1,7 @@
 #!/bin/sh
 # tmux status-right helper — cross-platform (Linux + macOS)
 # Usage: .tmux-status.sh <segment>
-# Segments: cpu, ram, claude, sessions, claude-state, claude-uptime, pane-git, pane-python
+# Segments: cpu, ram, claude, sessions
 
 case "$1" in
 cpu)
@@ -131,38 +131,5 @@ pane-git)
     fi
 
     printf "%s%s" "$branch" "$wt"
-    ;;
-pane-python)
-    # Python version for a pane's cwd: mise (preferred) → pyenv fallback.
-    # Empty output when no project tool-config is found in the ancestry,
-    # so the status segment is hidden via #{?...} in tmux.conf.
-    # Usage: .tmux-status.sh pane-python <cwd>
-    cwd="$2"
-    [ -z "$cwd" ] && exit 0
-    [ ! -d "$cwd" ] && exit 0
-
-    if command -v mise >/dev/null 2>&1; then
-        d="$cwd"
-        while [ -n "$d" ] && [ "$d" != "/" ]; do
-            if [ -f "$d/.mise.toml" ] || [ -f "$d/mise.toml" ] || [ -f "$d/.tool-versions" ]; then
-                ver=$(cd "$cwd" 2>/dev/null && mise current python 2>/dev/null | head -1 | tr -d ' ')
-                [ -n "$ver" ] && printf "%s" "$ver" && exit 0
-                break
-            fi
-            d=$(dirname "$d")
-        done
-    fi
-
-    if command -v pyenv >/dev/null 2>&1; then
-        d="$cwd"
-        while [ -n "$d" ] && [ "$d" != "/" ]; do
-            if [ -f "$d/.python-version" ]; then
-                ver=$(cd "$cwd" 2>/dev/null && pyenv version-name 2>/dev/null)
-                [ -n "$ver" ] && printf "%s" "$ver" && exit 0
-                break
-            fi
-            d=$(dirname "$d")
-        done
-    fi
     ;;
 esac
