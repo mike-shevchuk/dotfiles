@@ -33,22 +33,36 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
 
+set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 
-# Left: prefix indicator + session name + session count
+# Left: prefix indicator + session name + session count (row 0)
 set -g status-left-length 50 #!important
 set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
 
-# Right: claude | cpu | ram | AWS | kubectl | time | date
-set -g status-right-length 160 #!important
-set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+# Right (row 0): python | claude | cpu | ram | AWS | kubectl | time | date
+set -g status-right-length 200 #!important
+set -g status-right '#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
-# Window tabs — 󰚩 icon when claude is the foreground process
-set -g window-status-format '#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#[fg=#6c7086]#I:#W ' #!important
-set -g window-status-current-format '#{?#{==:#{pane_current_command},claude},#[bg=#313244,fg=#cba6f7,bold]󰚩 ,}#[bg=#313244,fg=#89b4fa,bold]#I:#W ' #!important
-set -g window-status-separator '' #!important
+# Row 1 (bottom of the 2-row status bar): a dot under every window tab.
+# Each segment mirrors the row 0 tab WIDTH (same '#I:#W' content + same
+# claude-icon conditional) but every char is rendered fg=bg (#1e1e2e)
+# except a leading ' ·' (or ' ●' for the active tab in blue+bold). That
+# keeps tab boundaries identical to row 0, so the dot lands directly
+# under the start of its tab on the row above. The 12-space prefix
+# offsets row 1 past the rendered status-left on row 0.
+set -g status-format[1] '#[bg=#1e1e2e]            #{W:#[range=window|#{window_index}]#[fg=#1e1e2e,bg=#1e1e2e,nobold,nounderscore] #[fg=#6c7086]·#[fg=#1e1e2e]#{?#{==:#{pane_current_command},claude},󰚩 ,}#I:#W#[norange]#{?loop_last_flag,,#{window-status-separator}},#[range=window|#{window_index}]#[fg=#1e1e2e,bg=#1e1e2e,nobold,nounderscore] #[fg=#89b4fa,bold]●#[fg=#1e1e2e,nobold]#{?#{==:#{pane_current_command},claude},󰚩 ,}#I:#W#[norange]#{?loop_last_flag,,#{window-status-separator}}}' #!important
+
+# Window tabs — active tab is underlined (no bg block) so the gap with
+# inactive tabs is clearly visible; separator inherits window-status-style
+# which has no underline, so the underline doesn't run across the whole bar.
+set -g window-status-style 'fg=#6c7086' #!important
+set -g window-status-current-style 'fg=#89b4fa,bold,underscore' #!important
+set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
 # Pane borders — color reflects claude state
 #   amber (#f9e2af) = claude thinking/working
@@ -56,8 +70,13 @@ set -g window-status-separator '' #!important
 #   blue  (#89b4fa) = no claude / default
 set -g pane-border-style 'fg=#313244' #!important
 set -g pane-active-border-style '#{?#{==:#{pane_current_command},claude},fg=#cba6f7,fg=#89b4fa}' #!important
+# Light ASCII border (-|+) instead of solid box-drawing (─│┌┐) so the
+# active pane reads as a non-solid underline rather than a heavy frame.
+set -g pane-border-lines simple #!important
+# Colour the corners of the active pane so it's still easy to spot.
+set -g pane-border-indicators colour #!important
 set -g pane-border-status top #!important
-set -g pane-border-format ' #{?#{==:#{pane_current_command},claude},#{?#{==:#(~/.tmux-status.sh claude-state #{pane_id}),waiting},#[fg=#a6e3a1]󰚩 ready,#[fg=#f9e2af]󰚩 thinking} #[fg=#6c7086]│ ⏱ #(~/.tmux-status.sh claude-uptime #{pane_id}) │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),},#[fg=#6c7086]#{pane_current_command} │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),}} ' #!important
+set -g pane-border-format ' #{?#{==:#{pane_current_command},claude},#{?#{==:#(~/.tmux-status.sh claude-state #{pane_id}),waiting},#[fg=#a6e3a1]󰚩 ready,#[fg=#f9e2af]󰚩 thinking} #[fg=#6c7086]│ ⏱ #(~/.tmux-status.sh claude-uptime #{pane_id}) │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}) ,}#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,},#[fg=#6c7086]#{pane_current_command} │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}) ,}#{?#(~/.tmux-status.sh pane-python #{pane_current_path}),#[fg=#f9e2af]🐍 #(~/.tmux-status.sh pane-python #{pane_current_path}) ,}} ' #!important
 
 # Message style
 set -g message-style 'bg=#313244 fg=#cdd6f4' #!important
