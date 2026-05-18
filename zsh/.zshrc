@@ -158,6 +158,38 @@ alias ll='ls -lh'
 alias nv='nvim'
 alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
 
+# Just — fzf chooser wrappers that echo the resolved command before running.
+#   jj   = local justfile chooser  (cwd's justfile)
+#   jjg  = global justfile chooser (~/.config/just/justfile via -g)
+#   jd   = dry-run mode (alias for --dry-run, pair with --choose)
+#   jv   = verbose mode (echoes each shell line)
+#   jq-  = quiet mode (jq is the JSON tool, so we suffix)
+# `just install-global` from ~/dotfiles wires the -g symlink the first time.
+_just_pick() {
+    # $1 = "" for local, "-g" for global
+    local flag="$1" picked recipe
+    picked=$(just $flag --list 2>/dev/null | tail -n +2 | grep -v '^[[:space:]]*$' \
+        | fzf --ansi \
+              --prompt="just $flag > " \
+              --header='enter=run · type to filter · esc=cancel' \
+              --preview='r=$(echo {} | awk "{print \$1}"); case "$r" in \[*|"") echo "(group header — pick a recipe)" ;; *) just '"$flag"' --show "$r" 2>/dev/null ;; esac' \
+              --preview-window='right,55%,wrap')
+    [ -z "$picked" ] && return 0
+    recipe=$(echo "$picked" | awk '{print $1}')
+    case "$recipe" in
+        \[*|"") return 0 ;;   # group header line — ignore
+    esac
+    echo "→ just $flag $recipe" >&2
+    eval "just $flag \"$recipe\""
+}
+jj()  { _just_pick "" }
+jjg() { _just_pick "-g" }
+alias jg='just -g'              # global justfile shorthand: `jg weather`, `jg ls`
+alias jgl='just -g --list'      # grouped list of every global recipe
+alias jd='just --dry-run'
+alias jv='just --verbose'
+alias 'jq-'='just --quiet'
+
 # Git
 alias gs='git status'
 alias ga='git add'
