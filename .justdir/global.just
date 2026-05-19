@@ -60,18 +60,21 @@ git-status-all:
     #!/usr/bin/env bash
     set -uo pipefail
     echo "→ scanning git repos for uncommitted changes..." >&2
+    dirty_count=0
     for root in "$HOME/dotfiles" "$HOME/zettelkasten" "$HOME/code"; do
         [ -d "$root" ] || continue
-        find "$root" -maxdepth 3 -type d -name .git 2>/dev/null | while read -r dot; do
+        while IFS= read -r dot; do
             repo="$(dirname "$dot")"
             dirty=$(git -C "$repo" status --short 2>/dev/null)
             if [ -n "$dirty" ]; then
+                dirty_count=$((dirty_count + 1))
                 echo ""
                 echo "  ${repo/$HOME/~}:"
                 echo "$dirty" | sed 's/^/    /'
             fi
-        done
+        done < <(find "$root" -maxdepth 3 -type d -name .git 2>/dev/null)
     done
+    echo "  OK — $dirty_count repo(s) with uncommitted changes" >&2
 
 # --- Reddit daily digest ----------------------------------------------------
 
@@ -140,12 +143,14 @@ night-job:
 [group('night')]
 night-log n="4":
     #!/usr/bin/env bash
+    [[ "{{n}}" =~ ^[0-9]+$ ]] || { echo "FAIL — n must be a positive integer, got: {{n}}" >&2; exit 1; }
     log="$HOME/.cache/night-jobs/summary.log"
     if [ ! -f "$log" ]; then
         echo "no log yet at $log — run: just -g night-job" >&2; exit 0
     fi
     # 6 lines per box → show last n*6 lines, then colourize OK/FAIL/SKIP
     lines=$(( {{n}} * 6 ))
+    echo "→ tail -$lines $log (last {{n}} box(es))" >&2
     tail -"$lines" "$log" \
         | sed -E "s/OK  /$(printf '\033[32m')OK  $(printf '\033[0m')/g" \
         | sed -E "s/FAIL/$(printf '\033[31m')FAIL$(printf '\033[0m')/g" \
@@ -155,10 +160,12 @@ night-log n="4":
 [group('night')]
 night-log-detail n="100":
     #!/usr/bin/env bash
+    [[ "{{n}}" =~ ^[0-9]+$ ]] || { echo "FAIL — n must be a positive integer, got: {{n}}" >&2; exit 1; }
     log="$HOME/.cache/night-jobs/detail.log"
     if [ ! -f "$log" ]; then
         echo "no detail log yet at $log — run: just -g night-job" >&2; exit 0
     fi
+    echo "→ tail -{{n}} $log" >&2
     tail -{{n}} "$log"
 
 # Install a cron entry that runs night-job at HOUR:00 daily (default 03:00)
@@ -166,6 +173,7 @@ night-log-detail n="100":
 night-install hour="3":
     #!/usr/bin/env bash
     set -euo pipefail
+    [[ "{{hour}}" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || { echo "FAIL — hour must be 0-23, got: {{hour}}" >&2; exit 1; }
     just_bin=$(command -v just || echo /opt/homebrew/bin/just)
     line="0 {{hour}} * * * $just_bin -g night-job >/dev/null 2>&1"
     echo "→ proposed crontab entry:" >&2
@@ -232,23 +240,34 @@ forecast-narrow city="":
     echo "━━━ curl -s '$url' ━━━" >&2
     curl -s "$url"
 
+# Resolve a city (or auto-detect via ip-api) → lat<TAB>lon<TAB>name on stdout
+[group('system')]
+[private]
+_resolve-location city="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ -z "{{city}}" ]; then
+        geo_url="http://ip-api.com/json/?fields=city,lat,lon"
+        echo "━━━ curl -s '$geo_url' ━━━" >&2
+        curl -s "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
+    else
+        city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+        geo_url="https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}"
+        echo "━━━ curl -s '$geo_url' ━━━" >&2
+        out=$(curl -s "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
+        [ -z "$out" ] && { echo "  FAIL — city '{{city}}' not found" >&2; exit 1; }
+        printf '%s\n' "$out"
+    fi
+
 # Pretty 24h chart: Unicode temp chart + rain/precip-prob/wind bars (Open-Meteo)
 [group('system')]
 forecast-chart city="":
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ -z "{{city}}" ]; then
-        loc=$(curl -s "http://ip-api.com/json/?fields=city,lat,lon")
-        lat=$(echo "$loc" | jq -r .lat); lon=$(echo "$loc" | jq -r .lon)
-        name=$(echo "$loc" | jq -r .city)
-    else
-        city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-        geo=$(curl -s "https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}")
-        lat=$(echo "$geo" | jq -r '.results[0].latitude // empty')
-        lon=$(echo "$geo" | jq -r '.results[0].longitude // empty')
-        name=$(echo "$geo" | jq -r '.results[0].name // "{{city}}"')
-        [ -z "$lat" ] && { echo "  FAIL — city not found" >&2; exit 1; }
-    fi
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching 24h forecast for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
     echo "━━━ curl -s '$url' ━━━" >&2
     fc=$(curl -s "$url")
@@ -346,21 +365,12 @@ forecast-graph city="":
 forecast-hourly city="":
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ -z "{{city}}" ]; then
-        loc=$(curl -s "http://ip-api.com/json/?fields=city,lat,lon")
-        lat=$(echo "$loc" | jq -r .lat); lon=$(echo "$loc" | jq -r .lon)
-        name=$(echo "$loc" | jq -r .city)
-    else
-        city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-        geo=$(curl -s "https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}")
-        lat=$(echo "$geo" | jq -r '.results[0].latitude // empty')
-        lon=$(echo "$geo" | jq -r '.results[0].longitude // empty')
-        name=$(echo "$geo" | jq -r '.results[0].name // "{{city}}"')
-        [ -z "$lat" ] && { echo "  FAIL — city not found" >&2; exit 1; }
-    fi
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching next 24h for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
     echo "━━━ curl -s '$url' ━━━" >&2
-    echo "→ next 24h for $name" >&2
     curl -s "$url" | jq -r '
         .hourly as $h
         | "  time              temp    precip   p(%)   wind",
@@ -374,26 +384,13 @@ forecast-hourly city="":
 forecast-week city="":
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ -z "{{city}}" ]; then
-        echo "→ resolving location via ip-api.com" >&2
-        loc=$(curl -s "http://ip-api.com/json/?fields=city,lat,lon")
-        lat=$(echo "$loc" | jq -r .lat)
-        lon=$(echo "$loc" | jq -r .lon)
-        name=$(echo "$loc" | jq -r .city)
-    else
-        city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-        geo_url="https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}"
-        echo "━━━ curl -s '$geo_url' ━━━" >&2
-        geo=$(curl -s "$geo_url")
-        lat=$(echo "$geo" | jq -r '.results[0].latitude // empty')
-        lon=$(echo "$geo" | jq -r '.results[0].longitude // empty')
-        name=$(echo "$geo" | jq -r '.results[0].name // "{{city}}"')
-        [ -z "$lat" ] && { echo "  FAIL — city not found" >&2; exit 1; }
-    fi
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching 7-day forecast for $name (lat=$lat lon=$lon)..." >&2
     fc_url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=auto&forecast_days=7"
     echo "━━━ curl -s '$fc_url' ━━━" >&2
     fc=$(curl -s "$fc_url")
-    echo "→ 7-day forecast for $name (lat=$lat lon=$lon)" >&2
     echo "$fc" | jq -r '
         def wmo(c):
             {"0":"☀️  clear","1":"🌤️  mostly clear","2":"⛅️ partly cloudy","3":"☁️  overcast",
@@ -433,7 +430,7 @@ todo-today:
     if [ -z "${TODOIST_TOKEN:-}" ]; then
         echo "TODOIST_TOKEN not set — add it to ~/dotfiles/.env" >&2; exit 1
     fi
-    echo "━━━ curl -s -G https://api.todoist.com/api/v1/tasks --data-urlencode filter=today ━━━" >&2
+    echo "━━━ curl -s -G 'https://api.todoist.com/api/v1/tasks' --data-urlencode 'filter=today' -H 'Authorization: Bearer \$TODOIST_TOKEN' ━━━" >&2
     curl -s -G "https://api.todoist.com/api/v1/tasks" \
         --data-urlencode "filter=today" \
         -H "Authorization: Bearer $TODOIST_TOKEN" \
@@ -451,6 +448,7 @@ tokens:
 [group('search')]
 pickdir:
     #!/usr/bin/env bash
+    echo "→ fd dirs under \$HOME → fzf..." >&2
     fd --type d --hidden --exclude .git --exclude node_modules . "$HOME" \
         | fzf --prompt="cd → " --height=50% --border --preview='ls -la {}'
 
@@ -458,7 +456,8 @@ pickdir:
 [group('search')]
 rgp pattern:
     #!/usr/bin/env bash
-    rg --color=always --line-number "{{pattern}}" \
+    echo "→ rg '{{pattern}}' in $(pwd) → fzf+bat preview..." >&2
+    rg --color=always --line-number -- "{{pattern}}" \
         | fzf --ansi --delimiter=: \
               --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
