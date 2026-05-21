@@ -144,6 +144,12 @@ bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux
 # bind B display-popup -E -w 85% -h 85% "btop"
 
 
+# -- Force UTF-8 locale in spawned panes --------------------------------------
+# Rescue cyrillic/box-drawing over SSH when LANG isn't forwarded from client.
+set-environment -g LANG en_US.UTF-8
+set-environment -g LC_ALL en_US.UTF-8
+
+
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
 run '~/.tmux/plugins/tpm/tpm'

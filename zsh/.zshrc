@@ -341,6 +341,7 @@ alias jf='fjob'
 alias td="todoist-cli --color --namespace --indent --project-namespace"
 
 # Tmux management
+alias tmux='tmux -u'  # force UTF-8 mode (cyrillic/box-drawing over SSH when LANG isn't forwarded)
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
 
 # Find file by content: rg -> fzf (live) -> open in $EDITOR at line
