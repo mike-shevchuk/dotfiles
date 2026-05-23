@@ -144,6 +144,22 @@ bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux
 # bind B display-popup -E -w 85% -h 85% "btop"
 
 
+# -- History scrolling: hotkey + mouse wheel ----------------------------------
+# Shift+PageUp / Shift+PageDown scroll the pane history without prefix.
+# Mouse wheel already scrolls via `set -g mouse on` in base config.
+
+# Outside copy-mode: Shift+PageUp enters copy-mode and pages up.
+bind -n S-PageUp copy-mode -u
+
+# Inside copy-mode: Shift+PageUp / Shift+PageDown keep paging.
+bind -T copy-mode-vi S-PageUp   send-keys -X page-up
+bind -T copy-mode-vi S-PageDown send-keys -X page-down
+
+# Smoother wheel scrolling: 3 lines per tick instead of the default 5.
+bind -T copy-mode-vi WheelUpPane   select-pane \; send-keys -X -N 3 scroll-up
+bind -T copy-mode-vi WheelDownPane select-pane \; send-keys -X -N 3 scroll-down
+
+
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
 run '~/.tmux/plugins/tpm/tpm'
