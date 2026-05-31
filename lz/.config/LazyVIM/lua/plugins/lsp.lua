@@ -1,111 +1,8 @@
-local lsp_old = {
-  "neovim/nvim-lspconfig",
-  event = { "BufReadPre", "BufNewFile" },
-  dependencies = {
-    -- Mason installer
-    "mason-org/mason.nvim",
-    "mason-org/mason-lspconfig.nvim",
-    -- Optional: auto-install for null-ls tools
-    "jay-babu/mason-null-ls.nvim",
-
-    -- Extra LSP enhancements
-    "nvimtools/none-ls.nvim", -- null-ls
-    "nvim-lua/plenary.nvim", -- needed for null-ls
-    "j-hui/fidget.nvim", -- status UI
-    "ray-x/lsp_signature.nvim", -- inline arg hints
-    "folke/lazydev.nvim", -- better Lua dev (replaces neodev)
-  },
-
-  config = function()
-    -- === Setup core plugins ===
-    require("mason").setup()
-    require("fidget").setup()
-    require("lazydev").setup({})
-
-    local lspconfig = require("lspconfig")
-    local mason_lspconfig = require("mason-lspconfig")
-    local null_ls = require("null-ls")
-    local mason_null_ls = require("mason-null-ls")
-
-    -- === Setup LSP servers ===
-    local capabilities = require("cmp_nvim_lsp").default_capabilities()
-
-    local servers = {
-      lua_ls = {},
-      pyright = {},
-      ts_ls = {},
-      html = {},
-      cssls = {},
-      jsonls = {},
-      yamlls = {},
-      bashls = {},
-      dockerls = {},
-      marksman = {},
-    }
-
-    mason_lspconfig.setup({
-      ensure_installed = vim.tbl_keys(servers),
-      automatic_installation = true,
-    })
-
-    for name, opts in pairs(servers) do
-      lspconfig[name].setup({
-        capabilities = capabilities,
-        settings = opts,
-        on_attach = function(_, bufnr)
-          require("lsp_signature").on_attach({
-            bind = true,
-            hint_prefix = "💡 ",
-            handler_opts = { border = "rounded" },
-          }, bufnr)
-        end,
-      })
-    end
-
-    -- === Setup Null-LS ===
-    null_ls.setup({
-      sources = {
-        -- Formatters
-        null_ls.builtins.formatting.prettier.with({
-          filetypes = { "json", "yaml", "markdown", "html", "css", "javascript" },
-        }),
-        null_ls.builtins.formatting.ruff_format, -- python (fast, primary)
-        -- null_ls.builtins.formatting.black, -- python (fallback)
-        null_ls.builtins.formatting.stylua, -- lua
-
-        -- Linters
-        null_ls.builtins.diagnostics.ruff, -- python (fast, primary)
-        -- null_ls.builtins.diagnostics.flake8, -- python (fallback)
-        null_ls.builtins.diagnostics.eslint,
-      },
-      on_attach = function(client, bufnr)
-        if client.supports_method("textDocument/formatting") then
-          vim.api.nvim_create_autocmd("BufWritePre", {
-            buffer = bufnr,
-            callback = function()
-              vim.lsp.buf.format({ bufnr = bufnr })
-            end,
-          })
-        end
-      end,
-    })
-
-    -- Automatically install formatters/linters
-    mason_null_ls.setup({
-      ensure_installed = {
-        "prettier",
-        "stylua",
-        "ruff",
-        "black", -- fallback
-        "flake8", -- fallback
-        "eslint_d",
-      },
-      automatic_installation = true,
-    })
-  end,
-}
-
-local merg_lsp = {
+-- LSP — cross-platform (Linux + macOS).
+-- Modern mason-lspconfig 2.x flow: NO `setup_handlers` (removed in 2.x).
+-- We register global defaults with `vim.lsp.config` and let mason-lspconfig
+-- auto-enable installed servers (`automatic_enable`, on by default).
+return {
   {
     "folke/lazydev.nvim",
     ft = "lua",
@@ -120,41 +17,59 @@ local merg_lsp = {
       "hrsh7th/cmp-nvim-lsp",
       "ray-x/lsp_signature.nvim",
       "mrjones2014/legendary.nvim",
+      "FeiyouG/commander.nvim",
     },
     config = function()
-      local lspconfig = require("lspconfig")
       local mason = require("mason")
       local mason_lspconfig = require("mason-lspconfig")
       local cmp_nvim_lsp = require("cmp_nvim_lsp")
-      local commander = require("commander")
+
+      -- Servers we want installed + enabled. `ts_ls` is the current name for the
+      -- TypeScript server (old alias `typescript-language-server` removed).
+      local servers = {
+        "lua_ls",
+        "bashls",
+        "pyright",
+        "ruff", -- python linter + formatter (replaces flake8 + black)
+        "html",
+        "cssls",
+        "jsonls",
+        "yamlls",
+        "dockerls",
+        "ts_ls",
+        "marksman",
+      }
 
       mason.setup()
       mason_lspconfig.setup({
-        ensure_installed = {
-          "typescript-language-server",
-          "lua_ls",
-          "bashls",
-          "pyright",
-          "ruff", -- python linter+formatter (replaces flake8+black)
-          "html",
-          "cssls",
-          "jsonls",
-          "ts_ls",
-          "marksman",
-        },
-        automatic_installation = true,
+        ensure_installed = servers,
+        automatic_enable = true, -- enables installed servers via vim.lsp.enable
       })
 
+      -- Global defaults applied to every server (capabilities for nvim-cmp).
       local capabilities = cmp_nvim_lsp.default_capabilities()
+      vim.lsp.config("*", { capabilities = capabilities })
 
-      local function on_attach(_, bufnr)
-        require("lsp_signature").on_attach({
-          bind = true,
-          handler_opts = { border = "rounded" },
-          hint_prefix = "💡 ",
-        }, bufnr)
+      -- Attach-time behaviour: signature hints. Runs for every server.
+      vim.api.nvim_create_autocmd("LspAttach", {
+        group = vim.api.nvim_create_augroup("user_lsp_attach", { clear = true }),
+        callback = function(args)
+          local ok, sig = pcall(require, "lsp_signature")
+          if ok then
+            sig.on_attach({
+              bind = true,
+              handler_opts = { border = "rounded" },
+              hint_prefix = "💡 ",
+            }, args.buf)
+          end
+        end,
+      })
 
-        -- Register all LSP commands via commander
+      -- LSP actions surfaced in commander / legendary palettes (discoverable via
+      -- <leader>fk / <leader>fi). These reference vim.lsp.buf.* which no-op
+      -- cleanly outside an LSP buffer.
+      local ok, commander = pcall(require, "commander")
+      if ok then
         commander.add({
           { keys = { "n", "K" }, cmd = vim.lsp.buf.hover, desc = "LSP: Hover" },
           { keys = { "n", "<leader>gd" }, cmd = vim.lsp.buf.definition, desc = "LSP: Go to Definition" },
@@ -168,7 +83,6 @@ local merg_lsp = {
           -- Navigation like VSCode
           { keys = { "n", "<leader>g<" }, cmd = "<C-o>", desc = "LSP: Go Back (Jump List)" },
           { keys = { "n", "<leader>g>" }, cmd = "<C-i>", desc = "LSP: Go Forward (Jump List)" },
-
           {
             keys = { "n", "<leader>lf" },
             cmd = function()
@@ -176,27 +90,24 @@ local merg_lsp = {
             end,
             desc = "LSP: Format File",
           },
-
           -- Diagnostics
-          { keys = { "n", "[d" }, cmd = function() vim.diagnostic.jump({ count = -1 }) end, desc = "LSP: Prev Diagnostic" },
-          { keys = { "n", "]d" }, cmd = function() vim.diagnostic.jump({ count = 1 }) end, desc = "LSP: Next Diagnostic" },
+          {
+            keys = { "n", "[d" },
+            cmd = function()
+              vim.diagnostic.jump({ count = -1 })
+            end,
+            desc = "LSP: Prev Diagnostic",
+          },
+          {
+            keys = { "n", "]d" },
+            cmd = function()
+              vim.diagnostic.jump({ count = 1 })
+            end,
+            desc = "LSP: Next Diagnostic",
+          },
           { keys = { "n", "<leader>dl" }, cmd = vim.diagnostic.open_float, desc = "LSP: Show Line Diagnostic" },
         })
       end
-
-      -- Auto-setup all servers via mason
-      mason_lspconfig.setup_handlers({
-        function(server_name)
-          lspconfig[server_name].setup({
-            capabilities = capabilities,
-            on_attach = on_attach,
-          })
-        end,
-      })
     end,
   },
-}
-
-return {
-  merg_lsp,
 }
