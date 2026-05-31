@@ -5,6 +5,7 @@ return {
     "nvim-lua/plenary.nvim",
     "nvim-tree/nvim-web-devicons",
     "MunifTanjim/nui.nvim",
+    "FeiyouG/commander.nvim", -- ensure commander is loaded before this config runs
   },
   config = function()
     local commander = require("commander")

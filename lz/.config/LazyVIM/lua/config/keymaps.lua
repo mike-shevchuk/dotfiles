@@ -4,11 +4,11 @@
 
 local st = vim.keymap.set
 
-local leg = require("legendary")
-local commander = require("commander")
--- local print = require("notify").print
--- leg.bind_whichkey(keymap, v_opts, false)
--- leg.bind_whichkey(keymap, opts, false)
+-- commander is eager-loaded; guard anyway so a load-order change can't break startup.
+local ok_commander, commander = pcall(require, "commander")
+if not ok_commander then
+  return
+end
 
 local get_input = function(prompt)
   local co = coroutine.running()
