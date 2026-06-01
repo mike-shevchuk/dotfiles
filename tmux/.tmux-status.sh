@@ -145,11 +145,13 @@ EOF
 }
 
 get_git() {
-    # branch (+ [wt:name] when in a linked worktree) for a cwd
+    # branch (+ [wt:name] when in a linked worktree) for a cwd.
+    # Usage: get_git <cwd> [branch]   (pass branch to avoid a duplicate git call)
     cwd="$1"
     [ -z "$cwd" ] && return 0
     [ -d "$cwd" ] || return 0
-    branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    branch="$2"
+    [ -z "$branch" ] && branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
     [ -z "$branch" ] && return 0
     git_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-dir 2>/dev/null)
     common_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-common-dir 2>/dev/null)
@@ -230,18 +232,27 @@ get_pr() {
     # Cached in /tmp/claude — same cache dir + mtime-TTL pattern the Claude Code
     # statusline uses (claude/.claude/statusline.sh). gh is ~0.7s + network +
     # rate-limited, so we only call it when the cache is older than 90s.
+    #
+    # CONTRACT: on a cache miss this BLOCKS for the duration of the gh call
+    # (~0.7s). Call it only from background contexts (run-shell -b) — never from
+    # a synchronous #() in status/pane-border-format, or it stalls the redraw.
+    #
+    # Usage: get_pr <cwd> [branch]   (pass branch to avoid a duplicate git call)
     cwd="$1"
     [ -z "$cwd" ] && return 0
     [ -d "$cwd" ] || return 0
     command -v gh >/dev/null 2>&1 || return 0
 
-    branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    branch="$2"
+    [ -z "$branch" ] && branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
     [ -z "$branch" ] && return 0
 
     dir=/tmp/claude
     mkdir -p "$dir" 2>/dev/null
     root=$(git -C "$cwd" --no-optional-locks rev-parse --show-toplevel 2>/dev/null)
-    key=$(printf '%s:%s' "$root" "$branch" | tr '/ :.' '____')
+    # Only fold path separators + spaces into '_'; keep ':'/'.' distinct so
+    # different repos/branches can't collide onto one cache file.
+    key=$(printf '%s:%s' "$root" "$branch" | tr '/ ' '__')
     cache="$dir/tmux-pr-$key.txt"
 
     # Fresh cache (TTL 90s) → serve without touching the network.
@@ -276,7 +287,10 @@ get_pr() {
                 end )
             else empty end' 2>/dev/null)
     fi
-    printf '%s' "$out" > "$cache.tmp" 2>/dev/null && mv "$cache.tmp" "$cache" 2>/dev/null
+    # Unique temp per process ($$) so concurrent background refreshes for the
+    # same branch can't clobber a shared temp mid-write.
+    tmp="$cache.$$"
+    printf '%s' "$out" > "$tmp" 2>/dev/null && mv "$tmp" "$cache" 2>/dev/null
     printf '%s' "$out"
 }
 
@@ -306,9 +320,11 @@ refresh-pane)
     # segment runs under `run-shell -b`, so even that never blocks the UI.
     cwd="$2"
     [ -z "$cwd" ] && cwd=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null)
-    _git=$(get_git "$cwd")
+    # Resolve the branch once and share it with get_git + get_pr.
+    _branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    _git=$(get_git "$cwd" "$_branch")
     _py=$(get_python "$cwd")
-    _pr=$(get_pr "$cwd")
+    _pr=$(get_pr "$cwd" "$_branch")
     _path=$(shorten_path "$cwd")
     tmux set -g @pane_git "$_git" \; \
          set -g @pane_python "$_py" \; \
