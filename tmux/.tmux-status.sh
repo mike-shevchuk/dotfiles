@@ -193,10 +193,12 @@ get_python() {
 }
 
 shorten_path() {
-    # Compact a path for the status bar: $HOME → ~, then fish-style abbreviate
-    # every leading component to its first char (keeping a leading dot), and
-    # keep the final component in full. e.g.
-    #   /Users/me/dotfiles/.claude/worktrees/tmux → ~/d/.c/w/tmux
+    # Compact a path for the status bar without making it cryptic: $HOME → ~,
+    # keep full directory NAMES, and only elide the MIDDLE when the path is long
+    # (more than 3 components after ~/root), keeping the parent + current dir:
+    #   /Users/me/dotfiles/.claude/worktrees/tmux → ~/…/worktrees/tmux
+    #   ~/dotfiles/foo                            → ~/dotfiles/foo   (left as-is)
+    #   /usr/local/bin                            → /usr/local/bin   (left as-is)
     p="$1"
     [ -z "$p" ] && return 0
     [ "$p" = "/" ] && { printf '/'; return 0; }
@@ -205,24 +207,21 @@ shorten_path() {
         "$HOME"/*)  p="~/${p#"$HOME"/}" ;;
     esac
     case "$p" in
-        */*) ;;                       # only abbreviate when there's a prefix
-        *)   printf '%s' "$p"; return 0 ;;
+        '~/'*) pfx='~/'; body="${p#'~/'}" ;;
+        /*)    pfx='/';  body="${p#/}" ;;   # absolute, non-home
+        *)     pfx='';   body="$p" ;;       # relative
     esac
-    last="${p##*/}"
-    head="${p%/*}"
-    out=""
-    OLDIFS=$IFS; IFS=/
-    for seg in $head; do
-        case "$seg" in
-            "")  abbr="" ;;           # leading empty = absolute root
-            "~") abbr="~" ;;
-            .?*) abbr=".$(printf '%s' "${seg#.}" | cut -c1)" ;;  # .claude → .c
-            *)   abbr=$(printf '%s' "$seg" | cut -c1) ;;
-        esac
-        out="$out$abbr/"
-    done
-    IFS=$OLDIFS
-    printf '%s%s' "$out" "$last"
+    # Short enough (≤3 components) → leave it readable in full.
+    n=$(printf '%s\n' "$body" | tr '/' '\n' | grep -c .)
+    if [ "${n:-0}" -le 3 ]; then
+        printf '%s' "$p"
+        return 0
+    fi
+    # Long → keep the last two components, elide the rest with …
+    last1="${body##*/}"
+    rest="${body%/*}"
+    last2="${rest##*/}"
+    printf '%s…/%s/%s' "$pfx" "$last2" "$last1"
 }
 
 get_pr() {
