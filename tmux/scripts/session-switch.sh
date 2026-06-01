@@ -19,8 +19,12 @@ if [ "${1:-}" = "--preview" ]; then
     attached=$(tmux display-message -t "$sess" -p '#{?session_attached,● attached,○ detached}' 2>/dev/null)
     printf '\033[1;36m%s\033[0m  %s\n\n' "$sess" "$attached"
     printf '\033[1mwindows\033[0m\n'
+    # No ANSI inside the tmux -F string — tmux does not interpret \033 and would
+    # print it literally. Mark the active window with a plain token, then colour
+    # it here with a real ESC via sed.
     tmux list-windows -t "$sess" \
-        -F '  #I: #W  (#{window_panes}p)#{?window_active,  \033[33m← active\033[0m,}' 2>/dev/null
+        -F '  #I: #W  (#{window_panes}p)#{?window_active,  <<A>>,}' 2>/dev/null \
+        | sed $'s/<<A>>/\033[33m← active\033[0m/'
     cl=$(tmux list-panes -s -t "$sess" -F '#{pane_current_command}' 2>/dev/null | grep -c '^claude$')
     path=$(tmux display-message -t "$sess" -p '#{pane_current_path}' 2>/dev/null)
     printf '\n\033[1mclaude panes:\033[0m %s\n' "${cl:-0}"
@@ -29,7 +33,9 @@ if [ "${1:-}" = "--preview" ]; then
 fi
 
 current=$(tmux display-message -p '#S' 2>/dev/null)
-others=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -v "^${current}\$")
+# -Fxv: fixed-string, whole-line, inverted — exclude the current session without
+# treating its name as a regex.
+others=$(tmux list-sessions -F '#{session_name}' 2>/dev/null | grep -Fxv "$current")
 [ -z "$others" ] && die "only one session open ($current)"
 
 self="${BASH_SOURCE[0]}"
@@ -40,4 +46,4 @@ sess=$(printf '%s\n' "$others" | fzf \
     --preview-window='right:55%')
 
 [ -z "$sess" ] && exit 0
-tmux switch-client -t "$sess"
+tmux switch-client -t "=$sess"   # '=' → exact name match

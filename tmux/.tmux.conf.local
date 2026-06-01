@@ -96,6 +96,9 @@ set -g message-style 'bg=#313244 fg=#cdd6f4' #!important
 
 # Active-pane context (@pane_git/@pane_python/@pane_path) — refreshed only on
 # user navigation, never on the 5s redraw tick. -b keeps tmux non-blocking.
+# CAVEAT: these are GLOBAL options. With two clients attached to different
+# sessions, row 1 reflects whichever pane was focused last (tmux has no
+# convenient per-client user-options). Correct for the common single-client case.
 set-hook -g after-select-pane    'run-shell -b "~/.tmux-status.sh refresh-pane"'
 set-hook -g after-select-window  'run-shell -b "~/.tmux-status.sh refresh-pane"'
 set-hook -g pane-focus-in        'run-shell -b "~/.tmux-status.sh refresh-pane"'

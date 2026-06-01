@@ -54,4 +54,5 @@ sel=$(printf '%s\n' "$rows" | fzf \
 pid=$(printf '%s' "$sel" | cut -f1)
 [ -z "$pid" ] && exit 0
 sess=$(tmux display-message -t "$pid" -p '#S' 2>/dev/null)
-tmux switch-client -t "$sess" \; select-window -t "$pid" \; select-pane -t "$pid"
+# '=' → exact session-name match (avoid prefix/pattern ambiguity)
+tmux switch-client -t "=$sess" \; select-window -t "$pid" \; select-pane -t "$pid"

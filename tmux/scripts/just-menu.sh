@@ -38,7 +38,12 @@ emit_recipes() {
         trimmed=$(printf '%s' "$line" | sed -E 's/^[[:space:]]+//')
         [ -z "$trimmed" ] && continue
         name=$(printf '%s' "$trimmed" | awk '{print $1}')
-        [ -z "$name" ] && continue
+        # Keep only valid recipe names. `just --list` also prints group headers
+        # ([group]) and attribute lines for grouped justfiles — those contain
+        # chars outside [A-Za-z0-9_-], so this skips them.
+        case "$name" in
+            ''|*[!A-Za-z0-9_-]*) continue ;;
+        esac
         printf '%s\t%s\t%-7s %s\n' "$jf" "$name" "[$label]" "$trimmed"
     done
 }
