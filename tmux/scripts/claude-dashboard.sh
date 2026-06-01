@@ -7,11 +7,11 @@
 # Portable to bash 3.2 (macOS).
 set -uo pipefail
 
+. "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 STATUS="$HOME/.tmux-status.sh"
-die() { printf '%s\n' "$*" >&2; printf 'press any key…' >&2; read -rsn1 _ 2>/dev/null || true; exit 1; }
 
 [ -n "${TMUX:-}" ] || die "not inside tmux"
-command -v fzf >/dev/null 2>&1 || die "fzf not installed — brew install fzf"
+need fzf "brew install fzf"
 
 # ─── Preview mode: tail the pane whose id is passed as $2 ────────────────────
 if [ "${1:-}" = "--preview" ]; then

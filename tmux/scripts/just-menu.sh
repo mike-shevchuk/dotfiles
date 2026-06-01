@@ -10,11 +10,11 @@
 #
 # Portable to bash 3.2 (macOS).
 set -uo pipefail
+. "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 GLOBAL_JF="$HOME/dotfiles/justfile"
-die() { printf '%s\n' "$*" >&2; printf 'press any key…' >&2; read -rsn1 _ 2>/dev/null || true; exit 1; }
 
-command -v just >/dev/null 2>&1 || die "just not installed — brew install just"
+need just "brew install just"
 
 # ─── Locate the project justfile by walking up from the cwd ──────────────────
 find_project_justfile() {
@@ -60,7 +60,7 @@ if [ "${1:-}" = "--list" ]; then
     exit 0
 fi
 
-command -v fzf >/dev/null 2>&1 || die "fzf not installed — brew install fzf"
+need fzf "brew install fzf"
 
 sel=$(printf '%s\n' "$rows" | fzf \
     --prompt='just recipe > ' \

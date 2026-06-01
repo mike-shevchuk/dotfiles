@@ -38,9 +38,12 @@ get_ram() {
         page_size=$(sysctl -n hw.pagesize 2>/dev/null || echo 4096)
         total=$(sysctl -n hw.memsize 2>/dev/null || echo 0)
         [ "$total" -eq 0 ] 2>/dev/null && { printf "?"; return; }
-        free_pages=$(vm_stat | awk '/Pages free/ {gsub(/\./,"",$3); print $3}')
-        inactive_pages=$(vm_stat | awk '/Pages inactive/ {gsub(/\./,"",$3); print $3}')
-        free_bytes=$(( (${free_pages:-0} + ${inactive_pages:-0}) * page_size ))
+        # one vm_stat call: sum free + inactive pages in a single awk pass
+        free_pages=$(vm_stat | awk '
+            /Pages free/     {gsub(/\./,"",$3); f=$3}
+            /Pages inactive/ {gsub(/\./,"",$3); i=$3}
+            END {print f + i}')
+        free_bytes=$(( ${free_pages:-0} * page_size ))
         awk "BEGIN {printf \"%.0f%%\", (1 - $free_bytes/$total) * 100}"
     else
         printf "?"

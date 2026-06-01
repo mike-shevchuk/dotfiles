@@ -7,11 +7,10 @@
 #
 # Portable to bash 3.2 (macOS): no mapfile / no ${var,,}.
 set -uo pipefail
-
-die() { printf '%s\n' "$*" >&2; printf 'press any key…' >&2; read -rsn1 _ 2>/dev/null || true; exit 1; }
+. "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 [ -n "${TMUX:-}" ] || die "not inside tmux"
-command -v fzf >/dev/null 2>&1 || die "fzf not installed — brew install fzf"
+need fzf "brew install fzf"
 
 # ─── Preview mode (fzf re-invokes this script with --preview <session>) ──────
 if [ "${1:-}" = "--preview" ]; then

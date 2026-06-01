@@ -2,6 +2,10 @@
 # keys-help.sh — grouped cheat-sheet of the custom tmux bindings defined in
 # ~/.tmux.conf.local. Bound to: prefix ? (tmux display-popup -E).
 # Scrollable via less; press q to close. Falls back to plain cat.
+#
+# This list is curated by hand (grouped for readability) — keep it in sync when
+# you add/change a binding in ~/.tmux.conf.local. A drift is harmless and is
+# caught the first time you try the stale key.
 set -uo pipefail
 
 C_TITLE='\033[1;35m'   # magenta bold

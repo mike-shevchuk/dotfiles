@@ -8,17 +8,17 @@
 #
 # Portable to bash 3.2 (macOS).
 set -uo pipefail
-
-die() { printf '%s\n' "$*" >&2; printf 'press any key…' >&2; read -rsn1 _ 2>/dev/null || true; exit 1; }
+. "$(dirname "${BASH_SOURCE[0]}")/_common.sh"
 
 [ -n "${TMUX:-}" ] || die "not inside tmux"
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not inside a git repository"
-command -v fzf >/dev/null 2>&1 || die "fzf not installed — brew install fzf"
+need fzf "brew install fzf"
 
 # ─── Preview mode: branch + short status of the worktree at path $2 ──────────
 if [ "${1:-}" = "--preview" ]; then
     path="${2:-}"
-    [ -z "$path" ] || [ ! -d "$path" ] && exit 0
+    [ -z "$path" ] && exit 0
+    [ -d "$path" ] || exit 0
     printf '\033[1;36m%s\033[0m\n\n' "$path"
     branch=$(git -C "$path" branch --show-current 2>/dev/null)
     printf '\033[1mbranch:\033[0m %s\n\n' "${branch:-(detached)}"
