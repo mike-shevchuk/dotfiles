@@ -32,23 +32,44 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
+#
+# PERFORMANCE: every value shown here is read from a tmux user-option
+# (#{@cpu}, #{@pane_git}, …) — ZERO subprocesses per redraw. Those options
+# are refreshed by ~/.tmux-status.sh:
+#   * refresh-global  — driven once per status-interval by a single empty-output
+#     #() trigger embedded in status-left (sets @cpu @ram @claude @sessions …)
+#   * refresh-pane    — driven by focus/select HOOKS only (sets @pane_git …)
+# See the "Status refresh" hook block below.
 
+set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
+set -g status-interval 5 #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 
-# Left: prefix indicator + session name + session count
+# Left (row 0): prefix indicator + session name + session count.
+# The trailing #() runs refresh-global once per interval (empty output).
 set -g status-left-length 50 #!important
-set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
+set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
 
-# Right: claude | cpu | ram | AWS | kubectl | time | date
-set -g status-right-length 160 #!important
-set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+# Right (row 0): python | claude | cpu | ram | AWS | kubectl | time | date.
+# All segments read cached user-options (no subprocess).
+set -g status-right-length 200 #!important
+set -g status-right '#[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}#[fg=#cba6f7]#{?#{@claude},󰚩 #{@claude} ,}#[fg=#94e2d5] #{@cpu} #[fg=#74c7ec] #{@ram} #[fg=#f9e2af]#{?#{@aws},  #{@aws} ,}#[fg=#a6e3a1]#{?#{@kube}, 󱃾 #{@kube} ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
-# Window tabs — 󰚩 icon when claude is the foreground process
-set -g window-status-format '#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#[fg=#6c7086]#I:#W ' #!important
-set -g window-status-current-format '#{?#{==:#{pane_current_command},claude},#[bg=#313244,fg=#cba6f7,bold]󰚩 ,}#[bg=#313244,fg=#89b4fa,bold]#I:#W ' #!important
-set -g window-status-separator '' #!important
+# Row 1 (bottom of the 2-row status bar) — Variant C: active-pane context.
+# Left-filled git branch + full path + python of the focused pane. Updated by
+# the refresh-pane hooks, not every redraw, and no fragile alignment hack.
+set -g status-format[1] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#89b4fa] #{@pane_path} #[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}' #!important
+
+# Window tabs — active tab is underlined (no bg block) so the gap with
+# inactive tabs is clearly visible; separator inherits window-status-style
+# which has no underline, so the underline doesn't run across the whole bar.
+set -g window-status-style 'fg=#6c7086' #!important
+set -g window-status-current-style 'fg=#89b4fa,bold,underscore' #!important
+set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
 # Pane borders — color reflects claude state
 #   amber (#f9e2af) = claude thinking/working
@@ -56,11 +77,38 @@ set -g window-status-separator '' #!important
 #   blue  (#89b4fa) = no claude / default
 set -g pane-border-style 'fg=#313244' #!important
 set -g pane-active-border-style '#{?#{==:#{pane_current_command},claude},fg=#cba6f7,fg=#89b4fa}' #!important
+# Light ASCII border (-|+) instead of solid box-drawing (─│┌┐) so the
+# active pane reads as a non-solid underline rather than a heavy frame.
+set -g pane-border-lines simple #!important
+# Colour the corners of the active pane so it's still easy to spot.
+set -g pane-border-indicators colour #!important
 set -g pane-border-status top #!important
-set -g pane-border-format ' #{?#{==:#{pane_current_command},claude},#{?#{==:#(~/.tmux-status.sh claude-state #{pane_id}),waiting},#[fg=#a6e3a1]󰚩 ready,#[fg=#f9e2af]󰚩 thinking} #[fg=#6c7086]│ ⏱ #(~/.tmux-status.sh claude-uptime #{pane_id}) │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),},#[fg=#6c7086]#{pane_current_command} │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),}} ' #!important
+# ONE subprocess per visible pane (was ~4). pane-meta returns the whole
+# pre-formatted string (claude state + uptime, or command, then path/git/python)
+# with embedded #[...] styles, which tmux interprets in #() output.
+set -g pane-border-format ' #(~/.tmux-status.sh pane-meta #{pane_id} "#{pane_current_path}") ' #!important
 
 # Message style
 set -g message-style 'bg=#313244 fg=#cdd6f4' #!important
+
+
+# -- Status refresh (user-option cache, populated outside the redraw path) -----
+
+# Active-pane context (@pane_git/@pane_python/@pane_path) — refreshed only on
+# user navigation, never on the 5s redraw tick. -b keeps tmux non-blocking.
+# CAVEAT: these are GLOBAL options. With two clients attached to different
+# sessions, row 1 reflects whichever pane was focused last (tmux has no
+# convenient per-client user-options). Correct for the common single-client case.
+set-hook -g after-select-pane    'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g after-select-window  'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g pane-focus-in        'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g session-window-changed 'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g client-session-changed 'run-shell -b "~/.tmux-status.sh refresh-pane"'
+
+# Populate both caches immediately on load so the bar isn't blank until the
+# first interval / focus event fires.
+run-shell -b "~/.tmux-status.sh refresh-global"
+run-shell -b "~/.tmux-status.sh refresh-pane"
 
 
 # -- DevOps layout bindings ----------------------------------------------------
@@ -104,8 +152,8 @@ bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read 
 # prefix + T → tmux project switcher (ts — create/attach session from project dirs)
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
 
-# prefix + j → switch between existing tmux sessions
-bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
+# prefix + j → session switcher (fzf list + live preview: windows/panes/git/claude)
+bind j display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/session-switch.sh"
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
@@ -116,8 +164,6 @@ bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 # ─── Diff/Compare popups (delegate to ~/dotfiles/tmux/scripts/git-compare.sh) ─
 # EVERY binding starts with fzf branch picker (default branch pre-selected).
 # Hit Enter for the common case; arrow/type to compare against another branch.
-# (prefix A was removed — use prefix V which now does the same fzf flow)
-unbind A
 
 # prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting) vs picked branch
 # To use legacy DiffView instead: ~/dotfiles/tmux/scripts/git-compare.sh diffview
@@ -133,15 +179,22 @@ bind N display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux
 bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh files"
 
 
-# -- Duplicate popup section (disabled, kept as reference) ---------------------
-# These were duplicated during rebase. The active bindings are above.
+# -- Productivity popups (fzf/justfile-driven, scripts in tmux/scripts/) -------
 
-# bind g display-popup -E -w 85% -h 85% "lazygit"
-# bind o new-window -n yazi "yazi; tmux wait-for -S yazi-done" \; set-option -w remain-on-exit off
-# bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
-# bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
-# bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
-# bind B display-popup -E -w 85% -h 85% "btop"
+# prefix + A → Claude dashboard: every pane running claude across all sessions,
+#              with state / uptime / path / branch; Enter jumps to it.
+bind A display-popup -E -w 85% -h 70% "~/dotfiles/tmux/scripts/claude-dashboard.sh"
+
+# prefix + W → worktree session: git worktrees of the current repo → fzf →
+#              create/attach a tmux session rooted in the chosen worktree.
+bind W display-popup -E -w 80% -h 60% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/worktree-session.sh"
+
+# prefix + R → just recipe runner: pick a recipe (global + project justfile),
+#              doc-comment preview; Enter runs it in the popup.
+bind R display-popup -E -w 80% -h 70% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/just-menu.sh"
+
+# prefix + ? → keybinding cheat-sheet for these custom bindings.
+bind '?' display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
