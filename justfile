@@ -17,6 +17,24 @@ install-deps:
     @command -v stow >/dev/null 2>&1 || just _install-stow
     @echo "Dependencies ready"
 
+# Symlink .justdir/global.just → ~/.config/just/justfile so `just -g` works everywhere
+install-global:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="$HOME/dotfiles/.justdir/global.just"
+    dst="$HOME/.config/just/justfile"
+    echo "→ linking $dst → $src" >&2
+    mkdir -p "$(dirname "$dst")"
+    if [ -L "$dst" ]; then
+        echo "  removing existing symlink" >&2
+        rm "$dst"
+    elif [ -f "$dst" ]; then
+        echo "  backing up existing file to $dst.bak" >&2
+        mv "$dst" "$dst.bak"
+    fi
+    ln -s "$src" "$dst"
+    echo "  OK — try: jj   (or: just -g --list)" >&2
+
 # --- Migration ---
 
 # Remove existing manual symlinks so stow can take over (one-time migration)
