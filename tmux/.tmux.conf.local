@@ -165,9 +165,9 @@ bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 # EVERY binding starts with fzf branch picker (default branch pre-selected).
 # Hit Enter for the common case; arrow/type to compare against another branch.
 
-# prefix + v → GitHub-PR-style review of the CURRENT branch vs main (auto, no
-# picker): current branch = PR head, default base (main/master) = PR base,
-# rendered unified via delta. Closest terminal match to a PR on GitHub.
+# prefix + v → GitHub-PR-style review: pick HEAD branch (default = current) and
+# BASE branch (default = origin's default, e.g. origin/main), then a unified
+# delta diff in the PR direction. Pick any local/remote refs to compare.
 # (lowercase v — pairs with V; uppercase U is TPM's update-plugins.)
 bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh review"
 

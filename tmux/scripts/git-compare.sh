@@ -6,8 +6,8 @@
 # (cursor on first line) so you can just hit Enter for the common case.
 #
 # Tools (1st arg):
-#   review       — GitHub-PR-style unified diff via delta; auto: current branch vs
-#                  default base (main/master), NO branch picker (PR head→base direction)
+#   review       — GitHub-PR-style unified diff via delta; pick HEAD (default current)
+#                  + BASE (default origin's main/master) branches, diff BASE→HEAD
 #   codediff     — VSCode-style two-tier diff (line + char), C-powered, moved-code detection
 #   diffview     — DiffView in lz (LazyVIM nvim) — side-by-side
 #   delta        — delta side-by-side pager (falls back to git diff if delta missing)
@@ -60,53 +60,69 @@ pick_branch() {
         --preview-window 'right:50%'
 }
 
-# ─── Pick target branch ──────────────────────────────────────────────────
-# review = "GitHub PR review of THIS branch": auto-target the default base
-# (main/master) with NO picker — head is your current branch, base is main,
-# exactly like a PR. The other modes prompt for any branch via fzf.
-if [[ "$TOOL" == "review" ]]; then
-    TARGET=$(detect_default_branch || true)
-    [[ -z "$TARGET" ]] && TARGET=$(pick_branch)   # fallback if no default detected
-else
+# ─── fzf picker with a caller-chosen default on line 1 ─────────────────────
+# Lists all local + remote branches; $1 is pre-selected first (Enter picks it).
+pick_branch_default() {
+    local def="$1" prompt="$2"
+    {
+        [[ -n "$def" ]] && echo "$def"
+        git branch -a --format='%(refname:short)' \
+            | grep -v '^HEAD' \
+            | grep -v "^${def}$" \
+            | sort -u
+    } | fzf --prompt="$prompt" --height 60% --border \
+            --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
+}
+
+# ─── Pick target branch ────────────────────────────────────────────────────
+# review picks its OWN head + base branches inside the case below; the other
+# modes compare the working tree against a single picked branch.
+if [[ "$TOOL" != "review" ]]; then
     TARGET=$(pick_branch)
-fi
-if [[ -z "$TARGET" ]]; then
-    echo "no branch picked — aborted" >&2
-    exit 0
+    if [[ -z "$TARGET" ]]; then
+        echo "no branch picked — aborted" >&2
+        exit 0
+    fi
 fi
 
 # ─── Tool dispatch ──────────────────────────────────────────────────────────
 case "$TOOL" in
     review)
-        # GitHub-PR-style unified diff: single column with dual line numbers (old|new),
-        # additions in green, deletions in red, file headers between sections.
+        # GitHub-PR-style review of any two refs. Two fzf pickers:
+        #   1) HEAD — the branch to review   (default: current branch)
+        #   2) BASE — the branch to compare against (default: origin's default,
+        #             e.g. origin/main or origin/master)
+        # Then a unified delta diff in the PR direction (BASE → HEAD).
         #
-        # Diffs from the MERGE-BASE with $TARGET to the WORKING TREE — i.e.
-        # everything this branch has changed since it diverged from $TARGET,
-        # including uncommitted edits. So it:
-        #   • matches GitHub's "Files changed" for committed work (merge-base,
-        #     not two-dot → $TARGET's own newer commits aren't shown as deletions);
-        #   • ALSO previews uncommitted changes, so it isn't empty when you're
-        #     mid-work or sitting on an up-to-date branch (e.g. master).
-        # (For a clean, fully-committed branch this is identical to GitHub.)
-        BASE=$(git merge-base "$TARGET" HEAD 2>/dev/null || echo "$TARGET")
-        # Empty diff → say so clearly instead of opening a blank pager (which
-        # looks broken). Happens when this repo has no changes vs $TARGET, e.g.
-        # an up-to-date/clean branch, or the popup opened in the wrong repo.
-        if git diff --quiet "$BASE" 2>/dev/null; then
+        # If HEAD is your CURRENT branch, the diff runs to the WORKING TREE from
+        # the merge-base with BASE, so uncommitted edits are included (preview
+        # your in-progress PR). For any other HEAD it's the committed three-dot
+        # BASE...HEAD — exactly GitHub's "Files changed" for that PR.
+        cur=$(git branch --show-current 2>/dev/null)
+        base_def=$(detect_default_branch || echo "origin/master")
+        HEAD_REF=$(pick_branch_default "$cur" "PR head — review THIS branch (Enter=current): ")
+        [[ -z "$HEAD_REF" ]] && { echo "no head branch picked — aborted" >&2; exit 0; }
+        BASE_REF=$(pick_branch_default "$base_def" "PR base — compare against (Enter=$base_def): ")
+        [[ -z "$BASE_REF" ]] && { echo "no base branch picked — aborted" >&2; exit 0; }
+
+        if [[ "$HEAD_REF" == "$cur" ]]; then
+            spec=$(git merge-base "$BASE_REF" HEAD 2>/dev/null || echo "$BASE_REF")
+        else
+            spec="$BASE_REF...$HEAD_REF"
+        fi
+
+        # Empty diff → clear message instead of a blank pager (looks broken).
+        if git diff --quiet "$spec" 2>/dev/null; then
             printf '\033[1;33m✓ Nothing to review.\033[0m\n\n' >&2
-            printf '  No changes between \033[1m%s\033[0m (merge-base) and your working tree.\n' "$TARGET" >&2
-            printf '  repo: \033[36m%s\033[0m\n' "$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")" >&2
-            printf '  branch: \033[36m%s\033[0m\n\n' "$(git branch --show-current 2>/dev/null || echo '(detached)')" >&2
-            printf '  This popup diffs the CURRENT pane'\''s repo vs the picked branch.\n' >&2
-            printf '  Run it from a repo/branch that has commits or edits not in %s.\n\n' "$TARGET" >&2
+            printf '  \033[1m%s\033[0m has no changes beyond \033[1m%s\033[0m.\n\n' "$HEAD_REF" "$BASE_REF" >&2
+            printf '  Pick a feature branch as head, or a different base.\n\n' >&2
             printf '  press any key…' >&2
             read -n1 -rs _ 2>/dev/null || true
             exit 0
         fi
-        echo "→ PR-style diff since merge-base with $TARGET" >&2
+        echo "→ PR diff: $BASE_REF → $HEAD_REF" >&2
         if command -v delta >/dev/null 2>&1; then
-            git diff "$BASE" \
+            git diff "$spec" \
                 | delta --line-numbers \
                         --file-style="bold yellow ul" \
                         --hunk-header-style="omit" \
@@ -115,7 +131,7 @@ case "$TOOL" in
             echo "⚠️  delta not installed — falling back to git diff + less" >&2
             echo "    install: brew install git-delta" >&2
             sleep 1
-            git diff --color=always "$BASE" | less -R
+            git diff --color=always "$spec" | less -R
         fi
         ;;
 
