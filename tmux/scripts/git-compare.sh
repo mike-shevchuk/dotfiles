@@ -6,8 +6,9 @@
 # (cursor on first line) so you can just hit Enter for the common case.
 #
 # Tools (1st arg):
+#   review       — GitHub-PR-style unified diff (single column, dual line numbers) via delta
 #   codediff     — VSCode-style two-tier diff (line + char), C-powered, moved-code detection
-#   diffview     — DiffView in lz (LazyVIM nvim)
+#   diffview     — DiffView in lz (LazyVIM nvim) — side-by-side
 #   delta        — delta side-by-side pager (falls back to git diff if delta missing)
 #   difftastic   — difftastic semantic diff (falls back to git diff if difft missing)
 #   files        — fzf list of changed files vs target; opens picked file in DiffView
@@ -67,6 +68,34 @@ fi
 
 # ─── Tool dispatch ──────────────────────────────────────────────────────────
 case "$TOOL" in
+    review)
+        # GitHub-PR-style unified diff: single column with dual line numbers (old|new),
+        # additions in green, deletions in red, file headers between sections.
+        #
+        # Diffs from the MERGE-BASE with $TARGET to the WORKING TREE — i.e.
+        # everything this branch has changed since it diverged from $TARGET,
+        # including uncommitted edits. So it:
+        #   • matches GitHub's "Files changed" for committed work (merge-base,
+        #     not two-dot → $TARGET's own newer commits aren't shown as deletions);
+        #   • ALSO previews uncommitted changes, so it isn't empty when you're
+        #     mid-work or sitting on an up-to-date branch (e.g. master).
+        # (For a clean, fully-committed branch this is identical to GitHub.)
+        BASE=$(git merge-base "$TARGET" HEAD 2>/dev/null || echo "$TARGET")
+        echo "→ PR-style diff since merge-base with $TARGET" >&2
+        if command -v delta >/dev/null 2>&1; then
+            git diff "$BASE" \
+                | delta --line-numbers \
+                        --file-style="bold yellow ul" \
+                        --hunk-header-style="omit" \
+                        --paging=always
+        else
+            echo "⚠️  delta not installed — falling back to git diff + less" >&2
+            echo "    install: brew install git-delta" >&2
+            sleep 1
+            git diff --color=always "$BASE" | less -R
+        fi
+        ;;
+
     codediff)
         # VSCode-style two-tier (line + char) side-by-side, C-powered, moved-code detection
         echo "→ CodeDiff vs $TARGET" >&2
@@ -114,7 +143,7 @@ case "$TOOL" in
 
     *)
         echo "ERR: unknown tool '$TOOL'" >&2
-        echo "valid: codediff | diffview | delta | difftastic | files" >&2
+        echo "valid: review | codediff | diffview | delta | difftastic | files" >&2
         exit 2
         ;;
 esac

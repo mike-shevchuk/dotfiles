@@ -165,6 +165,11 @@ bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 # EVERY binding starts with fzf branch picker (default branch pre-selected).
 # Hit Enter for the common case; arrow/type to compare against another branch.
 
+# prefix + v → GitHub-PR-style unified diff (single column, dual line numbers) via delta.
+# Closest terminal match to viewing a PR on GitHub. (lowercase v — pairs with V;
+# uppercase U is taken by TPM's update-plugins.)
+bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh review"
+
 # prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting) vs picked branch
 # To use legacy DiffView instead: ~/dotfiles/tmux/scripts/git-compare.sh diffview
 bind V display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh codediff"
