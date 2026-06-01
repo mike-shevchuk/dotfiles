@@ -13,13 +13,15 @@
 #
 # Segments:
 #   refresh-global            → set @cpu @ram @claude @sessions @aws @kube
-#   refresh-pane [cwd]        → set @pane_git @pane_python @pane_path
+#   refresh-pane [cwd]        → set @pane_git @pane_python @pane_pr @pane_path
 #   pane-meta <pane_id> <cwd> → one pre-formatted pane-border string (1 call/pane)
 #   cpu ram claude sessions   → print a single global value
 #   claude-state <pane_id>    → working | waiting | none
 #   claude-uptime <pane_id>   → human elapsed time of the claude process
 #   pane-git <cwd>            → branch (+ [wt:name] for worktrees)
 #   pane-python <cwd>         → python version (mise → pyenv), empty if none
+#   pr <cwd>                  → 🔀 PR#N <icon> for the branch (gh, cached 90s)
+#   short-path <cwd>          → ~/d/.c/w/tmux  (fish-style compact path)
 
 # ─── value helpers ───────────────────────────────────────────────────────────
 
@@ -143,11 +145,13 @@ EOF
 }
 
 get_git() {
-    # branch (+ [wt:name] when in a linked worktree) for a cwd
+    # branch (+ [wt:name] when in a linked worktree) for a cwd.
+    # Usage: get_git <cwd> [branch]   (pass branch to avoid a duplicate git call)
     cwd="$1"
     [ -z "$cwd" ] && return 0
     [ -d "$cwd" ] || return 0
-    branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    branch="$2"
+    [ -z "$branch" ] && branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
     [ -z "$branch" ] && return 0
     git_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-dir 2>/dev/null)
     common_dir=$(git -C "$cwd" --no-optional-locks rev-parse --git-common-dir 2>/dev/null)
@@ -190,6 +194,106 @@ get_python() {
     fi
 }
 
+shorten_path() {
+    # Compact a path for the status bar without making it cryptic: $HOME → ~,
+    # keep full directory NAMES, and only elide the MIDDLE when the path is long
+    # (more than 3 components after ~/root), keeping the parent + current dir:
+    #   /Users/me/dotfiles/.claude/worktrees/tmux → ~/…/worktrees/tmux
+    #   ~/dotfiles/foo                            → ~/dotfiles/foo   (left as-is)
+    #   /usr/local/bin                            → /usr/local/bin   (left as-is)
+    p="$1"
+    [ -z "$p" ] && return 0
+    [ "$p" = "/" ] && { printf '/'; return 0; }
+    case "$p" in
+        "$HOME")    printf '~'; return 0 ;;
+        "$HOME"/*)  p="~/${p#"$HOME"/}" ;;
+    esac
+    case "$p" in
+        '~/'*) pfx='~/'; body="${p#'~/'}" ;;
+        /*)    pfx='/';  body="${p#/}" ;;   # absolute, non-home
+        *)     pfx='';   body="$p" ;;       # relative
+    esac
+    # Short enough (≤3 components) → leave it readable in full.
+    n=$(printf '%s\n' "$body" | tr '/' '\n' | grep -c .)
+    if [ "${n:-0}" -le 3 ]; then
+        printf '%s' "$p"
+        return 0
+    fi
+    # Long → keep the last two components, elide the rest with …
+    last1="${body##*/}"
+    rest="${body%/*}"
+    last2="${rest##*/}"
+    printf '%s…/%s/%s' "$pfx" "$last2" "$last1"
+}
+
+get_pr() {
+    # PR number + a compact status icon for a cwd's branch.
+    #   🔀 PR#26 ✓   (✓ pass · ✗ fail · ● open/pending · ⊘ merged/closed)
+    # Cached in /tmp/claude — same cache dir + mtime-TTL pattern the Claude Code
+    # statusline uses (claude/.claude/statusline.sh). gh is ~0.7s + network +
+    # rate-limited, so we only call it when the cache is older than 90s.
+    #
+    # CONTRACT: on a cache miss this BLOCKS for the duration of the gh call
+    # (~0.7s). Call it only from background contexts (run-shell -b) — never from
+    # a synchronous #() in status/pane-border-format, or it stalls the redraw.
+    #
+    # Usage: get_pr <cwd> [branch]   (pass branch to avoid a duplicate git call)
+    cwd="$1"
+    [ -z "$cwd" ] && return 0
+    [ -d "$cwd" ] || return 0
+    command -v gh >/dev/null 2>&1 || return 0
+
+    branch="$2"
+    [ -z "$branch" ] && branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    [ -z "$branch" ] && return 0
+
+    dir=/tmp/claude
+    mkdir -p "$dir" 2>/dev/null
+    root=$(git -C "$cwd" --no-optional-locks rev-parse --show-toplevel 2>/dev/null)
+    # Only fold path separators + spaces into '_'; keep ':'/'.' distinct so
+    # different repos/branches can't collide onto one cache file.
+    key=$(printf '%s:%s' "$root" "$branch" | tr '/ ' '__')
+    cache="$dir/tmux-pr-$key.txt"
+
+    # Fresh cache (TTL 90s) → serve without touching the network.
+    if [ -f "$cache" ]; then
+        mtime=$(stat -c %Y "$cache" 2>/dev/null || stat -f %m "$cache" 2>/dev/null)
+        if [ -n "$mtime" ] && [ "$(( $(date +%s) - mtime ))" -lt 90 ]; then
+            cat "$cache"
+            return 0
+        fi
+    fi
+
+    # Stale/missing → fetch once, classify, cache the formatted string. We cache
+    # even an empty result so "no PR" branches don't refetch on every focus.
+    json=$(cd "$cwd" 2>/dev/null && gh pr view --json number,state,statusCheckRollup,reviewDecision 2>/dev/null)
+    out=""
+    if [ -n "$json" ]; then
+        out=$(printf '%s' "$json" | jq -r '
+            if .number then
+              "🔀 PR#\(.number) " +
+              ( if .state != "OPEN" then "⊘"
+                else
+                  ( reduce (.statusCheckRollup[]? | (.conclusion // .state // "")) as $c
+                      ({fail:false, pend:false, any:false};
+                       { fail: (.fail or ($c == "FAILURE" or $c == "ERROR" or $c == "CANCELLED" or $c == "TIMED_OUT")),
+                         pend: (.pend or ($c == "PENDING" or $c == "IN_PROGRESS" or $c == "QUEUED" or $c == "")),
+                         any:  true }) ) as $s
+                  | if   $s.fail then "✗"
+                    elif $s.pend then "●"
+                    elif $s.any  then "✓"
+                    elif .reviewDecision == "APPROVED" then "✓"
+                    else "●" end
+                end )
+            else empty end' 2>/dev/null)
+    fi
+    # Unique temp per process ($$) so concurrent background refreshes for the
+    # same branch can't clobber a shared temp mid-write.
+    tmp="$cache.$$"
+    printf '%s' "$out" > "$tmp" 2>/dev/null && mv "$tmp" "$cache" 2>/dev/null
+    printf '%s' "$out"
+}
+
 # ─── dispatch ────────────────────────────────────────────────────────────────
 
 case "$1" in
@@ -212,13 +316,20 @@ refresh-global)
     ;;
 refresh-pane)
     # Active-pane context. Triggered by focus/select hooks, NOT every redraw.
+    # get_pr only hits the network when its 90s cache is stale; this whole
+    # segment runs under `run-shell -b`, so even that never blocks the UI.
     cwd="$2"
     [ -z "$cwd" ] && cwd=$(tmux display-message -p '#{pane_current_path}' 2>/dev/null)
-    _git=$(get_git "$cwd")
+    # Resolve the branch once and share it with get_git + get_pr.
+    _branch=$(git -C "$cwd" --no-optional-locks branch --show-current 2>/dev/null)
+    _git=$(get_git "$cwd" "$_branch")
     _py=$(get_python "$cwd")
+    _pr=$(get_pr "$cwd" "$_branch")
+    _path=$(shorten_path "$cwd")
     tmux set -g @pane_git "$_git" \; \
          set -g @pane_python "$_py" \; \
-         set -g @pane_path "$cwd" 2>/dev/null
+         set -g @pane_pr "$_pr" \; \
+         set -g @pane_path "$_path" 2>/dev/null
     ;;
 pane-meta)
     # Single pre-formatted border string per visible pane (was ~4 #() calls).
@@ -228,15 +339,16 @@ pane-meta)
     cmd=$(tmux display-message -t "$pane_id" -p '#{pane_current_command}' 2>/dev/null)
     _git=$(get_git "$cwd")
     _py=$(get_python "$cwd")
+    _path=$(shorten_path "$cwd")
     if [ "$cmd" = "claude" ]; then
         if [ "$(get_claude_state "$pane_id")" = "waiting" ]; then
             printf '#[fg=#a6e3a1]󰚩 ready'
         else
             printf '#[fg=#f9e2af]󰚩 thinking'
         fi
-        printf ' #[fg=#6c7086]│ ⏱ %s │ %s' "$(get_claude_uptime "$pane_id")" "$cwd"
+        printf ' #[fg=#6c7086]│ ⏱ %s │ %s' "$(get_claude_uptime "$pane_id")" "$_path"
     else
-        printf '#[fg=#6c7086]%s │ %s' "$cmd" "$cwd"
+        printf '#[fg=#6c7086]%s │ %s' "$cmd" "$_path"
     fi
     [ -n "$_git" ] && printf ' #[fg=#a6e3a1]🌿 %s' "$_git"
     [ -n "$_py" ] && printf ' #[fg=#f9e2af]🐍 %s' "$_py"
@@ -250,4 +362,6 @@ claude-state)  get_claude_state "$2" ;;
 claude-uptime) get_claude_uptime "$2" ;;
 pane-git)      get_git "$2" ;;
 pane-python)   get_python "$2" ;;
+pr)            get_pr "$2" ;;
+short-path)    shorten_path "$2" ;;
 esac

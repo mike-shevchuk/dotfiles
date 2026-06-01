@@ -58,9 +58,9 @@ set -g status-right-length 200 #!important
 set -g status-right '#[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}#[fg=#cba6f7]#{?#{@claude},󰚩 #{@claude} ,}#[fg=#94e2d5] #{@cpu} #[fg=#74c7ec] #{@ram} #[fg=#f9e2af]#{?#{@aws},  #{@aws} ,}#[fg=#a6e3a1]#{?#{@kube}, 󱃾 #{@kube} ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
 # Row 1 (bottom of the 2-row status bar) — Variant C: active-pane context.
-# Left-filled git branch + full path + python of the focused pane. Updated by
-# the refresh-pane hooks, not every redraw, and no fragile alignment hack.
-set -g status-format[1] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#89b4fa] #{@pane_path} #[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}' #!important
+# Left-filled: git branch · PR (gh, cached) · compact path · python of the
+# focused pane. Updated by the refresh-pane hooks, not every redraw.
+set -g status-format[1] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}' #!important
 
 # Window tabs — active tab is underlined (no bg block) so the gap with
 # inactive tabs is clearly visible; separator inherits window-status-style
