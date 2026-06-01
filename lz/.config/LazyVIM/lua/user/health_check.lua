@@ -21,24 +21,9 @@ local CLI_TOOLS = {
   { "fzf", "fzf" },
 }
 
--- LSP servers we want (must match ensure_installed in plugins/lsp.lua).
--- {display, mason-bin executable name} — checked against the mason bin dir so
--- the result is correct even before lspconfig lazy-loads.
-local LSP_SERVERS = {
-  { "lua", "lua-language-server" },
-  { "python", "pyright-langserver" },
-  { "go", "gopls" },
-  { "rust", "rust-analyzer" },
-  { "typescript/react", "typescript-language-server" },
-  { "html", "vscode-html-language-server" },
-  { "css", "vscode-css-language-server" },
-  { "json", "vscode-json-language-server" },
-  { "yaml", "yaml-language-server" },
-  { "bash", "bash-language-server" },
-  { "ruby", "ruby-lsp" },
-  { "docker", "docker-langserver" },
-  { "markdown", "marksman" },
-}
+-- LSP servers we want — derived from the shared single source of truth so this
+-- list can't drift from plugins/lsp.lua's ensure_installed.
+local LSP_SERVERS = require("user.lsp_servers")
 
 -- ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -73,8 +58,8 @@ local function missing_lsp()
   local out = {}
   for _, s in ipairs(LSP_SERVERS) do
     -- mason bin entries can be symlinks/wrappers; existence of the path is enough.
-    if vim.fn.filereadable(bin .. s[2]) == 0 and vim.fn.executable(s[2]) == 0 then
-      out[#out + 1] = s[1]
+    if vim.fn.filereadable(bin .. s.mason_bin) == 0 and vim.fn.executable(s.mason_bin) == 0 then
+      out[#out + 1] = s.display
     end
   end
   return out

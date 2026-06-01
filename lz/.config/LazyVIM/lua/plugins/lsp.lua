@@ -24,24 +24,13 @@ return {
       local mason_lspconfig = require("mason-lspconfig")
       local cmp_nvim_lsp = require("cmp_nvim_lsp")
 
-      -- Servers we want installed + enabled. `ts_ls` is the current name for the
-      -- TypeScript server (old alias `typescript-language-server` removed).
-      local servers = {
-        "lua_ls",
-        "bashls",
-        "pyright",
-        "ruff", -- python linter + formatter (replaces flake8 + black)
-        "gopls", -- go
-        "rust_analyzer", -- rust
-        "ruby_lsp", -- ruby
-        "html",
-        "cssls",
-        "jsonls",
-        "yamlls",
-        "dockerls",
-        "ts_ls", -- javascript / typescript / react
-        "marksman",
-      }
+      -- Servers we want installed + enabled, derived from the shared single
+      -- source of truth (user/lsp_servers.lua) so the list can't drift from the
+      -- startup health check. `ts_ls` is the current name for the TS server.
+      local servers = vim.tbl_map(function(s)
+        return s.lspconfig
+      end, require("user.lsp_servers"))
+      table.insert(servers, "ruff") -- python linter + formatter (not a hover/completion LSP)
 
       mason.setup()
       mason_lspconfig.setup({

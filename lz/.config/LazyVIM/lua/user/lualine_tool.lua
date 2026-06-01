@@ -18,7 +18,7 @@ local last_sys_info = "🧠 …⧖ | 💾 … | 🌡️ …"
 local cached = { cpu = "?", mem = "?", cpu_t = "?", gpu_t = "?" }
 local sampling = false -- guard against overlapping samples
 
-local layout_cache = is_mac and "" or "…" -- empty hides the segment on mac
+local layout_cache = "…"
 local layout_inflight = false
 local notified_missing = false
 
@@ -153,9 +153,9 @@ function M.get_sys_status()
 end
 
 -- ── keyboard layout ─────────────────────────────────────────────────────────
--- Linux/X11: `xkb-switch`. macOS: no clean CLI → hidden. Sampled async.
+-- Linux/X11: `xkb-switch`. macOS: no clean CLI → segment hidden. Sampled async.
 local function refresh_layout()
-  if not is_linux or layout_inflight then
+  if layout_inflight then
     return
   end
   if vim.fn.executable("xkb-switch") == 0 then
@@ -177,6 +177,9 @@ local function refresh_layout()
 end
 
 function M.get_keyboard_layout()
+  if is_mac then
+    return "" -- no keyboard-layout CLI on macOS; hide the segment
+  end
   refresh_layout()
   return layout_cache
 end
