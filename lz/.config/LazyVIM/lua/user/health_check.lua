@@ -84,40 +84,63 @@ end
 
 -- ── report ──────────────────────────────────────────────────────────────────
 
--- force=true → always show full report (used by :Health). Otherwise only the
--- OS line (INFO) plus a WARN if there are problems.
+-- force=true (`:Health`) → always show the FULL report, including ✓ lines for
+-- the things that passed. force=false (startup) → stay quiet when healthy and
+-- only raise a WARN/ERROR popup when something is actually wrong.
 function M.run(force)
   local cli = missing_cli()
   local lsp = missing_lsp()
   local errs = startup_errors()
   local healthy = (#cli == 0 and #lsp == 0 and #errs == 0)
 
-  if healthy then
+  -- Startup path: a healthy system is silent except for one short OK line.
+  if healthy and not force then
     vim.notify(" " .. os_label() .. "  ✓ healthy", vim.log.levels.INFO, { title = "nvim health" })
     return
   end
 
-  -- Build the problem report.
   local lines = { " " .. os_label() }
+
+  -- Startup errors.
   if #errs > 0 then
     lines[#lines + 1] = ""
     lines[#lines + 1] = "✗ startup errors (" .. #errs .. "):"
     for _, e in ipairs(errs) do
       lines[#lines + 1] = "  • " .. e
     end
+  elseif force then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "✓ no startup errors"
   end
+
+  -- CLI tools.
   if #cli > 0 then
     lines[#lines + 1] = ""
     lines[#lines + 1] = "⚠ missing CLI tools: " .. table.concat(cli, ", ")
+  elseif force then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "✓ all CLI tools present (" .. #CLI_TOOLS .. ")"
   end
+
+  -- LSP servers.
   if #lsp > 0 then
     lines[#lines + 1] = ""
     lines[#lines + 1] = "⚠ LSP not installed: " .. table.concat(lsp, ", ")
     lines[#lines + 1] = "  → run :Mason  (or just open a file of that type; auto-installs)"
+  elseif force then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = "✓ all LSP servers installed (" .. #LSP_SERVERS .. ")"
   end
 
-  local level = (#errs > 0) and vim.log.levels.ERROR or vim.log.levels.WARN
-  vim.notify(table.concat(lines, "\n"), level, { title = "nvim health — problems found", timeout = 8000 })
+  -- Severity: errors → ERROR, missing tools → WARN, full healthy report → INFO.
+  local level = vim.log.levels.INFO
+  if #errs > 0 then
+    level = vim.log.levels.ERROR
+  elseif #cli > 0 or #lsp > 0 then
+    level = vim.log.levels.WARN
+  end
+  local title = healthy and "nvim health — all good" or "nvim health — problems found"
+  vim.notify(table.concat(lines, "\n"), level, { title = title, timeout = 8000 })
 end
 
 -- ── wiring ──────────────────────────────────────────────────────────────────
