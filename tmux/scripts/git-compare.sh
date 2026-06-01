@@ -81,6 +81,20 @@ case "$TOOL" in
         #     mid-work or sitting on an up-to-date branch (e.g. master).
         # (For a clean, fully-committed branch this is identical to GitHub.)
         BASE=$(git merge-base "$TARGET" HEAD 2>/dev/null || echo "$TARGET")
+        # Empty diff → say so clearly instead of opening a blank pager (which
+        # looks broken). Happens when this repo has no changes vs $TARGET, e.g.
+        # an up-to-date/clean branch, or the popup opened in the wrong repo.
+        if git diff --quiet "$BASE" 2>/dev/null; then
+            printf '\033[1;33m✓ Nothing to review.\033[0m\n\n' >&2
+            printf '  No changes between \033[1m%s\033[0m (merge-base) and your working tree.\n' "$TARGET" >&2
+            printf '  repo: \033[36m%s\033[0m\n' "$(git rev-parse --show-toplevel 2>/dev/null || echo "$PWD")" >&2
+            printf '  branch: \033[36m%s\033[0m\n\n' "$(git branch --show-current 2>/dev/null || echo '(detached)')" >&2
+            printf '  This popup diffs the CURRENT pane'\''s repo vs the picked branch.\n' >&2
+            printf '  Run it from a repo/branch that has commits or edits not in %s.\n\n' "$TARGET" >&2
+            printf '  press any key…' >&2
+            read -n1 -rs _ 2>/dev/null || true
+            exit 0
+        fi
         echo "→ PR-style diff since merge-base with $TARGET" >&2
         if command -v delta >/dev/null 2>&1; then
             git diff "$BASE" \
