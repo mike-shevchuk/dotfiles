@@ -41,7 +41,7 @@ render() {
     row "prefix s"   "dotfiles stow status"
 
     grp "Diff / compare (fzf branch picker, Enter = default branch)"
-    row "prefix v"   "Unified PR-style diff (delta) vs branch"
+    row "prefix v"   "PR review: current branch vs main (auto, no picker)"
     row "prefix V"   "CodeDiff — VSCode-style two-tier diff vs branch"
     row "prefix M"   "delta side-by-side pager vs branch"
     row "prefix N"   "difftastic semantic diff vs branch"

@@ -6,7 +6,8 @@
 # (cursor on first line) so you can just hit Enter for the common case.
 #
 # Tools (1st arg):
-#   review       — GitHub-PR-style unified diff (single column, dual line numbers) via delta
+#   review       — GitHub-PR-style unified diff via delta; auto: current branch vs
+#                  default base (main/master), NO branch picker (PR head→base direction)
 #   codediff     — VSCode-style two-tier diff (line + char), C-powered, moved-code detection
 #   diffview     — DiffView in lz (LazyVIM nvim) — side-by-side
 #   delta        — delta side-by-side pager (falls back to git diff if delta missing)
@@ -59,8 +60,16 @@ pick_branch() {
         --preview-window 'right:50%'
 }
 
-# ─── Pick target branch (used by all modes) ────────────────────────────────
-TARGET=$(pick_branch)
+# ─── Pick target branch ──────────────────────────────────────────────────
+# review = "GitHub PR review of THIS branch": auto-target the default base
+# (main/master) with NO picker — head is your current branch, base is main,
+# exactly like a PR. The other modes prompt for any branch via fzf.
+if [[ "$TOOL" == "review" ]]; then
+    TARGET=$(detect_default_branch || true)
+    [[ -z "$TARGET" ]] && TARGET=$(pick_branch)   # fallback if no default detected
+else
+    TARGET=$(pick_branch)
+fi
 if [[ -z "$TARGET" ]]; then
     echo "no branch picked — aborted" >&2
     exit 0
