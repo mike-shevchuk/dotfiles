@@ -2,5 +2,6 @@
 require("config.lazy")
 
 require("user.lualine_tool")
+require("user.health_check")
 
 vim.cmd("colorscheme hybrid_material")

@@ -31,12 +31,15 @@ return {
         "bashls",
         "pyright",
         "ruff", -- python linter + formatter (replaces flake8 + black)
+        "gopls", -- go
+        "rust_analyzer", -- rust
+        "ruby_lsp", -- ruby
         "html",
         "cssls",
         "jsonls",
         "yamlls",
         "dockerls",
-        "ts_ls",
+        "ts_ls", -- javascript / typescript / react
         "marksman",
       }
 
