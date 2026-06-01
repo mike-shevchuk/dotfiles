@@ -3,6 +3,7 @@ return {
   -- NOTE: perfetct, automatically highlighting other uses of the word under the cursor
   {
     "RRethy/vim-illuminate",
+    event = { "BufReadPost", "BufNewFile" },
     config = function()
       require("illuminate").configure()
       vim.api.nvim_set_keymap(
@@ -24,25 +25,20 @@ return {
 
   {
     "OXY2DEV/markview.nvim",
-    lazy = false,      -- Recommended
-    -- ft = "markdown" -- If you decide to lazy-load anyway
-
+    ft = { "markdown", "md" }, -- lazy-load on markdown buffers only
     dependencies = {
-      -- You will not need this if you installed the
-      -- parsers manually
-      -- Or if the parsers are in your $RUNTIMEPATH
       "nvim-treesitter/nvim-treesitter",
-
-      "nvim-tree/nvim-web-devicons"
-    }
+      "nvim-tree/nvim-web-devicons",
+    },
   },
 
 
   {
-      'fei6409/log-highlight.nvim',
-      config = function()
-          require('log-highlight').setup {}
-      end,
+    "fei6409/log-highlight.nvim",
+    ft = "log",
+    config = function()
+      require("log-highlight").setup({})
+    end,
   },
 
 

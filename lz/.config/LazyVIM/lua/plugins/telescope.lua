@@ -86,12 +86,7 @@ return {
   --   end,
   -- },
 
-  {
-    "gelguy/wilder.nvim",
-    config = function()
-      -- config goes here
-    end,
-  },
+  -- wilder.nvim is configured once in plugins/utils.lua (this empty duplicate removed).
 
   {
     "kdheepak/lazygit.nvim",

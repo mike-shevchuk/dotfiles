@@ -4,11 +4,22 @@
 
 local st = vim.keymap.set
 
-local leg = require("legendary")
-local commander = require("commander")
--- local print = require("notify").print
--- leg.bind_whichkey(keymap, v_opts, false)
--- leg.bind_whichkey(keymap, opts, false)
+-- Independent maps — set these FIRST, before the commander guard, because they
+-- don't depend on commander. Window navigation especially must survive even if
+-- commander fails to load.
+st("n", "<c-k>", ":wincmd k<CR>")
+st("n", "<c-j>", ":wincmd j<CR>")
+st("n", "<c-h>", ":wincmd h<CR>")
+st("n", "<c-l>", ":wincmd l<CR>")
+st("n", "<leader>md", "<cmd>NoiceDismiss<cr>", { desc = "Dismiss message" })
+
+-- commander is eager-loaded; guard anyway so a load-order change can't break
+-- startup. Everything below this point depends on commander, so a clean return
+-- here skips only the commander.add registrations — not the maps above.
+local ok_commander, commander = pcall(require, "commander")
+if not ok_commander then
+  return
+end
 
 local get_input = function(prompt)
   local co = coroutine.running()
@@ -137,14 +148,8 @@ commander.add({
   -- { keys = { "n", "<leader>bN" }, cmd = "<cmd>tabnext<cr>", desc = "next tab" },
 })
 
-st("n", "<leader>md", "<cmd>NoiceDismiss<cr>", { desc = "Dismiss message" })
-
--- Navigate vim panes better
--- local st = vim.keymap.set
-st("n", "<c-k>", ":wincmd k<CR>")
-st("n", "<c-j>", ":wincmd j<CR>")
-st("n", "<c-h>", ":wincmd h<CR>")
-st("n", "<c-l>", ":wincmd l<CR>")
+-- (window-nav + <leader>md maps moved to the top of the file, above the
+-- commander guard, so they survive even if commander fails to load.)
 
 -- st("n", "<leader>h", ":nohlsearch<CR>")
 

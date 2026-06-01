@@ -1,12 +1,25 @@
+-- Statusline helpers — cross-platform (Linux + macOS), fully async.
+--
+-- Every metric (CPU, memory, temps, keyboard layout) is sampled OFF the UI
+-- thread with `vim.system()`. The lualine components only ever return a cached
+-- string, so they never block a redraw and never error when a tool is missing.
+-- This is the fix for the old Linux-only `top -bn1`/`free`/`xkb-switch` calls
+-- that ran synchronously on every redraw.
+
 local M = {}
 
-local commmander = require("commander")
+local is_mac = vim.fn.has("mac") == 1
+local is_linux = vim.fn.has("linux") == 1
 
-local last_sys_info = ""
+-- ── shared cache ────────────────────────────────────────────────────────────
+local update_interval = 5 -- seconds between samples
 local last_update_time = 0
-local update_interval = 5 -- seconds between real updates
-local last_sys_info = "🧠 ? ⧖ | 💾 ? | 🌡️ ?"
-local cached_temps = { cpu_t = "?", gpu_t = "?", mem = "?", cpu = "?" }
+local last_sys_info = "🧠 …⧖ | 💾 … | 🌡️ …"
+local cached = { cpu = "?", mem = "?", cpu_t = "?", gpu_t = "?" }
+local sampling = false -- guard against overlapping samples
+
+local layout_cache = "…"
+local layout_inflight = false
 local notified_missing = false
 
 local function read_line(path)
@@ -19,81 +32,20 @@ local function read_line(path)
   return line
 end
 
--- Extract CPU and memory usage from system tools
-local function update_usage()
-  local cpu_line = vim.fn.system("top -bn1 | grep 'Cpu(s)' | sed 's/,/./g'")
-  local mem_line = vim.fn.system("free | grep Mem")
-
-  -- local used_cpu = idle and (100 - idle) or "?"
-  -- 💾 RAM usage in GB
-  local idle = cpu_line:match("(%d+%.%d+) id")
-  cached_temps.cpu = idle and string.format("%.2f", 100 - idle) or "?"
-
-  -- 🧠 CPU usage
-  local total_kb, _, _, _, _, avail_kb = mem_line:match("(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
-  local used_gb = (total_kb and avail_kb) and (tonumber(total_kb) - tonumber(avail_kb)) / (1024 * 1024) or nil
-
-  cached_temps.mem = used_gb and string.format("%.2f", used_gb) or "?"
-end
-
--- Scan thermal zones and update cpu_t / gpu_t
-local function update_temperatures()
-  for _, path in ipairs(vim.fn.glob("/sys/class/thermal/thermal_zone*/", true, true)) do
-    local sensor_type = read_line(path .. "type")
-    local temp_raw = tonumber(read_line(path .. "temp"))
-
-    if sensor_type and temp_raw then
-      local temp_c = math.floor(temp_raw / 1000)
-      sensor_type = sensor_type:lower()
-
-      if sensor_type:find("pkg") or sensor_type:find("cpu") or sensor_type:find("acpitz") then
-        cached_temps.cpu_t = temp_c
-      elseif sensor_type:find("gpu") or sensor_type:find("iwlwifi") or sensor_type:find("video") then
-        cached_temps.gpu_t = temp_c
-      end
-    end
-  end
-end
-
--- local function style_temp(temp)
---   if type(temp) ~= "number" then
---     return "?"
---   end
---
---   local symbol = "🌡️"
---   local color_group = "%#Normal#"
---
---   if temp >= 60 then
---     symbol = "🔥"
---     color_group = "%#ErrorMsg#"
---   elseif temp < 36 then
---     symbol = "🧊"
---     color_group = "%#Comment#"
---   else
---     color_group = "%#WarningMsg#"
---   end
---
---   return string.format("%s%s°C%%#", color_group, temp) .. symbol
--- end
-
+-- ── styling (unchanged visual language) ─────────────────────────────────────
 local function style_cpu(cpu)
   local val = tonumber(cpu)
   if not val then
     return "?"
   end
-
   local hl, icon
   if val >= 45 then
-    hl = "ErrorMsg"
-    icon = "🔥"
+    hl, icon = "ErrorMsg", "🔥"
   elseif val >= 20 then
-    hl = "WarningMsg"
-    icon = "🧠"
+    hl, icon = "WarningMsg", "🧠"
   else
-    hl = "MoreMsg"
-    icon = "🧊"
+    hl, icon = "MoreMsg", "🧊"
   end
-
   return string.format("%%#%s#%s %.2f%%*", hl, icon, val)
 end
 
@@ -101,93 +53,148 @@ local function style_temp(temp)
   if type(temp) ~= "number" then
     return "?"
   end
-
-  local symbol = "🌡️"
-  local hl_group = "Normal"
-
+  local symbol, hl = "🌡️", "Normal"
   if temp >= 60 then
-    symbol = "🔥"
-    hl_group = "ErrorMsg"
+    symbol, hl = "🔥", "ErrorMsg"
   elseif temp < 39 then
-    symbol = "🧊"
-    hl_group = "Comment"
+    symbol, hl = "🧊", "Comment"
   else
-    hl_group = "WarningMsg"
+    hl = "WarningMsg"
   end
+  return string.format("%%#%s#%d°C%%*%s", hl, temp, symbol)
+end
 
-  return string.format("%%#%s#%d°C%%*%s", hl_group, temp, symbol)
+-- ── Linux samplers ──────────────────────────────────────────────────────────
+local function sample_linux()
+  -- CPU idle from `top`, memory used from `free` — both async.
+  vim.system({ "sh", "-c", "top -bn1 | grep 'Cpu(s)' | sed 's/,/./g'" }, { text = true }, function(o)
+    local idle = (o.stdout or ""):match("(%d+%.%d+) id")
+    cached.cpu = idle and string.format("%.2f", 100 - idle) or "?"
+  end)
+  vim.system({ "sh", "-c", "free | grep Mem" }, { text = true }, function(o)
+    local total, _, _, _, _, avail = (o.stdout or ""):match("(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)%s+(%d+)")
+    if total and avail then
+      cached.mem = string.format("%.2f", (tonumber(total) - tonumber(avail)) / (1024 * 1024))
+    end
+  end)
+  -- Temps: /sys/class/thermal (synchronous file reads are cheap, no process).
+  for _, path in ipairs(vim.fn.glob("/sys/class/thermal/thermal_zone*/", true, true)) do
+    local t = (read_line(path .. "type") or ""):lower()
+    local raw = tonumber(read_line(path .. "temp"))
+    if t ~= "" and raw then
+      local c = math.floor(raw / 1000)
+      if t:find("pkg") or t:find("cpu") or t:find("acpitz") then
+        cached.cpu_t = c
+      elseif t:find("gpu") or t:find("iwlwifi") or t:find("video") then
+        cached.gpu_t = c
+      end
+    end
+  end
+end
+
+-- ── macOS samplers ──────────────────────────────────────────────────────────
+local function sample_mac()
+  -- One `top -l 1 -n 0` call gives both CPU idle and PhysMem used.
+  vim.system({ "top", "-l", "1", "-n", "0" }, { text = true }, function(o)
+    local out = o.stdout or ""
+    local idle = out:match("CPU usage:.-([%d%.]+)%% idle")
+    if idle then
+      cached.cpu = string.format("%.2f", 100 - tonumber(idle))
+    end
+    local used, unit = out:match("PhysMem:%s+([%d%.]+)(%a)%s+used")
+    if used then
+      local gb = tonumber(used)
+      if unit == "M" then
+        gb = gb / 1024
+      end
+      cached.mem = string.format("%.2f", gb)
+    end
+  end)
+  -- macOS exposes no stable userland thermal source → leave temps hidden.
+  cached.cpu_t = "?"
+  cached.gpu_t = "?"
+end
+
+local function refresh_sys()
+  if sampling then
+    return
+  end
+  sampling = true
+  if is_mac then
+    sample_mac()
+  elseif is_linux then
+    sample_linux()
+  end
+  -- Re-arm the guard shortly after dispatch; samples are fire-and-forget.
+  vim.defer_fn(function()
+    sampling = false
+  end, 1500)
 end
 
 function M.get_sys_status()
-  local now = vim.loop.hrtime() / 1e9 -- convert nanoseconds to seconds
-
+  local now = vim.uv.hrtime() / 1e9
   if now - last_update_time > update_interval then
-    -- 🧩 Final formatting
-    -- last_sys_info = string.format("cpu: %.2f%% | mem: %.2fGB", used_cpu, used_gb)
-    -- last_sys_info = "🧠" .. cpu_str .. "⧖ | 💾" .. mem_str .. "GB"
-
-    update_usage()
-    update_temperatures()
-
-    -- last_sys_info = string.format(
-    --   "🧠 %s⧖ | 💾 %sGB | 🌡️ %s/%s",
-    --   cached_temps.cpu or "?",
-    --   cached_temps.mem or "?",
-    --   cached_temps.cpu_t or "?",
-    --   cached_temps.gpu_t or "?"
-    -- )
-
-    last_sys_info = string.format(
-      "🧠 %s⧖ | 💾 %sGB | %s/%s",
-      style_cpu(cached_temps.cpu),
-      cached_temps.mem or "?",
-      style_temp(cached_temps.cpu_t),
-      style_temp(cached_temps.gpu_t)
-    )
-
+    refresh_sys()
     last_update_time = now
+    -- Render from whatever is currently cached (updated by prior async sample).
+    if is_mac then
+      last_sys_info = string.format("🧠 %s⧖ | 💾 %sGB", style_cpu(cached.cpu), cached.mem or "?")
+    else
+      last_sys_info = string.format(
+        "🧠 %s⧖ | 💾 %sGB | %s/%s",
+        style_cpu(cached.cpu),
+        cached.mem or "?",
+        style_temp(cached.cpu_t),
+        style_temp(cached.gpu_t)
+      )
+    end
   end
-
   return last_sys_info
 end
 
-function M.get_keyboard_layout()
-  local result = vim.fn.system("xkb-switch")
-  local error_code = vim.v.shell_error
-
-  if error_code ~= 0 then
+-- ── keyboard layout ─────────────────────────────────────────────────────────
+-- Linux/X11: `xkb-switch`. macOS: no clean CLI → segment hidden. Sampled async.
+local function refresh_layout()
+  if layout_inflight then
+    return
+  end
+  if vim.fn.executable("xkb-switch") == 0 then
     if not notified_missing then
       notified_missing = true
       vim.schedule(function()
-        vim.notify("❗ Missing `xkb-switch`. Run: yay -S xkb-switch", vim.log.levels.WARN)
+        vim.notify("ℹ️ `xkb-switch` not found — keyboard-layout segment hidden.", vim.log.levels.INFO)
       end)
     end
-    return "n/a"
+    layout_cache = ""
+    return
   end
-
-  local layout = result:gsub("\n", "")
-  return ({
-    us = "[EN]",
-    ua = "[UA]",
-  })[layout] or "[" .. layout .. "]"
+  layout_inflight = true
+  vim.system({ "xkb-switch" }, { text = true }, function(o)
+    layout_inflight = false
+    local layout = (o.stdout or ""):gsub("%s+", "")
+    layout_cache = ({ us = "[EN]", ua = "[UA]" })[layout] or (layout ~= "" and "[" .. layout .. "]" or "")
+  end)
 end
 
+function M.get_keyboard_layout()
+  if is_mac then
+    return "" -- no keyboard-layout CLI on macOS; hide the segment
+  end
+  refresh_layout()
+  return layout_cache
+end
+
+-- ── battery (battery.nvim is itself cross-platform) ─────────────────────────
 function M.get_battery_status()
-  local battery_ok, battery = pcall(require, "battery")
-
-  local btr = "🔋 N/A"
-
-  if battery_ok and battery then
-    -- btr = battery.get_status() .. "🔋"
-    btr = battery.get_status_line()
+  local ok, battery = pcall(require, "battery")
+  if ok and battery then
+    return battery.get_status_line()
   end
-
-  -- vim.notify(btr)
-  return btr
+  return "🔋 N/A"
 end
 
+-- ── reload helper (unchanged) ───────────────────────────────────────────────
 local function find_lua_root(filepath)
-  -- look for the nearest parent folder named "lua"
   local segments = vim.split(filepath, "/")
   for i = #segments, 1, -1 do
     if segments[i] == "lua" then
@@ -197,24 +204,19 @@ local function find_lua_root(filepath)
 end
 
 function M.reload_current()
-  local file = vim.fn.expand("%:p") -- full file path
+  local file = vim.fn.expand("%:p")
   local lua_root = find_lua_root(file)
-
   if not lua_root then
     vim.notify("❌ Could not find 'lua/' root", vim.log.levels.ERROR)
     return
   end
-
   local module_path = file:gsub(lua_root, ""):gsub("%.lua$", ""):gsub("/", ".")
-
   if module_path == "" then
     vim.notify("⚠️ Not a Lua module file", vim.log.levels.WARN)
     return
   end
-
   package.loaded[module_path] = nil
   local ok, result = pcall(require, module_path)
-
   if ok then
     vim.notify("✅ Reloaded: " .. module_path)
   else
@@ -224,27 +226,14 @@ end
 
 vim.keymap.set("n", "<leader>rr", M.reload_current, { desc = "Reload Current Lua File" })
 vim.api.nvim_create_user_command("ReloadCurrent", M.reload_current, {})
-
 vim.api.nvim_create_user_command("SYS", function()
   vim.notify(M.get_sys_status())
 end, { desc = "Show system monitor" })
-
 vim.api.nvim_create_user_command("BAT", function()
   vim.notify(M.get_battery_status())
 end, { desc = "Show battery" })
-
 vim.api.nvim_create_user_command("LANG", function()
   vim.notify(M.get_keyboard_layout())
 end, { desc = "Show lang layout" })
 
--- commander.add({
---   {
---     desc = "Relload Current File",
---     keys = { "n", "<leader>rr" },
---     cmd = function()
---       M.reload_current()
---     end,
---   },
--- })
---
 return M

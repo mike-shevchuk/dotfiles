@@ -20,5 +20,16 @@ vim.opt.foldexpr = "nvim_treesitter#foldexpr()" -- default is ""
 vim.opt.foldenable = false --
 vim.opt.foldmethod = "indent"
 vim.opt.foldlevel = 99
-vim.opt.shell = "/usr/bin/zsh"
+-- Resolve zsh per-machine (Linux: /usr/bin/zsh, macOS: /bin/zsh). Falls back to
+-- the inherited $SHELL if zsh isn't on PATH.
+local zsh = vim.fn.exepath("zsh")
+if zsh ~= "" then
+  vim.o.shell = zsh
+end
 -- vim.wo.number = true
+
+-- Silence unused remote-plugin providers (cleans :checkhealth, no behaviour change).
+vim.g.loaded_node_provider = 0
+vim.g.loaded_perl_provider = 0
+vim.g.loaded_python3_provider = 0
+vim.g.loaded_ruby_provider = 0
