@@ -48,7 +48,7 @@ render() {
 
     grp "Status bar"
     printf "  ${C_DIM}row 0${C_OFF} session · tabs · 🐍 python · 󰚩 claude · cpu · ram · clock\n"
-    printf "  ${C_DIM}row 1${C_OFF} active pane: 🌿 branch · path · 🐍 python\n"
+    printf "  ${C_DIM}row 1${C_OFF} active pane: 🌿 branch · 🔀 PR#n · path · 🐍 python\n"
     printf "  ${C_DIM}border${C_OFF} per-pane claude state/uptime or command · path · git · python\n"
 
     printf "\n${C_DIM}Everything else: prefix : then 'list-keys', or prefix ? in base config.${C_OFF}\n"
