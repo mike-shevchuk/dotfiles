@@ -172,6 +172,25 @@ class TestCli(unittest.TestCase):
         self.assertIn("foo.py", body)
         self.assertTrue(body.startswith("<!DOCTYPE html>"))
 
+    def test_nested_meta_file_used_for_both_flags(self):
+        d = tempfile.mkdtemp()
+        diff_f = os.path.join(d, "d.diff")
+        with open(diff_f, "w") as f:
+            f.write(SAMPLE_DIFF)
+        nested_f = os.path.join(d, "explanations.json")
+        with open(nested_f, "w") as f:
+            f.write('{"meta":{"head":"feat-x","base":"origin/master",'
+                    '"mode":"local","generated":"t","repo":"dotfiles"},'
+                    '"files":[{"path":"foo.py","summary":{"eng":"x"},"hunks":[]}]}')
+        out_f = os.path.join(d, "r.html")
+        rc = rh.main(["--diff", diff_f, "--explanations", nested_f,
+                      "--lang", "eng", "--out", out_f, "--meta", nested_f])
+        self.assertEqual(rc, 0)
+        body = open(out_f, encoding="utf-8").read()
+        self.assertIn("feat-x", body)            # head reached the title/header
+        self.assertIn('data-repo="dotfiles"', body)  # repo reached the page
+        self.assertIn('data-ref="feat-x"', body)
+
 
 if __name__ == "__main__":
     unittest.main()

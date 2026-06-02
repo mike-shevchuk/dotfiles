@@ -302,9 +302,15 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--meta", default=None)
     args = ap.parse_args(argv)
 
-    diff_text = open(args.diff, encoding="utf-8").read()
-    expl = json.load(open(args.explanations, encoding="utf-8"))
-    meta = json.load(open(args.meta, encoding="utf-8")) if args.meta else {}
+    with open(args.diff, encoding="utf-8") as f:
+        diff_text = f.read()
+    with open(args.explanations, encoding="utf-8") as f:
+        expl = json.load(f)
+    meta = {}
+    if args.meta:
+        with open(args.meta, encoding="utf-8") as f:
+            meta_raw = json.load(f)
+        meta = meta_raw.get("meta", meta_raw)
     files = parse_diff(diff_text)
     html_out = render_html(files, expl, args.lang, meta)
     _atomic_write(args.out, html_out)
