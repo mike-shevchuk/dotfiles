@@ -68,5 +68,44 @@ class TestRenderText(unittest.TestCase):
         self.assertIn("Hello", out)
 
 
+class TestRenderHunk(unittest.TestCase):
+    def setUp(self):
+        self.hunk = {"header": "@@ -1,3 +1,4 @@",
+                     "lines": [("ctx", "import os"), ("del", "x = 1"),
+                               ("add", "x = 2")]}
+
+    def test_diff_line_classes_and_escape(self):
+        out = rh.render_hunk("F0H0", {"header": "@@ x @@",
+                                      "lines": [("add", "a<b")]}, {}, "eng")
+        self.assertIn('class="ln add"', out)
+        self.assertIn("a&lt;b", out)
+
+    def test_anchor_and_comment_box(self):
+        out = rh.render_hunk("F0H0", self.hunk, {}, "eng")
+        self.assertIn('id="F0H0"', out)
+        self.assertIn('data-hunk="F0H0"', out)          # comment box + copy button bind here
+        self.assertIn("Copy for Claude", out)
+
+    def test_description_and_problems(self):
+        eh = {"description": {"eng": "renames x"},
+              "problems": [{"severity": "warn", "text": {"eng": "shadowing"}}]}
+        out = rh.render_hunk("F0H0", self.hunk, eh, "eng")
+        self.assertIn("renames x", out)
+        self.assertIn("shadowing", out)
+        self.assertIn("warn", out)
+
+    def test_problems_omitted_when_none(self):
+        out = rh.render_hunk("F0H0", self.hunk, {"description": {"eng": "d"}}, "eng")
+        self.assertNotIn("review-problems", out)
+
+    def test_replies_rendered(self):
+        eh = {"replies": [{"comment": "why?", "reply": {"eng": "because"},
+                           "status": "addressed"}]}
+        out = rh.render_hunk("F0H0", self.hunk, eh, "eng")
+        self.assertIn("why?", out)
+        self.assertIn("because", out)
+        self.assertIn("✅", out)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -79,3 +79,59 @@ def render_text(obj, lang: str) -> str:
         e = html.escape(_text(obj, "eng"))
         return f'<span class="L L-ukr">{u}</span><span class="L L-eng" hidden>{e}</span>'
     return html.escape(_text(obj, lang))
+
+
+def render_hunk(hid: str, hunk: dict, expl: dict, lang: str) -> str:
+    rows = []
+    for tag, text in hunk["lines"]:
+        sign = {"add": "+", "del": "-", "ctx": " "}[tag]
+        rows.append(
+            f'<div class="ln {tag}"><span class="sign">{sign}</span>'
+            f'<code>{html.escape(text)}</code></div>'
+        )
+    diff_html = "".join(rows)
+
+    desc = expl.get("description")
+    desc_html = ""
+    if desc:
+        desc_html = (
+            '<details class="review-desc" open><summary>📝 Description</summary>'
+            f'<div class="body">{render_text(desc, lang)}</div></details>'
+        )
+
+    problems = expl.get("problems") or []
+    prob_html = ""
+    if problems:
+        items = "".join(
+            f'<li class="sev-{html.escape(str(p.get("severity", "info")))}">'
+            f'<span class="badge">{html.escape(str(p.get("severity", "info")))}</span>'
+            f'{render_text(p.get("text", ""), lang)}</li>'
+            for p in problems
+        )
+        prob_html = (
+            '<details class="review-problems" open><summary>⚠️ Problems</summary>'
+            f'<ul>{items}</ul></details>'
+        )
+
+    replies = expl.get("replies") or []
+    rep_html = ""
+    if replies:
+        threads = []
+        for r in replies:
+            mark = "✅" if r.get("status") == "addressed" else "💬"
+            threads.append(
+                f'<div class="thread"><div class="you">🗣 {html.escape(str(r.get("comment", "")))}</div>'
+                f'<div class="claude">{mark} {render_text(r.get("reply", ""), lang)}</div></div>'
+            )
+        rep_html = f'<div class="replies">{"".join(threads)}</div>'
+
+    return (
+        f'<div class="hunk" id="{hid}">'
+        f'<div class="hunk-head"><code>{html.escape(hunk["header"])}</code>'
+        f'<button class="copy" data-hunk="{hid}">Copy for Claude</button></div>'
+        f'<div class="diff">{diff_html}</div>'
+        f'{desc_html}{prob_html}{rep_html}'
+        f'<textarea class="comment" data-hunk="{hid}" '
+        f'placeholder="comment for Claude…"></textarea>'
+        f'</div>'
+    )
