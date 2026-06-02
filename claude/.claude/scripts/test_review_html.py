@@ -107,5 +107,35 @@ class TestRenderHunk(unittest.TestCase):
         self.assertIn("✅", out)
 
 
+class TestRenderHtml(unittest.TestCase):
+    META = {"head": "feat-x", "base": "origin/master", "mode": "local",
+            "generated": "2026-06-02 10:00", "repo": "dotfiles"}
+
+    def test_empty_diff_nothing_to_review(self):
+        out = rh.render_html([], {}, "eng", self.META)
+        self.assertIn("Nothing to review", out)
+        self.assertTrue(out.strip().startswith("<!DOCTYPE html>"))
+
+    def test_full_page_has_file_and_hunk(self):
+        files = rh.parse_diff(SAMPLE_DIFF)
+        expl = {"files": [{"path": "foo.py", "summary": {"eng": "edits"},
+                           "hunks": [{"description": {"eng": "change x"}}]}]}
+        out = rh.render_html(files, expl, "eng", self.META)
+        self.assertIn("foo.py", out)
+        self.assertIn('id="F0H0"', out)
+        self.assertIn("change x", out)
+        self.assertIn("Export for Claude", out)
+
+    def test_both_mode_shows_toggle(self):
+        files = rh.parse_diff(SAMPLE_DIFF)
+        out = rh.render_html(files, {"files": []}, "both", self.META)
+        self.assertIn('id="lang-toggle"', out)
+
+    def test_single_mode_hides_toggle(self):
+        files = rh.parse_diff(SAMPLE_DIFF)
+        out = rh.render_html(files, {"files": []}, "eng", self.META)
+        self.assertNotIn('id="lang-toggle"', out)
+
+
 if __name__ == "__main__":
     unittest.main()

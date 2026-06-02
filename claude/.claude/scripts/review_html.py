@@ -135,3 +135,94 @@ def render_hunk(hid: str, hunk: dict, expl: dict, lang: str) -> str:
         f'placeholder="comment for Claude…"></textarea>'
         f'</div>'
     )
+
+
+_JS = ""  # replaced in Task 6
+
+
+_CSS = """
+:root{--bg:#1e1e2e;--fg:#cdd6f4;--mut:#6c7086;--add:#1c3a1c;--del:#3a1c1c;
+--addfg:#a6e3a1;--delfg:#f38ba8;--card:#181825;--acc:#89b4fa;--peach:#fab387;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);
+font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace}
+header{position:sticky;top:0;background:var(--card);padding:10px 16px;
+border-bottom:1px solid #313244;display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+header .meta{color:var(--mut)}
+button{background:#313244;color:var(--fg);border:1px solid #45475a;border-radius:6px;
+padding:4px 10px;cursor:pointer;font:inherit}
+button:hover{border-color:var(--acc)}
+main{padding:16px;max-width:1100px;margin:0 auto}
+details.file{background:var(--card);border:1px solid #313244;border-radius:8px;margin:0 0 14px}
+details.file>summary{cursor:pointer;padding:10px 14px;font-weight:bold;color:var(--acc)}
+.fstat{color:var(--mut);font-weight:normal;margin-left:8px}
+.fsummary{padding:0 14px 8px;color:var(--fg)}
+.hunk{border-top:1px solid #313244;padding:10px 14px}
+.hunk-head{display:flex;justify-content:space-between;align-items:center;color:var(--mut)}
+.diff{overflow-x:auto;margin:8px 0;border-radius:6px;background:#11111b}
+.ln{white-space:pre;display:flex}
+.ln .sign{width:1.4em;text-align:center;color:var(--mut)}
+.ln.add{background:var(--add)} .ln.add .sign,.ln.add code{color:var(--addfg)}
+.ln.del{background:var(--del)} .ln.del .sign,.ln.del code{color:var(--delfg)}
+.ln code{background:none;padding:0}
+details.review-desc>summary{color:var(--acc);cursor:pointer}
+details.review-problems>summary{color:var(--peach);cursor:pointer}
+.review-problems .badge{background:var(--peach);color:#1e1e2e;border-radius:4px;
+padding:0 6px;margin-right:6px;font-size:.8em}
+.replies{margin:8px 0;border-left:3px solid var(--acc);padding-left:10px}
+.replies .you{color:var(--peach)} .replies .claude{color:var(--addfg)}
+textarea.comment{width:100%;min-height:46px;margin-top:8px;background:#11111b;
+color:var(--fg);border:1px solid #45475a;border-radius:6px;padding:6px;font:inherit}
+.empty{text-align:center;color:var(--mut);padding:60px 20px}
+.empty b{color:var(--addfg);font-size:1.3em}
+"""
+
+
+def _page(meta: dict, lang: str, body: str) -> str:
+    toggle = ('<button id="lang-toggle">UK / EN</button>' if lang == "both" else "")
+    title = f'{meta.get("base","?")} → {meta.get("head","?")}'
+    return (
+        "<!DOCTYPE html>\n<html lang=\"en\"><head><meta charset=\"utf-8\">"
+        f"<title>review: {html.escape(title)}</title><style>{_CSS}</style></head><body>"
+        "<header>"
+        f"<strong>review</strong> <span class=\"meta\">{html.escape(title)} "
+        f"· {html.escape(str(meta.get('mode','')))} · {html.escape(str(meta.get('generated','')))}</span>"
+        "<span style=\"flex:1\"></span>"
+        "<button id=\"expand-all\">Expand all</button>"
+        "<button id=\"collapse-all\">Collapse all</button>"
+        f"{toggle}"
+        "<button id=\"export\">Export for Claude</button>"
+        f"</header><main data-repo=\"{html.escape(str(meta.get('repo','')))}\" "
+        f"data-ref=\"{html.escape(str(meta.get('head','')))}\">{body}</main>"
+        f"<script>{_JS}</script></body></html>\n"
+    )
+
+
+def _nothing_to_review(meta: dict) -> str:
+    return (
+        '<div class="empty"><b>✓ Nothing to review.</b>'
+        f'<p>No changes for {html.escape(str(meta.get("head","?")))} '
+        f'vs {html.escape(str(meta.get("base","?")))}.</p></div>'
+    )
+
+
+def render_html(files: list[dict], expl: dict, lang: str, meta: dict) -> str:
+    if not files:
+        return _page(meta, lang, _nothing_to_review(meta))
+    by_path = {f.get("path"): f for f in expl.get("files", [])}
+    blocks = []
+    for fi, f in enumerate(files):
+        ef = by_path.get(f["path"], {})
+        ehunks = ef.get("hunks", [])
+        summary = render_text(ef.get("summary", ""), lang) if ef.get("summary") else ""
+        hunks = "".join(
+            render_hunk(hunk_id(fi, hi), h, ehunks[hi] if hi < len(ehunks) else {}, lang)
+            for hi, h in enumerate(f["hunks"])
+        )
+        stat = f'<span class="fstat">+{f["added"]} -{f["removed"]}</span>'
+        summ = f'<div class="fsummary">{summary}</div>' if summary else ""
+        blocks.append(
+            f'<details class="file" open><summary>{html.escape(f["path"])}{stat}</summary>'
+            f'{summ}{hunks}</details>'
+        )
+    return _page(meta, lang, "".join(blocks))
