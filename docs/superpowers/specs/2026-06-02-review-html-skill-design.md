@@ -35,10 +35,11 @@ Three pieces with clear boundaries:
 ## 4. Command flow
 
 ```
-/review-html [eng|ukr|both] [ <base> <head> | <PR#> ] [--reply]
+/review-html [eng|ukr|both] [ <base> <head> | <PR#> ] [--reply] [--help]
 ```
 
 Defaults: language = **ukr**; diff = current branch vs origin's default base.
+`--help` (or `help`) prints the usage examples in §11 and exits without generating anything.
 
 1. **Resolve the diff** (Bash):
    - no refs → `git diff "$(git merge-base <origin-default> HEAD)"` (= `prefix v` default; includes uncommitted work).
@@ -114,3 +115,55 @@ State: comments live in `localStorage`, keyed by `repo + ref + hunkId`, survivin
 ## 10. Deliverable
 
 A PR from `feat-review-html` → `master` adding the command, the generator, the `.gitignore` entry, and this spec, with the testing above green.
+
+## 11. Usage examples (`--help` output)
+
+`/review-html --help` (or `help`) prints exactly this:
+
+```text
+/review-html — turn your branch's changes into an interactive HTML review page.
+
+USAGE
+  /review-html [eng|ukr|both] [ <base> <head> | <PR#> ] [--reply] [--help]
+
+  language   eng | ukr | both     (default: ukr)
+  <base> <head>  two refs to compare, PR-style (base ← head)
+  <PR#>          a GitHub PR number (uses `gh pr diff`)
+  --reply        read .claude-review/comments.md and answer, regenerate the page
+  --help         show this help
+
+EXAMPLES
+  # Review the CURRENT branch vs origin's default base (main/master),
+  # including uncommitted work — same diff as tmux `prefix v`. Ukrainian.
+  /review-html
+
+  # Same, but explanations in English / in both languages (UK·EN toggle in page)
+  /review-html eng
+  /review-html both
+
+  # Compare two explicit branches, PR-style (changes of <head> over <base>)
+  /review-html ukr origin/master feat-tmux-review-diff
+  /review-html eng origin/develop origin/feature/payments
+
+  # Review a specific GitHub PR by number (exactly what GitHub shows)
+  /review-html ukr 28
+  /review-html both 28
+
+  # Continue the discussion after you click "Export for Claude" in the page:
+  /review-html --reply
+  #   → I read your comments, answer each one, and regenerate the page with
+  #     my replies threaded under your comments (💬 open / ✅ addressed)
+
+TYPICAL FLOW
+  1. /review-html              → page opens in your browser
+  2. expand a file → read 📝 Description / ⚠️ Problems per hunk
+  3. either: "Copy for Claude" on a hunk → paste into chat (instant), or
+     add comments → "Export for Claude" → /review-html --reply (threaded)
+  4. iterate until ✅
+
+NOTES
+  • Runs on the CURRENT pane's repo (like `prefix v`); for PR# it uses `gh`.
+  • Artifacts go to .claude-review/ (git-ignored): the .html, explanations.json,
+    comments.md.
+  • Empty diff → a clear "Nothing to review" page, never a blank one.
+```
