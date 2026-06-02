@@ -88,8 +88,8 @@ State: comments live in `localStorage`, keyed by `repo + ref + hunkId`, survivin
   comment: <your text>
   ```
   User pastes into the Claude chat; Claude answers.
-- **A — file round-trip:** "Export for Claude" writes all non-empty comments to `.claude-review/comments.md` (grouped by file → hunk, each with the hunk header + the user's comment). Then:
-  - `/review-html --reply` → Claude reads `comments.md`, answers each comment, writes the answers back into `explanations.json` (a `replies` array per hunk), and **regenerates the HTML** so each thread shows the user's comment, Claude's reply, and a status (💬 open / ✅ addressed).
+- **A — round-trip:** a browser page cannot write into the repo, so "Export for Claude" **copies all non-empty comments to the clipboard** as a markdown block (grouped by file → hunk, each with the hunk header + the user's comment), and also offers a **"Download comments.md"** fallback. Then:
+  - `/review-html --reply` → Claude obtains the comments by, in order: (1) clipboard via `pbpaste` (macOS) / `xclip -o` / `wl-paste` (Linux); (2) `.claude-review/comments.md`; (3) the newest `~/Downloads/comments.md`. It saves them to `.claude-review/comments.md` for the record, answers each comment, writes the answers back into `explanations.json` (a `replies` array per hunk), and **regenerates the HTML** so each thread shows the user's comment, Claude's reply, and a status (💬 open / ✅ addressed).
 
 ## 7. Error handling
 
