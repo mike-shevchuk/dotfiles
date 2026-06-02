@@ -1,3 +1,5 @@
+import os
+import tempfile
 import unittest
 
 import review_html as rh
@@ -145,6 +147,23 @@ class TestPageJs(unittest.TestCase):
         for needle in ("localStorage", "clipboard", "comments.md",
                        "expand-all", "export"):
             self.assertIn(needle, out)
+
+
+class TestCli(unittest.TestCase):
+    def test_generate_file(self):
+        d = tempfile.mkdtemp()
+        diff_f = os.path.join(d, "d.diff"); open(diff_f, "w").write(SAMPLE_DIFF)
+        expl_f = os.path.join(d, "e.json")
+        open(expl_f, "w").write('{"files":[{"path":"foo.py","summary":{"eng":"x"},"hunks":[]}]}')
+        out_f = os.path.join(d, "r.html")
+        meta_f = os.path.join(d, "m.json")
+        open(meta_f, "w").write('{"head":"h","base":"b","mode":"local","generated":"t","repo":"r"}')
+        rc = rh.main(["--diff", diff_f, "--explanations", expl_f,
+                      "--lang", "eng", "--out", out_f, "--meta", meta_f])
+        self.assertEqual(rc, 0)
+        body = open(out_f).read()
+        self.assertIn("foo.py", body)
+        self.assertTrue(body.startswith("<!DOCTYPE html>"))
 
 
 if __name__ == "__main__":

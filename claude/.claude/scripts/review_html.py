@@ -10,7 +10,6 @@ import argparse
 import html
 import json
 import os
-import sys
 import tempfile
 
 
@@ -278,3 +277,39 @@ def render_html(files: list[dict], expl: dict, lang: str, meta: dict) -> str:
             f'{summ}{hunks}</details>'
         )
     return _page(meta, lang, "".join(blocks))
+
+
+def _atomic_write(path: str, content: str) -> None:
+    d = os.path.dirname(os.path.abspath(path)) or "."
+    os.makedirs(d, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=d, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.remove(tmp)
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="Generate an HTML review page.")
+    ap.add_argument("--diff", required=True)
+    ap.add_argument("--explanations", required=True)
+    ap.add_argument("--lang", default="ukr", choices=["ukr", "eng", "both"])
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--meta", default=None)
+    args = ap.parse_args(argv)
+
+    diff_text = open(args.diff, encoding="utf-8").read()
+    expl = json.load(open(args.explanations, encoding="utf-8"))
+    meta = json.load(open(args.meta, encoding="utf-8")) if args.meta else {}
+    files = parse_diff(diff_text)
+    html_out = render_html(files, expl, args.lang, meta)
+    _atomic_write(args.out, html_out)
+    print(args.out)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
