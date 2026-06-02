@@ -18,6 +18,15 @@ def hunk_id(file_idx: int, hunk_idx: int) -> str:
     return f"F{file_idx}H{hunk_idx}"
 
 
+def _strip_ab(path: str) -> str:
+    """Strip a leading 'a/' or 'b/' from a diff path."""
+    return path[2:] if path[:2] in ("a/", "b/") else path
+
+
+def _new_file(path: str) -> dict:
+    return {"path": path, "added": 0, "removed": 0, "hunks": []}
+
+
 def parse_diff(text: str) -> list[dict]:
     """Parse `git diff` unified output.
 
@@ -31,19 +40,19 @@ def parse_diff(text: str) -> list[dict]:
     for line in text.splitlines():
         if line.startswith("diff --git "):
             path = line.split(" b/", 1)[-1].strip()
-            cur = {"path": path, "added": 0, "removed": 0, "hunks": []}
+            cur = _new_file(path)
             files.append(cur)
         elif line.startswith("+++ "):
             p = line[4:].strip()
             if cur is not None and p != "/dev/null":
-                cur["path"] = p[2:] if p.startswith("b/") else p
+                cur["path"] = _strip_ab(p)
         elif line.startswith("--- "):
             p = line[4:].strip()
             if cur is not None and p != "/dev/null" and cur["path"] == "/dev/null":
-                cur["path"] = p[2:] if p.startswith("a/") else p
+                cur["path"] = _strip_ab(p)
         elif line.startswith("@@"):
             if cur is None:
-                cur = {"path": "?", "added": 0, "removed": 0, "hunks": []}
+                cur = _new_file("?")
                 files.append(cur)
             cur["hunks"].append({"header": line, "lines": []})
         elif cur is not None and cur["hunks"]:
@@ -60,6 +69,15 @@ def parse_diff(text: str) -> list[dict]:
     return files
 
 
+def _detail(cls: str, summary: str, body: str) -> str:
+    """A collapsible <details open> block used for Description/Problems."""
+    return (f'<details class="{cls}" open><summary>{summary}</summary>'
+            f'{body}</details>')
+
+
+# NOTE: single-language mode falls back across languages (show *something*),
+# but `both` mode does NOT — a missing translation renders an empty span so the
+# two languages never duplicate. This asymmetry is intentional.
 def _text(obj, lang: str) -> str:
     """Pick a language string from {'ukr':..,'eng':..} or a plain string."""
     if isinstance(obj, dict):
@@ -93,24 +111,23 @@ def render_hunk(hid: str, hunk: dict, expl: dict, lang: str) -> str:
     desc = expl.get("description")
     desc_html = ""
     if desc:
-        desc_html = (
-            '<details class="review-desc" open><summary>📝 Description</summary>'
-            f'<div class="body">{render_text(desc, lang)}</div></details>'
+        desc_html = _detail(
+            "review-desc", "📝 Description",
+            f'<div class="body">{render_text(desc, lang)}</div>',
         )
 
     problems = expl.get("problems") or []
     prob_html = ""
     if problems:
-        items = "".join(
-            f'<li class="sev-{html.escape(str(p.get("severity", "info")))}">'
-            f'<span class="badge">{html.escape(str(p.get("severity", "info")))}</span>'
-            f'{render_text(p.get("text", ""), lang)}</li>'
-            for p in problems
-        )
-        prob_html = (
-            '<details class="review-problems" open><summary>⚠️ Problems</summary>'
-            f'<ul>{items}</ul></details>'
-        )
+        items = ""
+        for p in problems:
+            sev = html.escape(str(p.get("severity", "info")))
+            items += (
+                f'<li class="sev-{sev}">'
+                f'<span class="badge">{sev}</span>'
+                f'{render_text(p.get("text", ""), lang)}</li>'
+            )
+        prob_html = _detail("review-problems", "⚠️ Problems", f'<ul>{items}</ul>')
 
     replies = expl.get("replies") or []
     rep_html = ""
