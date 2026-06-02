@@ -59,3 +59,23 @@ def parse_diff(text: str) -> list[dict]:
                 h["lines"].append(("ctx", line[1:]))
             # ignore "\ No newline at end of file" and other noise
     return files
+
+
+def _text(obj, lang: str) -> str:
+    """Pick a language string from {'ukr':..,'eng':..} or a plain string."""
+    if isinstance(obj, dict):
+        return obj.get(lang) or obj.get("eng") or obj.get("ukr") or ""
+    return obj or ""
+
+
+def render_text(obj, lang: str) -> str:
+    """Escaped HTML for a bilingual field.
+
+    lang 'ukr'|'eng' -> just that language. lang 'both' -> two spans
+    (.L-ukr shown, .L-eng hidden); the page's toggle flips them.
+    """
+    if lang == "both":
+        u = html.escape(_text(obj, "ukr"))
+        e = html.escape(_text(obj, "eng"))
+        return f'<span class="L L-ukr">{u}</span><span class="L L-eng" hidden>{e}</span>'
+    return html.escape(_text(obj, lang))

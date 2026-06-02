@@ -48,5 +48,25 @@ class TestParseDiff(unittest.TestCase):
         self.assertEqual(new["added"], 1)
 
 
+class TestRenderText(unittest.TestCase):
+    OBJ = {"ukr": "Привіт", "eng": "Hello"}
+
+    def test_single_lang_escapes(self):
+        self.assertEqual(rh.render_text({"eng": "a<b"}, "eng"), "a&lt;b")
+
+    def test_single_lang_picks_lang(self):
+        self.assertEqual(rh.render_text(self.OBJ, "ukr"), "Привіт")
+
+    def test_plain_string(self):
+        self.assertEqual(rh.render_text("plain", "ukr"), "plain")
+
+    def test_both_emits_two_spans(self):
+        out = rh.render_text(self.OBJ, "both")
+        self.assertIn('class="L L-ukr"', out)
+        self.assertIn('class="L L-eng" hidden', out)
+        self.assertIn("Привіт", out)
+        self.assertIn("Hello", out)
+
+
 if __name__ == "__main__":
     unittest.main()
