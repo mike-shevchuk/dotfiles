@@ -74,8 +74,8 @@ def render_text(obj, lang: str) -> str:
     (.L-ukr shown, .L-eng hidden); the page's toggle flips them.
     """
     if lang == "both":
-        u = html.escape(_text(obj, "ukr"))
-        e = html.escape(_text(obj, "eng"))
+        u = html.escape(obj.get("ukr", "")) if isinstance(obj, dict) else html.escape(obj or "")
+        e = html.escape(obj.get("eng", "")) if isinstance(obj, dict) else ""
         return f'<span class="L L-ukr">{u}</span><span class="L L-eng" hidden>{e}</span>'
     return html.escape(_text(obj, lang))
 
@@ -149,7 +149,7 @@ _JS = r"""
   function block(h,comment){
     var hunk=document.getElementById(h);
     var head=hunk.querySelector('.hunk-head code').textContent;
-    var file=hunk.closest('details.file').querySelector('summary').textContent.trim();
+    var file=hunk.closest('details.file').dataset.path;
     return '[review-html] '+main.dataset.repo+' @ '+main.dataset.ref+'\n'
       +'file: '+file+'  hunk: '+h+' ('+head+')\n'+'comment: '+comment;
   }
@@ -273,7 +273,8 @@ def render_html(files: list[dict], expl: dict, lang: str, meta: dict) -> str:
         stat = f'<span class="fstat">+{f["added"]} -{f["removed"]}</span>'
         summ = f'<div class="fsummary">{summary}</div>' if summary else ""
         blocks.append(
-            f'<details class="file" open><summary>{html.escape(f["path"])}{stat}</summary>'
+            f'<details class="file" open data-path="{html.escape(f["path"])}">'
+            f'<summary>{html.escape(f["path"])}{stat}</summary>'
             f'{summ}{hunks}</details>'
         )
     return _page(meta, lang, "".join(blocks))

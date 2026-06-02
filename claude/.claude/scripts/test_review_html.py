@@ -69,6 +69,12 @@ class TestRenderText(unittest.TestCase):
         self.assertIn("Привіт", out)
         self.assertIn("Hello", out)
 
+    def test_both_no_cross_language_fallback(self):
+        out = rh.render_text({"ukr": "Привіт"}, "both")
+        self.assertIn('<span class="L L-ukr">Привіт</span>', out)
+        self.assertIn('<span class="L L-eng" hidden></span>', out)
+        self.assertEqual(out.count("Привіт"), 1)
+
 
 class TestRenderHunk(unittest.TestCase):
     def setUp(self):
@@ -127,6 +133,7 @@ class TestRenderHtml(unittest.TestCase):
         self.assertIn('id="F0H0"', out)
         self.assertIn("change x", out)
         self.assertIn("Export for Claude", out)
+        self.assertIn('data-path="foo.py"', out)
 
     def test_both_mode_shows_toggle(self):
         files = rh.parse_diff(SAMPLE_DIFF)
