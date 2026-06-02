@@ -137,5 +137,15 @@ class TestRenderHtml(unittest.TestCase):
         self.assertNotIn('id="lang-toggle"', out)
 
 
+class TestPageJs(unittest.TestCase):
+    META = {"head": "h", "base": "b", "mode": "local", "generated": "t", "repo": "r"}
+
+    def test_js_present_and_features(self):
+        out = rh.render_html(rh.parse_diff(SAMPLE_DIFF), {"files": []}, "eng", self.META)
+        for needle in ("localStorage", "clipboard", "comments.md",
+                       "expand-all", "export"):
+            self.assertIn(needle, out)
+
+
 if __name__ == "__main__":
     unittest.main()

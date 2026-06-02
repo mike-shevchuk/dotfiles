@@ -137,7 +137,59 @@ def render_hunk(hid: str, hunk: dict, expl: dict, lang: str) -> str:
     )
 
 
-_JS = ""  # replaced in Task 6
+_JS = r"""
+(function(){
+  var main=document.querySelector('main');
+  var key=function(h){return 'rh:'+main.dataset.repo+':'+main.dataset.ref+':'+h;};
+  // restore saved comments
+  document.querySelectorAll('textarea.comment').forEach(function(t){
+    var v=localStorage.getItem(key(t.dataset.hunk)); if(v)t.value=v;
+    t.addEventListener('input',function(){localStorage.setItem(key(t.dataset.hunk),t.value);});
+  });
+  function copy(text){navigator.clipboard.writeText(text);}
+  function block(h,comment){
+    var hunk=document.getElementById(h);
+    var head=hunk.querySelector('.hunk-head code').textContent;
+    var file=hunk.closest('details.file').querySelector('summary').textContent.trim();
+    return '[review-html] '+main.dataset.repo+' @ '+main.dataset.ref+'\n'
+      +'file: '+file+'  hunk: '+h+' ('+head+')\n'+'comment: '+comment;
+  }
+  // per-hunk Copy for Claude
+  document.querySelectorAll('button.copy').forEach(function(b){
+    b.addEventListener('click',function(){
+      var h=b.dataset.hunk;
+      var c=document.querySelector('textarea.comment[data-hunk="'+h+'"]').value||'(no comment)';
+      copy(block(h,c)); b.textContent='Copied ✓'; setTimeout(function(){b.textContent='Copy for Claude';},1200);
+    });
+  });
+  // Export for Claude: bundle all non-empty comments -> clipboard (+ download fallback)
+  document.getElementById('export').addEventListener('click',function(){
+    var out='# review-html comments — '+main.dataset.repo+' @ '+main.dataset.ref+'\n\n';
+    var n=0;
+    document.querySelectorAll('textarea.comment').forEach(function(t){
+      if(t.value.trim()){n++;out+=block(t.dataset.hunk,t.value.trim())+'\n\n';}
+    });
+    if(!n){alert('No comments yet.');return;}
+    copy(out);
+    var a=document.createElement('a');
+    a.href='data:text/markdown;charset=utf-8,'+encodeURIComponent(out);
+    a.download='comments.md'; a.click();
+    alert(n+' comment(s) copied to clipboard.\nThen run:  /review-html --reply\n(comments.md also downloaded as a fallback)');
+  });
+  // collapse / expand
+  document.getElementById('expand-all').addEventListener('click',function(){
+    document.querySelectorAll('details.file').forEach(function(d){d.open=true;});});
+  document.getElementById('collapse-all').addEventListener('click',function(){
+    document.querySelectorAll('details.file').forEach(function(d){d.open=false;});});
+  // language toggle (only present in both mode)
+  var lt=document.getElementById('lang-toggle');
+  if(lt){var showUkr=true;lt.addEventListener('click',function(){
+    showUkr=!showUkr;
+    document.querySelectorAll('.L-ukr').forEach(function(e){e.hidden=!showUkr;});
+    document.querySelectorAll('.L-eng').forEach(function(e){e.hidden=showUkr;});
+  });}
+})();
+"""
 
 
 _CSS = """
