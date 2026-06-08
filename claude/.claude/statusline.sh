@@ -18,6 +18,7 @@ cyan='\033[38;2;46;149;153m'
 red='\033[38;2;255;85;85m'
 yellow='\033[38;2;230;200;0m'
 white='\033[38;2;220;220;220m'
+purple='\033[38;2;190;130;255m'
 dim='\033[2m'
 reset='\033[0m'
 
@@ -295,35 +296,110 @@ refresh_tokens_usage
 line2=""
 line2+="🤖 ${blue}${model_name}${reset}"
 
-# PR number from git remote (cached to avoid slowdown)
+# PR number + state from git remote (cached to avoid slowdown).
+# Cache line format: "number|state|isDraft" (state = OPEN/MERGED/CLOSED).
 pr_cache_file="/tmp/claude/pr-cache-${cwd//\//-}.txt"
 mkdir -p /tmp/claude
 pr_cache_max_age=120
 needs_pr_refresh=true
 pr_number=""
+pr_state=""
+pr_isdraft=""
 if [ -f "$pr_cache_file" ]; then
   pr_cache_mtime=$(stat -c %Y "$pr_cache_file" 2>/dev/null || stat -f %m "$pr_cache_file" 2>/dev/null)
   pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
-    pr_number=$(cat "$pr_cache_file" 2>/dev/null)
+    IFS='|' read -r pr_number pr_state pr_isdraft < "$pr_cache_file"
   fi
 fi
 if $needs_pr_refresh && [ -n "$cwd" ]; then
   if command -v gh >/dev/null 2>&1; then
-    pr_number=$(cd "$cwd" && gh pr view --json number -q '.number' 2>/dev/null || true)
-    if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
+    pr_json=$(cd "$cwd" && gh pr view --json number,state,isDraft 2>/dev/null || true)
+    if [ -z "$pr_json" ]; then
       pr_remote_branch=$(cd "$cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
       if [ -n "$pr_remote_branch" ]; then
-        pr_number=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number -q '.number' 2>/dev/null || true)
+        pr_json=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number,state,isDraft 2>/dev/null || true)
       fi
     fi
-    echo "${pr_number}" > "$pr_cache_file"
+    if [ -n "$pr_json" ]; then
+      pr_number=$(echo "$pr_json" | jq -r '.number // ""')
+      pr_state=$(echo "$pr_json" | jq -r '.state // ""')
+      pr_isdraft=$(echo "$pr_json" | jq -r '.isDraft // false')
+    fi
+    echo "${pr_number}|${pr_state}|${pr_isdraft}" > "$pr_cache_file"
   fi
 fi
 if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   line2+="${sep}"
   line2+="🔀 ${orange}PR#${pr_number}${reset}"
+
+  # PR state badge: open / draft / merged / closed
+  case "$pr_state" in
+    OPEN)
+      if [ "$pr_isdraft" = "true" ]; then
+        line2+=" 📝 ${dim}draft${reset}"
+      else
+        line2+=" 🟢 ${green}open${reset}"
+      fi
+      ;;
+    MERGED) line2+=" 🟣 ${purple}merged${reset}" ;;
+    CLOSED) line2+=" 🔴 ${red}closed${reset}" ;;
+  esac
+
+  # ===== PR deploy status (async background refresh, throttled 30s) =====
+  # Classify the PR's deploy-* checks into one state word, cached to a file so
+  # the statusline render stays fast (gh call happens in the background).
+  _deploy_cache="/tmp/claude/pr-deploy-${pr_number}.txt"
+  _deploy_stamp="/tmp/claude/pr-deploy-${pr_number}.stamp"
+  _dnow=$(date +%s)
+  _dage=999999
+  [ -f "$_deploy_stamp" ] && _dage=$(( _dnow - $(cat "$_deploy_stamp" 2>/dev/null || echo 0) ))
+  if [ "$_dage" -gt 30 ] && command -v gh >/dev/null 2>&1 && [ -n "$cwd" ]; then
+    echo "$_dnow" > "$_deploy_stamp"
+    (
+      _c=$(cd "$cwd" && gh pr checks "$pr_number" --json name,bucket 2>/dev/null)
+      _st=$(jq -r '[.[] | select(.name | test("deploy"; "i"))] |
+        if length == 0 then "none"
+        elif any(.[]; .bucket == "pending") then "deploying"
+        elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "failed"
+        elif any(.[]; .bucket == "pass") then "deployed"
+        else "skipped" end' <<<"${_c:-[]}" 2>/dev/null)
+      # While deploying, grab the in-progress deploy run's start time so the
+      # render can draw a live elapsed-based progress bar between refreshes.
+      _start=""
+      if [ "$_st" = "deploying" ]; then
+        _start=$(cd "$cwd" && gh run list --limit 8 --json status,startedAt,name,workflowName 2>/dev/null \
+          | jq -r 'first(.[] | select(.status == "in_progress" and (((.name // "") + (.workflowName // "")) | test("deploy"; "i")))) | .startedAt // empty')
+      fi
+      echo "${_st:-none}|${_start}" > "${_deploy_cache}.tmp" && mv "${_deploy_cache}.tmp" "$_deploy_cache"
+    ) &
+    disown $!
+  fi
+  if [ -f "$_deploy_cache" ]; then
+    IFS='|' read -r _dstate _dstart < "$_deploy_cache"
+    case "$_dstate" in
+      deploying)
+        line2+=" 🟡 ${yellow}deploying${reset}"
+        # Live elapsed-based progress bar (baseline ~280s = a typical deploy).
+        _sepoch=""
+        [ -n "$_dstart" ] && _sepoch=$(iso_to_epoch "$_dstart")
+        if [ -n "$_sepoch" ]; then
+          _dpct=$(( (now_epoch - _sepoch) * 100 / 280 ))
+          [ "$_dpct" -gt 99 ] && _dpct=99
+          [ "$_dpct" -lt 0 ] && _dpct=0
+          _bw=8; _bf=$(( _dpct * _bw / 100 )); _be=$(( _bw - _bf ))
+          _fill=""; _emp=""
+          for ((i = 0; i < _bf; i++)); do _fill+="●"; done
+          for ((i = 0; i < _be; i++)); do _emp+="○"; done
+          line2+=" ${cyan}${_fill}${dim}${_emp}${reset} ${yellow}${_dpct}%${reset}"
+        fi
+        ;;
+      deployed)  line2+=" 🟢 ${green}deployed${reset}" ;;
+      failed)    line2+=" 🔴 ${red}deploy failed${reset}" ;;
+      skipped)   line2+=" ⚪ ${dim}deploy skipped${reset}" ;;
+    esac
+  fi
 fi
 
 line2+="${sep}"
@@ -337,8 +413,19 @@ if [ -f "$_tokens_cache" ]; then
   [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
 fi
 
-# Subscription renewal countdown
-renewal_date="2026-04-10"
+# Subscription renewal countdown — auto-rolls to the next billing day each month
+# (always current; no hardcoded date to go stale). Set your billing day-of-month:
+renewal_day=10
+today_day=$((10#$(date +%d)))
+if [ "$today_day" -le "$renewal_day" ]; then
+  # billing day is still ahead (or is today) this month
+  ry=$(date +%Y); rm=$(date +%m)
+else
+  # billing day passed — roll to the 1st of next month, take its year/month
+  ry=$(date -v1d -v+1m +%Y 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%Y)
+  rm=$(date -v1d -v+1m +%m 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%m)
+fi
+renewal_date=$(printf "%04d-%02d-%02d" "$((10#$ry))" "$((10#$rm))" "$renewal_day")
 renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null || \
   date -j -f "%Y-%m-%d" "$renewal_date" +%s 2>/dev/null)
 if [ -n "$renewal_epoch" ]; then
