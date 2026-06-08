@@ -365,14 +365,36 @@ if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
         elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "failed"
         elif any(.[]; .bucket == "pass") then "deployed"
         else "skipped" end' <<<"${_c:-[]}" 2>/dev/null)
-      echo "${_st:-none}" > "${_deploy_cache}.tmp" && mv "${_deploy_cache}.tmp" "$_deploy_cache"
+      # While deploying, grab the in-progress deploy run's start time so the
+      # render can draw a live elapsed-based progress bar between refreshes.
+      _start=""
+      if [ "$_st" = "deploying" ]; then
+        _start=$(cd "$cwd" && gh run list --limit 8 --json status,startedAt,name,workflowName 2>/dev/null \
+          | jq -r 'first(.[] | select(.status == "in_progress" and (((.name // "") + (.workflowName // "")) | test("deploy"; "i")))) | .startedAt // empty')
+      fi
+      echo "${_st:-none}|${_start}" > "${_deploy_cache}.tmp" && mv "${_deploy_cache}.tmp" "$_deploy_cache"
     ) &
     disown $!
   fi
   if [ -f "$_deploy_cache" ]; then
-    _dstate=$(cat "$_deploy_cache" 2>/dev/null)
+    IFS='|' read -r _dstate _dstart < "$_deploy_cache"
     case "$_dstate" in
-      deploying) line2+=" 🟡 ${yellow}deploying${reset}" ;;
+      deploying)
+        line2+=" 🟡 ${yellow}deploying${reset}"
+        # Live elapsed-based progress bar (baseline ~280s = a typical deploy).
+        _sepoch=""
+        [ -n "$_dstart" ] && _sepoch=$(iso_to_epoch "$_dstart")
+        if [ -n "$_sepoch" ]; then
+          _dpct=$(( (now_epoch - _sepoch) * 100 / 280 ))
+          [ "$_dpct" -gt 99 ] && _dpct=99
+          [ "$_dpct" -lt 0 ] && _dpct=0
+          _bw=8; _bf=$(( _dpct * _bw / 100 )); _be=$(( _bw - _bf ))
+          _fill=""; _emp=""
+          for ((i = 0; i < _bf; i++)); do _fill+="●"; done
+          for ((i = 0; i < _be; i++)); do _emp+="○"; done
+          line2+=" ${cyan}${_fill}${dim}${_emp}${reset} ${yellow}${_dpct}%${reset}"
+        fi
+        ;;
       deployed)  line2+=" 🟢 ${green}deployed${reset}" ;;
       failed)    line2+=" 🔴 ${red}deploy failed${reset}" ;;
       skipped)   line2+=" ⚪ ${dim}deploy skipped${reset}" ;;
@@ -391,8 +413,19 @@ if [ -f "$_tokens_cache" ]; then
   [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
 fi
 
-# Subscription renewal countdown
-renewal_date="2026-04-10"
+# Subscription renewal countdown — auto-rolls to the next billing day each month
+# (always current; no hardcoded date to go stale). Set your billing day-of-month:
+renewal_day=10
+today_day=$((10#$(date +%d)))
+if [ "$today_day" -le "$renewal_day" ]; then
+  # billing day is still ahead (or is today) this month
+  ry=$(date +%Y); rm=$(date +%m)
+else
+  # billing day passed — roll to the 1st of next month, take its year/month
+  ry=$(date -v1d -v+1m +%Y 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%Y)
+  rm=$(date -v1d -v+1m +%m 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%m)
+fi
+renewal_date=$(printf "%04d-%02d-%02d" "$((10#$ry))" "$((10#$rm))" "$renewal_day")
 renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null || \
   date -j -f "%Y-%m-%d" "$renewal_date" +%s 2>/dev/null)
 if [ -n "$renewal_epoch" ]; then
