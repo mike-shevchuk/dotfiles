@@ -171,9 +171,17 @@ bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 # (lowercase v — pairs with V; uppercase U is TPM's update-plugins.)
 bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh review"
 
-# prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting) vs picked branch
+# prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting).
+# Same two-picker UX as prefix v: pick HEAD (default current) + BASE (default
+# origin's default), diff BASE → HEAD (right side = WORKING TREE if HEAD = current).
 # To use legacy DiffView instead: ~/dotfiles/tmux/scripts/git-compare.sh diffview
 bind V display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh codediff"
+
+# prefix + C-v → DIFF MENU: pick a platform (codediff / diffview / delta /
+# difftastic / tig) via fzf, THEN the same HEAD + BASE two-picker, then launch
+# the chosen viewer. Run the SAME comparison through different tools to find the
+# one you like best. (C-v, not d — prefix d stays detach-client.)
+bind C-v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh menu"
 
 # prefix + M → delta side-by-side pager vs picked branch (fallback if delta missing)
 bind M display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh delta"
