@@ -6,9 +6,12 @@
 # (cursor on first line) so you can just hit Enter for the common case.
 #
 # Tools (1st arg):
+#   menu         — pick a PLATFORM (codediff/diffview/delta/difftastic/tig) via fzf,
+#                  THEN HEAD+BASE two-picker, then launch the chosen viewer. (prefix C-v)
 #   review       — GitHub-PR-style unified diff via delta; pick HEAD (default current)
 #                  + BASE (default origin's main/master) branches, diff BASE→HEAD
-#   codediff     — VSCode-style two-tier diff (line + char), C-powered, moved-code detection
+#   codediff     — VSCode-style two-tier diff (line + char), C-powered, moved-code
+#                  detection. HEAD+BASE two-picker, PR-style. (prefix V)
 #   diffview     — DiffView in lz (LazyVIM nvim) — side-by-side
 #   delta        — delta side-by-side pager (falls back to git diff if delta missing)
 #   difftastic   — difftastic semantic diff (falls back to git diff if difft missing)
@@ -74,10 +77,73 @@ pick_branch_default() {
             --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
 }
 
+# ─── Two-picker HEAD/BASE flow (shared by codediff + menu) ─────────────────
+# Sets globals CUR_REF, HEAD_REF, BASE_REF (same UX as review's two pickers).
+pick_head_base() {
+    CUR_REF=$(git branch --show-current 2>/dev/null)
+    local base_def
+    base_def=$(detect_default_branch || echo "origin/master")
+    HEAD_REF=$(pick_branch_default "$CUR_REF" "head — review THIS branch (Enter=current): ")
+    [[ -z "$HEAD_REF" ]] && { echo "no head branch picked — aborted" >&2; exit 0; }
+    BASE_REF=$(pick_branch_default "$base_def" "base — compare against (Enter=$base_def): ")
+    [[ -z "$BASE_REF" ]] && { echo "no base branch picked — aborted" >&2; exit 0; }
+}
+
+# ─── Resolve PR-direction spec: LEFT=merge-base, RIGHT=HEAD tip or "" (working) ─
+compute_pr_spec() {
+    LEFT=$(git merge-base "$BASE_REF" "$HEAD_REF" 2>/dev/null || echo "$BASE_REF")
+    if [[ "$HEAD_REF" == "$CUR_REF" ]]; then RIGHT=""; else RIGHT="$HEAD_REF"; fi
+}
+
+# ─── Launch one diff viewer for the resolved LEFT→RIGHT spec ────────────────
+# RIGHT empty means "working tree". Add a case + a menu line to offer more tools.
+launch_view() {
+    local tool="$1"
+    echo "→ ${tool} (PR): ${BASE_REF} → ${HEAD_REF} [${RIGHT:-working tree}]" >&2
+    case "$tool" in
+        codediff)
+            exec env NVIM_APPNAME=LazyVIM nvim -c "CodeDiff ${LEFT} ${RIGHT}"
+            ;;
+        diffview)
+            local spec="$LEFT"
+            [[ -n "$RIGHT" ]] && spec="${LEFT}..${RIGHT}"
+            exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen ${spec}"
+            ;;
+        delta)
+            if command -v delta >/dev/null 2>&1; then
+                git -c delta.side-by-side=true -c delta.line-numbers=true \
+                    diff "$LEFT" ${RIGHT:+"$RIGHT"} | delta --paging=always
+            else
+                echo "⚠️  delta not installed — brew install git-delta" >&2; sleep 1
+                git diff --color=always "$LEFT" ${RIGHT:+"$RIGHT"} | less -R
+            fi
+            ;;
+        difftastic)
+            if command -v difft >/dev/null 2>&1; then
+                GIT_EXTERNAL_DIFF=difft git diff "$LEFT" ${RIGHT:+"$RIGHT"} | less -R
+            else
+                echo "⚠️  difftastic not installed — brew install difftastic" >&2; sleep 1
+                git diff --color=always "$LEFT" ${RIGHT:+"$RIGHT"} | less -R
+            fi
+            ;;
+        tig)
+            if command -v tig >/dev/null 2>&1; then
+                exec tig "${LEFT}..${RIGHT:-HEAD}"
+            else
+                echo "⚠️  tig not installed — brew install tig" >&2; sleep 1
+                git diff --color=always "$LEFT" ${RIGHT:+"$RIGHT"} | less -R
+            fi
+            ;;
+        *)
+            echo "ERR: unknown view tool '$tool'" >&2; exit 2
+            ;;
+    esac
+}
+
 # ─── Pick target branch ────────────────────────────────────────────────────
-# review picks its OWN head + base branches inside the case below; the other
-# modes compare the working tree against a single picked branch.
-if [[ "$TOOL" != "review" ]]; then
+# review + codediff + menu pick their OWN head + base branches (two fzf pickers);
+# the other modes compare the working tree against a single picked branch.
+if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" ]]; then
     TARGET=$(pick_branch)
     if [[ -z "$TARGET" ]]; then
         echo "no branch picked — aborted" >&2
@@ -136,9 +202,32 @@ case "$TOOL" in
         ;;
 
     codediff)
-        # VSCode-style two-tier (line + char) side-by-side, C-powered, moved-code detection
-        echo "→ CodeDiff vs $TARGET" >&2
-        exec env NVIM_APPNAME=LazyVIM nvim -c "CodeDiff $TARGET"
+        # VSCode-style two-tier diff with the SAME two-picker UX as review:
+        # pick HEAD (default current) + BASE (default origin's default), diff
+        # BASE→HEAD. If HEAD is the current branch, the right side is the WORKING
+        # TREE; otherwise the committed 3-dot diff. (shared helpers above)
+        pick_head_base
+        compute_pr_spec
+        launch_view codediff
+        ;;
+
+    menu)
+        # Pick a PLATFORM first, then the same HEAD/BASE two-picker, then launch
+        # the chosen viewer — run the SAME comparison through different tools to
+        # find the one you like best. Add a line here + a launch_view() case for more.
+        PLATFORM=$(printf '%s\n' \
+            "codediff    VSCode-style two-tier (line+char), moved-code detection [nvim]" \
+            "diffview    side-by-side file list + scrollable diff [nvim]" \
+            "delta       side-by-side pager, syntax-highlighted [terminal]" \
+            "difftastic  semantic / AST-aware structural diff [terminal]" \
+            "tig         TUI commit + diff browser [terminal · brew install tig]" \
+            | fzf --prompt='diff platform (Enter=codediff): ' --height 60% --border \
+                  --header='choose how to view  BASE → HEAD' \
+            | awk '{print $1}')
+        [[ -z "$PLATFORM" ]] && { echo "no platform picked — aborted" >&2; exit 0; }
+        pick_head_base
+        compute_pr_spec
+        launch_view "$PLATFORM"
         ;;
 
     diffview)
@@ -182,7 +271,7 @@ case "$TOOL" in
 
     *)
         echo "ERR: unknown tool '$TOOL'" >&2
-        echo "valid: review | codediff | diffview | delta | difftastic | files" >&2
+        echo "valid: menu | review | codediff | diffview | delta | difftastic | files" >&2
         exit 2
         ;;
 esac
