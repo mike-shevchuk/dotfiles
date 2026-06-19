@@ -182,6 +182,14 @@ return {
           ["ui-select"] = {
             require("telescope.themes").get_dropdown({}),
           },
+          -- telescope.nvim is pinned to tag 0.1.5 (2023), but nvim-treesitter is
+          -- on the `main` rewrite which dropped `parsers.ft_to_lang`. The themes
+          -- previewer calls telescope's ts highlighter -> ft_to_lang (nil) and
+          -- crashes the <leader>ft picker preview. Disable the previewer (the
+          -- dropdown UI doesn't need it) until telescope is unpinned/updated.
+          themes = {
+            enable_previewer = false,
+          },
           picker = {
             enable_preview = true,
             find_files = {
