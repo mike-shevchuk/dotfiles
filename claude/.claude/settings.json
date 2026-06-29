@@ -9,6 +9,46 @@
             "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
           }
         ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-prompt-guard.js\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-read-guard.js\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-workflow-guard.js\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/mikeshevchuk/.claude/hooks/gsd-validate-commit.sh\"",
+            "timeout": 5
+          }
+        ]
       }
     ],
     "Notification": [
@@ -47,11 +87,69 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-check-update.js\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/mikeshevchuk/.claude/hooks/gsd-session-state.sh\""
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "just --justfile /Users/mikeshevchuk/code/b2b/rescue-serverless/backend/src/lambdas/api/fast/justfile.v2 _hook-session-start"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash|Edit|Write|MultiEdit|Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-context-monitor.js\"",
+            "timeout": 10
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.claude/hooks/gsd-read-injection-scanner.js\"",
+            "timeout": 5
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"/Users/mikeshevchuk/.claude/hooks/gsd-phase-boundary.sh\"",
+            "timeout": 5
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
     "type": "command",
-    "command": "~/.claude/statusline.sh",
+    "command": "~/.claude/hooks/context-status.sh | ~/.claude/statusline.sh",
     "padding": 2
   },
   "enabledPlugins": {
@@ -64,8 +162,35 @@
     "claude-md-management@claude-plugins-official": true,
     "telegram@claude-plugins-official": true,
     "linear@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": true,
+    "claude-code-kanban@claude-code-kanban": true,
+    "ui-ux-pro-max@ui-ux-pro-max-skill": true,
+    "stop-slop@cAI-tools": true
+  },
+  "extraKnownMarketplaces": {
+    "claude-code-kanban": {
+      "source": {
+        "source": "directory",
+        "path": "/Users/mikeshevchuk/.claude/.cck/plugin"
+      }
+    },
+    "ui-ux-pro-max-skill": {
+      "source": {
+        "source": "github",
+        "repo": "nextlevelbuilder/ui-ux-pro-max-skill"
+      }
+    },
+    "cAI-tools": {
+      "source": {
+        "source": "github",
+        "repo": "caidish/cAI-tools"
+      }
+    }
   },
   "effortLevel": "high",
-  "voiceEnabled": true
+  "tui": "fullscreen",
+  "theme": "custom:user-focus",
+  "skipAutoPermissionPrompt": true,
+  "voiceEnabled": true,
+  "model": "claude-opus-4-8"
 }

@@ -1,0 +1,207 @@
+# manjaro-arm — обслуговування диска + спільні рантайми (mise) для багатьох юзерів.
+# Запуск: `just <recipe>`.  Перелік: `just` (без аргументів).
+
+set shell := ["bash", "-euo", "pipefail", "-c"]
+
+# --- Налаштування (під свій сервер за потреби) ---
+shared_root   := "/opt/shared"
+shared_group  := "devshared"
+root_dev      := "/dev/mmcblk0p2"
+profile_script := "/etc/profile.d/shared-tools.sh"
+
+default:
+    @just --list --unsorted
+
+# ════════════════════════════════════════════════════════════════════
+#  ДІАГНОСТИКА
+# ════════════════════════════════════════════════════════════════════
+
+# Загальний стан: диск, ext4 резерв, найбільші теки, docker.
+status:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ Диск ━━━" >&2
+    duf --only local 2>/dev/null || df -h /
+    echo "" >&2
+    echo "━━━ ext4 reserved blocks ({{root_dev}}) ━━━" >&2
+    sudo tune2fs -l {{root_dev}} | grep -E "Reserved block count|Block count|Block size"
+    echo "" >&2
+    echo "━━━ Топ-15 тек у / ━━━" >&2
+    sudo du -h -d 1 -x / 2>/dev/null | sort -hr | head -15
+    echo "" >&2
+    echo "━━━ Docker df ━━━" >&2
+    docker system df 2>/dev/null || echo "(docker недоступний)"
+    echo "" >&2
+    echo "━━━ journald ━━━" >&2
+    sudo journalctl --disk-usage
+
+# Інтерактивний пошук: що жере диск (натискай d щоб видалити).
+ncdu:
+    @echo "→ sudo ncdu -x /" >&2
+    sudo ncdu -x /
+
+# ════════════════════════════════════════════════════════════════════
+#  ОЧИЩЕННЯ
+# ════════════════════════════════════════════════════════════════════
+
+# systemd journal → 100 МБ.
+clean-journal:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ journalctl --vacuum-size=100M ━━━" >&2
+    echo "  до:   $(sudo journalctl --disk-usage | grep -oE '[0-9.]+[A-Z]+')" >&2
+    sudo journalctl --vacuum-size=100M
+    echo "  після: $(sudo journalctl --disk-usage | grep -oE '[0-9.]+[A-Z]+')" >&2
+    echo "  OK" >&2
+
+# pacman cache: лишити по 1 попередній версії + знести кеш видалених пакетів.
+clean-pacman:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "[1/2] paccache -rk1  (лишити одну попередню версію)..." >&2
+    sudo paccache -rk1
+    echo "[2/2] paccache -ruk0  (знести кеш видалених пакетів)..." >&2
+    sudo paccache -ruk0
+    echo "  OK" >&2
+
+# Docker — БЕЗ volumes (безпечно для immich-postgres даних).
+clean-docker:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "[1/3] docker container prune -f ..." >&2
+    docker container prune -f
+    echo "[2/3] docker image prune -a -f ..." >&2
+    docker image prune -a -f
+    echo "[3/3] docker builder prune -af ..." >&2
+    docker builder prune -af
+    echo "  OK" >&2
+    docker system df
+
+# ⚠️ Видалити НЕВИКОРИСТОВУВАНІ docker volumes — знесе дані immich-postgres!
+[confirm("⚠️  Це знесе volumes (включно з immich-postgres). Точно? [y/N]")]
+clean-docker-volumes:
+    @echo "━━━ docker volume prune -f ━━━" >&2
+    docker volume prune -f
+
+# Безпечне очищення «все одразу».
+clean-all: clean-journal clean-pacman clean-docker
+    @echo "" >&2
+    @echo "✓ Готово. Стан:" >&2
+    @just status
+
+# Знизити резерв root з 5 % до 1 % (≈ +9 ГБ на 228 ГБ).
+ext4-reduce-reserve:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ tune2fs -m 1 {{root_dev}} ━━━" >&2
+    before=$(sudo tune2fs -l {{root_dev}} | grep "Reserved block count" | awk '{print $4}')
+    echo "  до:    Reserved=$before блоків" >&2
+    sudo tune2fs -m 1 {{root_dev}}
+    after=$(sudo tune2fs -l {{root_dev}} | grep "Reserved block count" | awk '{print $4}')
+    echo "  після: Reserved=$after блоків" >&2
+    echo "  OK — звільнено $(( (before - after) * 4 / 1024 )) MB" >&2
+
+# ════════════════════════════════════════════════════════════════════
+#  СПІЛЬНІ РАНТАЙМИ (mise + кеші)
+# ════════════════════════════════════════════════════════════════════
+
+# Створити /opt/shared з групою, SGID і default ACL.
+shared-init:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "[1/5] група {{shared_group}}..." >&2
+    sudo groupadd -f {{shared_group}}
+    echo "[2/5] теки під {{shared_root}}..." >&2
+    sudo mkdir -p {{shared_root}}/mise/data \
+                  {{shared_root}}/cache/{mise,uv,pip,npm,pnpm,cargo}
+    echo "[3/5] chown root:{{shared_group}}..." >&2
+    sudo chown -R root:{{shared_group}} {{shared_root}}
+    echo "[4/5] chmod 2775 (SGID — новi файли успадковують групу)..." >&2
+    sudo chmod -R 2775 {{shared_root}}
+    echo "[5/5] default ACL g:{{shared_group}}:rwx..." >&2
+    sudo setfacl -R -d -m g:{{shared_group}}:rwx {{shared_root}}
+    echo "  OK" >&2
+    ls -ld {{shared_root}} {{shared_root}}/mise {{shared_root}}/cache
+
+# Додати юзера до спільної групи. Приклад: just shared-add-user user=alice
+shared-add-user user:
+    @echo "━━━ usermod -aG {{shared_group}} {{user}} ━━━" >&2
+    sudo usermod -aG {{shared_group}} {{user}}
+    @echo "  ✓ {{user}} додано. Потрібен повторний логін, щоб група підхопилась." >&2
+    @id {{user}}
+
+# Розкатати /etc/profile.d/shared-tools.sh (env-змінні для всіх юзерів).
+shared-install-profile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ запис {{profile_script}} ━━━" >&2
+    sudo tee {{profile_script}} > /dev/null <<'PROFILE_EOF'
+    # /etc/profile.d/shared-tools.sh — спільні рантайми та кеші.
+    # mise замінює pyenv/nvm/rbenv; окремий pyenv не потрібен.
+
+    export MISE_DATA_DIR=/opt/shared/mise/data
+    export MISE_CACHE_DIR=/opt/shared/cache/mise
+    export MISE_CONFIG_DIR="$HOME/.config/mise"     # конфіг лишається персональним
+
+    # Python
+    export UV_CACHE_DIR=/opt/shared/cache/uv
+    export PIP_CACHE_DIR=/opt/shared/cache/pip
+
+    # Node
+    export PNPM_HOME=/opt/shared/cache/pnpm
+    export npm_config_cache=/opt/shared/cache/npm
+
+    # Rust — спільний лише registry/git; target/ ЛИШАЄТЬСЯ в проєкті.
+    export CARGO_HOME=/opt/shared/cache/cargo
+
+    # Нові файли → group-writable, щоб співавтори могли довстановити пакети.
+    umask 002
+    PROFILE_EOF
+    sudo chmod 644 {{profile_script}}
+    echo "  ✓ Готово. Перелогінься або:  source {{profile_script}}" >&2
+
+# Встановити рантайми в спільну mise (через sudo з збереженим env).
+# Приклад: just mise-install                       # python 3.12 + node 22
+#          just mise-install python=3.13 node=24
+mise-install python="3.12" node="22":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    MISE_BIN=$(command -v mise || echo "/usr/local/bin/mise")
+    if [[ ! -x "$MISE_BIN" ]]; then
+        echo "✗ mise не знайдено в PATH. Встанови: curl https://mise.run | sh  (як root)" >&2
+        exit 1
+    fi
+    echo "━━━ mise install python@{{python}} node@{{node}} ━━━" >&2
+    echo "    MISE_DATA_DIR={{shared_root}}/mise/data" >&2
+    echo "    binary:       $MISE_BIN" >&2
+    sudo env \
+        MISE_DATA_DIR={{shared_root}}/mise/data \
+        MISE_CACHE_DIR={{shared_root}}/cache/mise \
+        "$MISE_BIN" install python@{{python}} node@{{node}}
+    echo "" >&2
+    echo "━━━ mise ls (спільне сховище) ━━━" >&2
+    sudo env MISE_DATA_DIR={{shared_root}}/mise/data "$MISE_BIN" ls
+
+# Bootstrap «під ключ»: init + profile. Юзерів і рантайми — окремо.
+shared-bootstrap: shared-init shared-install-profile
+    @echo "" >&2
+    @echo "Далі вручну:" >&2
+    @echo "  just shared-add-user user=ІМ\\\\'Я     # для кожного учасника" >&2
+    @echo "  just mise-install                       # python+node як root" >&2
+
+# ════════════════════════════════════════════════════════════════════
+#  IMMICH (опційно — стек упав 2 дні тому через 100 % диска)
+# ════════════════════════════════════════════════════════════════════
+
+# Прибрати exited контейнери immich (volumes лишаються).
+immich-rm-stopped:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ видаляю exited immich-контейнери..." >&2
+    for c in immich_postgres immich_server immich_machine_learning immich_redis; do
+        if docker ps -a --format '{{{{.Names}}}}' | grep -qx "$c"; then
+            echo "  rm $c" >&2
+            docker rm "$c" || true
+        fi
+    done
+    echo "  ✓ Volumes (дані postgres) лишилися. Видалити окремо: just clean-docker-volumes" >&2

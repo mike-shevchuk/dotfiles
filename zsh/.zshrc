@@ -25,6 +25,15 @@ setopt PROMPT_SUBST
 export EDITOR='nvim'
 export PATH="$HOME/.local/bin:$PATH"
 
+# Guarantee a UTF-8 locale so the prompt (multibyte glyphs / powerline segments)
+# never throws "character not in range" when zsh starts in a bare env that did
+# not forward a locale (detached tmux, cron, ssh without SendEnv). Only forces
+# UTF-8 when no locale var is already UTF-8, so an intentional locale always wins.
+if [[ "${LANG}${LC_ALL}${LC_CTYPE}" != *[Uu][Tt][Ff]* ]]; then
+  export LANG=en_US.UTF-8
+  export LC_CTYPE=en_US.UTF-8
+fi
+
 # mise — manages JS, Go, tools; activate BEFORE pyenv so pyenv shims win for python
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
@@ -728,3 +737,33 @@ if [ -d "$HOME/.bun" ]; then
   export PATH="$BUN_INSTALL/bin:$PATH"
   [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
 fi
+
+# ─── jb2b — shortcut for `just --justfile <repo>/backend/src/lambdas/api/fast/justfile.v2`
+# Works from anywhere inside the rescue-serverless repo INCLUDING git worktrees
+# (where the justfile lives in the main checkout, not the worktree copy — see
+# feedback_justfile_local memory rule).
+#
+# Uses --git-common-dir which returns the MAIN repo's .git path even from a
+# worktree (resolved to absolute by git when cwd is inside a worktree), then
+# strips /.git to get the canonical repo root.
+#
+#   Usage: jb2b moving-assets-pick dev
+#          jb2b triangulation-test
+#          jb2b --list
+jb2b() {
+    local git_common
+    git_common=$(git rev-parse --git-common-dir 2>/dev/null) || {
+        echo "jb2b: not inside a git repo" >&2
+        return 1
+    }
+    # Make absolute in case git returned a relative path (rare but possible
+    # when running from the main checkout itself).
+    [[ "$git_common" != /* ]] && git_common="$(pwd)/$git_common"
+    local repo_root="${git_common%/.git}"
+    local jf="$repo_root/backend/src/lambdas/api/fast/justfile.v2"
+    if [[ ! -f "$jf" ]]; then
+        echo "jb2b: $jf not found (wrong repo? expected rescue-serverless)" >&2
+        return 1
+    fi
+    just --justfile "$jf" "$@"
+}
