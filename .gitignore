@@ -8,6 +8,7 @@ zsh/.zshrc.secure
 # Backup files
 *.backup
 *~
+*.bak.gsd-*
 lz/.config/LazyVIM/lazy-lock.json
 
 # Hammerspoon secrets
