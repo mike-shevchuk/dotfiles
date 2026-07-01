@@ -231,13 +231,16 @@ case "$TOOL" in
         ;;
 
     diffview)
-        # prefix v. ONE fzf picker (default origin/main on line 1) with keys:
-        #   Enter   → committed PR view: <base>...HEAD (three-dot) — exactly the
-        #             files in your branch vs base, NO stray files from base/main.
-        #   Tab     → pick a 2nd branch (head) → compare two refs: <base>...<head>.
-        #             (fzf has no shift-enter — Tab is the reliable modifier.)
-        #   Ctrl-A  → ALL uncommitted changes: working tree vs HEAD incl. untracked
-        #             (gitignored files are never shown — DiffView has no support).
+        # prefix v. ONE fzf picker (default origin/main → origin/master). Keys are
+        # shown in the fzf header:
+        #   Enter  → your branch vs base: committed <base>...HEAD; if nothing is
+        #            committed yet, falls back to the working-tree diff vs base
+        #            (so you never get an empty view).
+        #   Tab    → pick a 2nd branch (head) → compare two refs <base>...<head>.
+        #            (fzf has no shift-enter — Tab is the reliable modifier.)
+        #   Ctrl-O → ALL uncommitted changes: working tree vs HEAD incl. untracked.
+        #            (Ctrl-A can't be used — it's a tmux prefix here. gitignored
+        #            files are never shown — DiffView has no support for them.)
         cur=$(git branch --show-current 2>/dev/null)
         # Default (first line) prefers origin/main, then origin/master, then the
         # detected origin HEAD — whichever exists.
@@ -253,29 +256,44 @@ case "$TOOL" in
                 echo "$base_def"
                 git branch -a --format='%(refname:short)' \
                     | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
-            } | fzf --prompt="DiffView vs (Enter=$base_def · Tab=pick 2nd · C-a=all uncommitted): " \
-                    --expect=tab,ctrl-a \
+            } | fzf --prompt="DiffView vs (Enter=$base_def): " \
+                    --header="Enter → branch vs base    Tab → pick 2nd branch    Ctrl-O → all uncommitted (working tree)" \
+                    --expect=tab,ctrl-o \
                     --height 60% --border \
                     --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
         )
         dv_key=$(printf '%s\n' "$dv_out" | sed -n 1p)
         dv_base=$(printf '%s\n' "$dv_out" | sed -n 2p)
+
+        # Open DiffView and announce the compared refs inside nvim (a notify toast
+        # + the panel's own "Showing changes for:" line), so it's always clear what
+        # is being compared.  $1 = DiffviewOpen args, $2 = human label.
+        dv_open() {
+            echo "→ DiffView: $2" >&2
+            exec env NVIM_APPNAME=LazyVIM nvim \
+                -c "DiffviewOpen $1" \
+                -c "lua vim.defer_fn(function() pcall(vim.notify, 'Comparing: $2', vim.log.levels.INFO, { title = 'DiffView' }) end, 250)"
+        }
+
         case "$dv_key" in
-            ctrl-a)
-                echo "→ DiffView: all uncommitted changes (working tree vs HEAD, +untracked)" >&2
-                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen --untracked-files=true"
+            ctrl-o)
+                dv_open "--untracked-files=true" "working tree → HEAD  (all uncommitted, +untracked)"
                 ;;
             tab)
                 [[ -z "$dv_base" ]] && { echo "no base picked — aborted" >&2; exit 0; }
                 dv_head=$(pick_branch_default "$cur" "DiffView head — $dv_base → (Enter=$cur): ")
                 [[ -z "$dv_head" ]] && { echo "no head picked — aborted" >&2; exit 0; }
-                echo "→ DiffView: $dv_base...$dv_head" >&2
-                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $dv_base...$dv_head"
+                dv_open "$dv_base...$dv_head" "$dv_base → $dv_head"
                 ;;
             *)
                 [[ -z "$dv_base" ]] && { echo "no branch picked — aborted" >&2; exit 0; }
-                echo "→ DiffView: $dv_base...$cur (committed PR files)" >&2
-                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $dv_base...HEAD"
+                if git diff --quiet "$dv_base...HEAD" 2>/dev/null; then
+                    # Nothing committed vs base → show the working tree instead of an
+                    # empty DiffView.
+                    dv_open "$dv_base" "working tree → $dv_base  (no committed diff)"
+                else
+                    dv_open "$dv_base...HEAD" "$dv_base → ${cur:-HEAD}  (committed)"
+                fi
                 ;;
         esac
         ;;
