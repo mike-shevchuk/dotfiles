@@ -141,9 +141,9 @@ launch_view() {
 }
 
 # ─── Pick target branch ────────────────────────────────────────────────────
-# review + codediff + menu pick their OWN head + base branches (two fzf pickers);
+# review + codediff + menu + diffview pick their OWN refs (custom pickers);
 # the other modes compare the working tree against a single picked branch.
-if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" ]]; then
+if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" && "$TOOL" != "diffview" ]]; then
     TARGET=$(pick_branch)
     if [[ -z "$TARGET" ]]; then
         echo "no branch picked — aborted" >&2
@@ -231,8 +231,47 @@ case "$TOOL" in
         ;;
 
     diffview)
-        echo "→ DiffView vs $TARGET" >&2
-        exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $TARGET"
+        # prefix v. ONE fzf picker (default origin/main on line 1) with keys:
+        #   Enter   → committed PR view: <base>...HEAD (three-dot) — exactly the
+        #             files in your branch vs base, NO stray files from base/main.
+        #   Tab     → pick a 2nd branch (head) → compare two refs: <base>...<head>.
+        #             (fzf has no shift-enter — Tab is the reliable modifier.)
+        #   Ctrl-A  → ALL uncommitted changes: working tree vs HEAD incl. untracked
+        #             (gitignored files are never shown — DiffView has no support).
+        cur=$(git branch --show-current 2>/dev/null)
+        base_def="origin/main"
+        git rev-parse --verify -q "$base_def" >/dev/null 2>&1 \
+            || base_def=$(detect_default_branch || echo "origin/master")
+        dv_out=$(
+            {
+                echo "$base_def"
+                git branch -a --format='%(refname:short)' \
+                    | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
+            } | fzf --prompt="DiffView vs (Enter=$base_def · Tab=pick 2nd · C-a=all uncommitted): " \
+                    --expect=tab,ctrl-a \
+                    --height 60% --border \
+                    --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
+        )
+        dv_key=$(printf '%s\n' "$dv_out" | sed -n 1p)
+        dv_base=$(printf '%s\n' "$dv_out" | sed -n 2p)
+        case "$dv_key" in
+            ctrl-a)
+                echo "→ DiffView: all uncommitted changes (working tree vs HEAD, +untracked)" >&2
+                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen --untracked-files=true"
+                ;;
+            tab)
+                [[ -z "$dv_base" ]] && { echo "no base picked — aborted" >&2; exit 0; }
+                dv_head=$(pick_branch_default "$cur" "DiffView head — $dv_base → (Enter=$cur): ")
+                [[ -z "$dv_head" ]] && { echo "no head picked — aborted" >&2; exit 0; }
+                echo "→ DiffView: $dv_base...$dv_head" >&2
+                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $dv_base...$dv_head"
+                ;;
+            *)
+                [[ -z "$dv_base" ]] && { echo "no branch picked — aborted" >&2; exit 0; }
+                echo "→ DiffView: $dv_base...$cur (committed PR files)" >&2
+                exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $dv_base...HEAD"
+                ;;
+        esac
         ;;
 
     delta)
