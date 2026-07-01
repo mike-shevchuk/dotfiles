@@ -239,9 +239,15 @@ case "$TOOL" in
         #   Ctrl-A  → ALL uncommitted changes: working tree vs HEAD incl. untracked
         #             (gitignored files are never shown — DiffView has no support).
         cur=$(git branch --show-current 2>/dev/null)
-        base_def="origin/main"
-        git rev-parse --verify -q "$base_def" >/dev/null 2>&1 \
-            || base_def=$(detect_default_branch || echo "origin/master")
+        # Default (first line) prefers origin/main, then origin/master, then the
+        # detected origin HEAD — whichever exists.
+        if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+            base_def="origin/main"
+        elif git rev-parse --verify -q origin/master >/dev/null 2>&1; then
+            base_def="origin/master"
+        else
+            base_def=$(detect_default_branch || echo "origin/master")
+        fi
         dv_out=$(
             {
                 echo "$base_def"
