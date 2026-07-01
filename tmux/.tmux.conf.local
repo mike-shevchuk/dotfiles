@@ -165,11 +165,11 @@ bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 # EVERY binding starts with fzf branch picker (default branch pre-selected).
 # Hit Enter for the common case; arrow/type to compare against another branch.
 
-# prefix + v → GitHub-PR-style review: pick HEAD branch (default = current) and
-# BASE branch (default = origin's default, e.g. origin/main), then a unified
-# delta diff in the PR direction. Pick any local/remote refs to compare.
+# prefix + v → DiffView (nvim side-by-side): single fzf picker for the branch to
+# compare against (default = origin's default, e.g. origin/main — Enter picks it),
+# then nvim opens DiffView with the WORKING TREE vs that branch.
 # (lowercase v — pairs with V; uppercase U is TPM's update-plugins.)
-bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh review"
+bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh diffview"
 
 # prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting).
 # Same two-picker UX as prefix v: pick HEAD (default current) + BASE (default
