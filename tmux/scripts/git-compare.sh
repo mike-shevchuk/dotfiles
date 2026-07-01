@@ -233,14 +233,18 @@ case "$TOOL" in
     diffview)
         # prefix v. ONE fzf picker (default origin/main → origin/master). Keys are
         # shown in the fzf header:
-        #   Enter  → your branch vs base: committed <base>...HEAD; if nothing is
-        #            committed yet, falls back to the working-tree diff vs base
-        #            (so you never get an empty view).
-        #   Tab    → pick a 2nd branch (head) → compare two refs <base>...<head>.
-        #            (fzf has no shift-enter — Tab is the reliable modifier.)
+        #   Enter  → your branch vs base: committed <base>...HEAD (3-dot, PR view);
+        #            if nothing is committed yet, falls back to the working-tree
+        #            diff vs base (so you never get an empty view).
+        #   Tab    → pick a 2nd branch (head), 3-dot <base>...<head> — changes
+        #            since the merge-base (GitHub "Files changed").
+        #   Ctrl-T → pick a 2nd branch (head), 2-dot <base>..<head> — the EXACT
+        #            difference between the two tips. Stable when 3-dot is ambiguous
+        #            (multiple merge-bases). "T" = two-dot.
         #   Ctrl-O → ALL uncommitted changes: working tree vs HEAD incl. untracked.
         #            (Ctrl-A can't be used — it's a tmux prefix here. gitignored
         #            files are never shown — DiffView has no support for them.)
+        # The compared refs + dot-mode are shown in nvim on open (notify + panel).
         cur=$(git branch --show-current 2>/dev/null)
         # Default (first line) prefers origin/main, then origin/master, then the
         # detected origin HEAD — whichever exists.
@@ -257,8 +261,8 @@ case "$TOOL" in
                 git branch -a --format='%(refname:short)' \
                     | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
             } | fzf --prompt="DiffView vs (Enter=$base_def): " \
-                    --header="Enter → branch vs base    Tab → pick 2nd branch    Ctrl-O → all uncommitted (working tree)" \
-                    --expect=tab,ctrl-o \
+                    --header=$'Enter → branch vs base (3-dot)   Tab → 2nd branch (3-dot/PR)   Ctrl-T → 2nd branch (2-dot/exact)   Ctrl-O → all uncommitted' \
+                    --expect=tab,ctrl-t,ctrl-o \
                     --height 60% --border \
                     --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
         )
@@ -279,11 +283,15 @@ case "$TOOL" in
             ctrl-o)
                 dv_open "--untracked-files=true" "working tree → HEAD  (all uncommitted, +untracked)"
                 ;;
-            tab)
+            tab|ctrl-t)
                 [[ -z "$dv_base" ]] && { echo "no base picked — aborted" >&2; exit 0; }
                 dv_head=$(pick_branch_default "$cur" "DiffView head — $dv_base → (Enter=$cur): ")
                 [[ -z "$dv_head" ]] && { echo "no head picked — aborted" >&2; exit 0; }
-                dv_open "$dv_base...$dv_head" "$dv_base → $dv_head"
+                if [[ "$dv_key" == "ctrl-t" ]]; then
+                    dv_open "$dv_base..$dv_head"  "2-dot  $dv_base..$dv_head  (exact difference between tips)"
+                else
+                    dv_open "$dv_base...$dv_head" "3-dot  $dv_base...$dv_head  (changes since merge-base / PR)"
+                fi
                 ;;
             *)
                 [[ -z "$dv_base" ]] && { echo "no branch picked — aborted" >&2; exit 0; }
@@ -292,7 +300,7 @@ case "$TOOL" in
                     # empty DiffView.
                     dv_open "$dv_base" "working tree → $dv_base  (no committed diff)"
                 else
-                    dv_open "$dv_base...HEAD" "$dv_base → ${cur:-HEAD}  (committed)"
+                    dv_open "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
                 fi
                 ;;
         esac
