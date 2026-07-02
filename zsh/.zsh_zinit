@@ -22,6 +22,10 @@ source "$HOME/.local/share/zinit/zinit.git/zinit.zsh"
 # STARTUP TIMER
 # =============================================================================
 
+# $EPOCHREALTIME needs zsh/datetime — load explicitly (was a silent dependency
+# on zinit loading it internally)
+zmodload zsh/datetime
+
 # Record startup time with float precision
 typeset -F STARTUP_START=$EPOCHREALTIME
 
@@ -54,13 +58,11 @@ zinit light agnoster/agnoster-zsh-theme
 # - lucid: Silent loading (no output during load)
 # - Grouped loading: Multiple plugins loaded together for efficiency
 
-# Total number of lazy plugins/snippets (for final message)
-ZINIT_TOTAL_PLUGINS=18
-
 # Core utilities - turbo loaded after 1s
+# (history-search-multi-word removed: fzf's CTRL-R from `fzf --zsh` in .zshrc
+#  is strictly better and hsmw would silently steal the ^R binding back;
+#  rupa/z removed: unmaintained since ~2020 — zoxide init lives in .zshrc)
 zinit ice wait"1"; zinit light Aloxaf/fzf-tab
-zinit ice wait"1"; zinit light zdharma-continuum/history-search-multi-word
-zinit ice wait"1" pick"z.sh"; zinit light rupa/z
 
 # Essential OH-MY-ZSH plugins - after 2s
 zinit ice wait"2"; zinit snippet OMZ::plugins/git/git.plugin.zsh
@@ -82,55 +84,25 @@ zinit ice wait"4"; zinit light UshioA/zsh-python-module-completion
 # zinit ice wait"4" atload'print -P "%F{green}Loaded all ${ZINIT_TOTAL_PLUGINS} plugins%f"'; zinit light UshioA/zsh-python-module-completion
 # zinit ice wait"4"; zinit light kiurchv/asdf.plugin.zsh
 
-# =============================================================================
-# CLIPBOARD SUPPORT FOR MODERN TERMINALS
-# =============================================================================
-
-# Detect terminal and set up clipboard support (kitty + generic fallback)
-setup_clipboard() {
-    case "$TERM" in
-        *kitty*)
-            alias copy="kitty +kitten clipboard"
-            alias paste="kitty +kitten clipboard --get-clipboard"
-            ;;
-        *)
-            if command -v wl-copy >/dev/null 2>&1; then
-                alias copy="wl-copy"
-                alias paste="wl-paste"
-            elif command -v xclip >/dev/null 2>&1; then
-                alias copy="xclip -selection clipboard"
-                alias paste="xclip -selection clipboard -o"
-            elif command -v xsel >/dev/null 2>&1; then
-                alias copy="xsel --clipboard --input"
-                alias paste="xsel --clipboard --output"
-            fi
-            ;;
-    esac
-}
-
-setup_clipboard
+# NOTE: clipboard lives in ONE place — clip()/osc52() in .zshrc (OSC 52 aware).
+# The old copy/paste alias system was removed as a second source of truth.
 
 # =============================================================================
-# COMPLETION SYSTEM INITIALIZATION
+# STARTUP TIME DISPLAY (opt-in: export ZSH_SHOW_STARTUP=1)
 # =============================================================================
 
-# Initialize completion system only once here (use caching)
-# autoload -Uz compinit
-# compinit -C
-
-# =============================================================================
-# STARTUP TIME DISPLAY
-# =============================================================================
-
-# Report startup time on first prompt
-autoload -Uz add-zsh-hook
-_zinit_report_startup_time() {
-    local startup_time
-    printf -v startup_time '%.2f' $(( EPOCHREALTIME - STARTUP_START ))
-    echo "🚀 Shell startup time: ${startup_time}s"
-    add-zsh-hook -d precmd _zinit_report_startup_time
-}
-add-zsh-hook precmd _zinit_report_startup_time
+# Report startup time on first prompt — gated so it doesn't spam every tmux
+# pane / $(...) subshell; set ZSH_SHOW_STARTUP=1 to see it while profiling.
+if [[ -n "${ZSH_SHOW_STARTUP:-}" ]]; then
+    autoload -Uz add-zsh-hook
+    _zinit_report_startup_time() {
+        local startup_time
+        printf -v startup_time '%.2f' $(( EPOCHREALTIME - STARTUP_START ))
+        echo "🚀 Shell startup time: ${startup_time}s"
+        add-zsh-hook -d precmd _zinit_report_startup_time
+    }
+    add-zsh-hook precmd _zinit_report_startup_time
+fi
 
 # =============================================================================
 # PLUGIN LOADING COMPLETION
