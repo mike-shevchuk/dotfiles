@@ -141,9 +141,9 @@ launch_view() {
 }
 
 # ─── Pick target branch ────────────────────────────────────────────────────
-# review + codediff + menu pick their OWN head + base branches (two fzf pickers);
+# review + codediff + menu + diffview pick their OWN refs (custom pickers);
 # the other modes compare the working tree against a single picked branch.
-if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" ]]; then
+if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" && "$TOOL" != "diffview" ]]; then
     TARGET=$(pick_branch)
     if [[ -z "$TARGET" ]]; then
         echo "no branch picked — aborted" >&2
@@ -231,8 +231,79 @@ case "$TOOL" in
         ;;
 
     diffview)
-        echo "→ DiffView vs $TARGET" >&2
-        exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $TARGET"
+        # prefix v. ONE fzf picker (default origin/main → origin/master). Keys are
+        # shown in the fzf header:
+        #   Enter  → your branch vs base: committed <base>...HEAD (3-dot, PR view);
+        #            if nothing is committed yet, falls back to the working-tree
+        #            diff vs base (so you never get an empty view).
+        #   Tab    → pick a 2nd branch (head), 3-dot <base>...<head> — changes
+        #            since the merge-base (GitHub "Files changed").
+        #   Ctrl-T → pick a 2nd branch (head), 2-dot <base>..<head> — the EXACT
+        #            difference between the two tips. Stable when 3-dot is ambiguous
+        #            (multiple merge-bases). "T" = two-dot.
+        #   Ctrl-O → ALL uncommitted changes: working tree vs HEAD incl. untracked.
+        #            (Ctrl-A can't be used — it's a tmux prefix here. gitignored
+        #            files are never shown — DiffView has no support for them.)
+        # The compared refs + dot-mode are shown in nvim on open (notify + panel).
+        cur=$(git branch --show-current 2>/dev/null)
+        # Default (first line) prefers origin/main, then origin/master, then the
+        # detected origin HEAD — whichever exists.
+        if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
+            base_def="origin/main"
+        elif git rev-parse --verify -q origin/master >/dev/null 2>&1; then
+            base_def="origin/master"
+        else
+            base_def=$(detect_default_branch || echo "origin/master")
+        fi
+        dv_out=$(
+            {
+                echo "$base_def"
+                git branch -a --format='%(refname:short)' \
+                    | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
+            } | fzf --prompt="DiffView vs (Enter=$base_def): " \
+                    --header=$'Enter → branch vs base (3-dot)   Tab → 2nd branch (3-dot/PR)   Ctrl-T → 2nd branch (2-dot/exact)   Ctrl-O → all uncommitted' \
+                    --expect=tab,ctrl-t,ctrl-o \
+                    --height 60% --border \
+                    --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
+        )
+        dv_key=$(printf '%s\n' "$dv_out" | sed -n 1p)
+        dv_base=$(printf '%s\n' "$dv_out" | sed -n 2p)
+
+        # Open DiffView and announce the compared refs inside nvim (a notify toast
+        # + the panel's own "Showing changes for:" line), so it's always clear what
+        # is being compared.  $1 = DiffviewOpen args, $2 = human label.
+        dv_open() {
+            echo "→ DiffView: $2" >&2
+            exec env NVIM_APPNAME=LazyVIM nvim \
+                -c "DiffviewOpen $1" \
+                -c "lua vim.defer_fn(function() pcall(vim.notify, 'Comparing: $2', vim.log.levels.INFO, { title = 'DiffView' }) end, 250)"
+        }
+
+        case "$dv_key" in
+            ctrl-o)
+                dv_open "--untracked-files=true" "working tree → HEAD  (all uncommitted, +untracked)"
+                ;;
+            tab|ctrl-t)
+                [[ -z "$dv_base" ]] && { echo "no base picked — aborted" >&2; exit 0; }
+                dv_head=$(pick_branch_default "$cur" "DiffView head — $dv_base → (Enter=$cur): ")
+                [[ -z "$dv_head" ]] && { echo "no head picked — aborted" >&2; exit 0; }
+                if [[ "$dv_key" == "ctrl-t" ]]; then
+                    dv_open "$dv_base..$dv_head"  "2-dot  $dv_base..$dv_head  (exact difference between tips)"
+                else
+                    dv_open "$dv_base...$dv_head" "3-dot  $dv_base...$dv_head  (changes since merge-base / PR)"
+                fi
+                ;;
+            *)
+                [[ -z "$dv_base" ]] && { echo "no branch picked — aborted" >&2; exit 0; }
+                if git diff --quiet "$dv_base...HEAD" 2>/dev/null; then
+                    # Nothing committed vs base → show the working tree instead of an
+                    # empty DiffView.
+                    dv_open "$dv_base" "working tree → $dv_base  (no committed diff)"
+                else
+                    dv_open "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
+                fi
+                ;;
+        esac
         ;;
 
     delta)
