@@ -14,7 +14,6 @@ return {
     dependencies = {
       "mason-org/mason.nvim",
       "mason-org/mason-lspconfig.nvim",
-      "hrsh7th/cmp-nvim-lsp",
       "ray-x/lsp_signature.nvim",
       "mrjones2014/legendary.nvim",
       "FeiyouG/commander.nvim",
@@ -22,7 +21,6 @@ return {
     config = function()
       local mason = require("mason")
       local mason_lspconfig = require("mason-lspconfig")
-      local cmp_nvim_lsp = require("cmp_nvim_lsp")
 
       -- Servers we want installed + enabled, derived from the shared single
       -- source of truth (user/lsp_servers.lua) so the list can't drift from the
@@ -38,8 +36,10 @@ return {
         automatic_enable = true, -- enables installed servers via vim.lsp.enable
       })
 
-      -- Global defaults applied to every server (capabilities for nvim-cmp).
-      local capabilities = cmp_nvim_lsp.default_capabilities()
+      -- Global defaults applied to every server. The completion engine is
+      -- blink.cmp (see editor.lua) — advertise ITS capabilities, not nvim-cmp's
+      -- (servers were previously told to speak to a completion plugin we don't run).
+      local capabilities = require("blink.cmp").get_lsp_capabilities()
       vim.lsp.config("*", { capabilities = capabilities })
 
       -- Attach-time behaviour: signature hints. Runs for every server.

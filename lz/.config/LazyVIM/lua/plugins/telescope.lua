@@ -8,20 +8,23 @@ return {
     dependencies = { "nvim-telescope/telescope.nvim", "nvim-lua/plenary.nvim" },
   },
 
+  -- Native C sorter — the single biggest telescope speed win
+  {
+    "nvim-telescope/telescope-fzf-native.nvim",
+    build = "make",
+  },
+
+  -- Dynamic rg args mid-prompt:  "pattern -g '*.py'"  /  "pattern -t py"
+  {
+    "nvim-telescope/telescope-live-grep-args.nvim",
+  },
+
   {
     "willthbill/opener.nvim",
     config = function()
-      require("telescope").load_extension("opener")
-      require("telescope").setup({
-        extensions = {
-          opener = {
-            use_telescope = true,
-            hidden = false, -- do not show hidden directories
-            root_dir = "$HOME", -- search from home directory by default
-            -- respect_gitignore = true, -- respect .gitignore files
-          },
-        },
-      })
+      -- NOTE: telescope.setup() is called ONCE in the main telescope spec below
+      -- (multiple setup() calls silently wipe each other's config — whichever
+      -- plugin loads last used to win). Extension config lives there too.
       require("opener").setup({
         pre_open = function(new_dir)
           print("Yay, opening " .. new_dir .. " in a moment")
@@ -33,37 +36,9 @@ return {
           end,
         },
       })
-      -- TODO: add hiden files like find files
+      require("telescope").load_extension("opener")
       vim.api.nvim_set_keymap("n", "<Leader>fd", ":Telescope opener<CR>", { noremap = true })
       vim.api.nvim_set_keymap("n", "<Leader>fD", ":Telescope opener hidden=true<CR>", { noremap = true })
-    end,
-  },
-
-  {
-    "nvim-telescope/telescope.nvim",
-    dependencies = {
-      "nvim-lua/plenary.nvim",
-      "debugloop/telescope-undo.nvim",
-    },
-    keys = {
-      { -- lazy style key map
-        "<leader>Tu",
-        "<cmd>Telescope undo<cr>",
-        desc = "undo history",
-      },
-    },
-    config = function()
-      require("telescope").setup({
-        -- the rest of your telescope config goes here
-        extensions = {
-          undo = {
-            -- telescope-undo.nvim config, see below
-          },
-          -- other extensions:
-          -- file_browser = { ... }
-        },
-      })
-      require("telescope").load_extension("undo")
     end,
   },
 
@@ -77,16 +52,6 @@ return {
       })
     end,
   },
-
-  -- {
-  --   -- ln -s ~/.zshrc ~/.zshenv
-  --   "nvim-telescope/telescope-z.nvim",
-  --   config = function()
-  --     require("telescope").load_extension("z")
-  --   end,
-  -- },
-
-  -- wilder.nvim is configured once in plugins/utils.lua (this empty duplicate removed).
 
   {
     "kdheepak/lazygit.nvim",
@@ -110,19 +75,44 @@ return {
 
   {
     "nvim-telescope/telescope.nvim",
-    tag = "0.1.5",
+    -- tag pin removed: 0.1.5 was Nov-2023 vintage and already broke against
+    -- nvim-treesitter `main` (see the themes-previewer note below)
     dependencies = {
       "nvim-lua/plenary.nvim",
+      "debugloop/telescope-undo.nvim",
       "andrew-george/telescope-themes",
       "folke/noice.nvim",
-      -- "nvim-telescope/telescope-frecency.nvim",
+      "nvim-telescope/telescope-fzf-native.nvim",
+      "nvim-telescope/telescope-live-grep-args.nvim",
     },
     keys = {
       {
         "<leader>fg",
-        -- require('telescope.buitin').live_grep,
-        "<cmd>Telescope live_grep<cr>",
-        desc = "live grep",
+        -- live_grep_args: type extra rg flags right in the prompt,
+        -- e.g.  handler -g '*.py'   or   AlertType -t py
+        function()
+          require("telescope").extensions.live_grep_args.live_grep_args()
+        end,
+        desc = "live grep (args)",
+        mode = "n",
+      },
+      {
+        "<leader>fG",
+        -- grep EVERYTHING — including .gitignore'd files (node_modules, .venv)
+        "<cmd>Telescope live_grep additional_args=--no-ignore<cr>",
+        desc = "live grep (no ignore)",
+        mode = "n",
+      },
+      {
+        "<leader>fw",
+        "<cmd>Telescope grep_string<cr>",
+        desc = "grep word under cursor",
+        mode = "n",
+      },
+      {
+        "<leader>fT",
+        "<cmd>TodoTelescope<cr>",
+        desc = "search TODO/FIXME",
         mode = "n",
       },
       {
@@ -134,7 +124,7 @@ return {
       {
         "<leader>fh",
         "<cmd>Telescope find_files hidden=true no_ignore=true<cr>",
-        desc = "Find files",
+        desc = "Find files (+ignored)",
         mode = "n",
       },
       {
@@ -156,9 +146,9 @@ return {
         mode = "n",
       },
       {
-        "<leader>fz",
-        "<cmd>Telescope z<cr>",
-        desc = "z autojump",
+        "<leader>Tu",
+        "<cmd>Telescope undo<cr>",
+        desc = "undo history",
         mode = "n",
       },
     },
@@ -174,43 +164,52 @@ return {
             "--line-number",
             "--column",
             "--smart-case",
-            "--no-ignore", -- **This is the added flag**
-            "--hidden", -- **Also this flag. The combination of the two is the same as `-uu`**
+            "--hidden",
+            "--follow",
+            -- NOT --no-ignore: default grep respects .gitignore (no node_modules/
+            -- .venv noise). <leader>fG is the grep-everything variant.
+            "--glob",
+            "!.git/",
+          },
+        },
+        pickers = {
+          find_files = {
+            hidden = true,
+            -- fd: fast, .gitignore-aware (was health-checked but never wired in)
+            find_command = { "fd", "--type", "f", "--hidden", "--follow", "--exclude", ".git" },
           },
         },
         extensions = {
+          fzf = {}, -- native C sorter, default opts
+          opener = {
+            use_telescope = true,
+            hidden = false, -- do not show hidden directories
+            root_dir = "$HOME", -- search from home directory by default
+            -- respect_gitignore = true, -- respect .gitignore files
+          },
+          undo = {
+            -- telescope-undo.nvim config, see below
+          },
           ["ui-select"] = {
             require("telescope.themes").get_dropdown({}),
           },
-          -- telescope.nvim is pinned to tag 0.1.5 (2023), but nvim-treesitter is
-          -- on the `main` rewrite which dropped `parsers.ft_to_lang`. The themes
-          -- previewer calls telescope's ts highlighter -> ft_to_lang (nil) and
-          -- crashes the <leader>ft picker preview. Disable the previewer (the
-          -- dropdown UI doesn't need it) until telescope is unpinned/updated.
+          -- nvim-treesitter is on the `main` rewrite which dropped
+          -- `parsers.ft_to_lang`; the themes previewer used to crash on it with
+          -- the old pinned telescope. Kept disabled (the dropdown UI doesn't
+          -- need a preview) — re-enable to test after a telescope update.
           themes = {
             enable_previewer = false,
           },
-          picker = {
-            enable_preview = true,
-            find_files = {
-              hidden = true,
-            },
-          },
         },
       })
-      -- local builtin = require("telescope.builtin")
-      -- vim.keymap.set("n", "<C-p>", builtin.find_files, {})
-      -- vim.keymap.set("n", "<leader>fg", builtin.live_grep, {})
-      -- vim.keymap.set("n", "<leader><leader>", builtin.oldfiles, {})
 
+      require("telescope").load_extension("fzf")
+      require("telescope").load_extension("live_grep_args")
+      require("telescope").load_extension("undo")
       require("telescope").load_extension("ui-select")
       require("telescope").load_extension("themes")
       require("telescope").load_extension("noice")
       require("telescope").load_extension("file_browser")
-      -- require("telescope").load_extension("z")
-
-      --  Has some bugs
-      -- require("telescope").load_extension("frecency")
     end,
   },
 }
