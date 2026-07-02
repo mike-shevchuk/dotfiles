@@ -14,7 +14,8 @@ git refs `<base> <head>` or a single integer `<PR#>`, and the flags `--reply` / 
 ## Step 0 — `--help`
 If `--help` or the bare word `help` is present, print the contents of the
 "Usage examples" section of
-`docs/superpowers/specs/2026-06-02-review-html-skill-design.md` (§11) and STOP.
+`~/dotfiles/docs/superpowers/specs/2026-06-02-review-html-skill-design.md` (§11) and STOP.
+(Absolute path — this command runs from any repo, not just dotfiles.)
 
 ## Step 1 — resolve paths
 - `GEN=~/dotfiles/claude/.claude/scripts/review_html.py`
