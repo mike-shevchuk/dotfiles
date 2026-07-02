@@ -10,6 +10,18 @@ set -g allow-passthrough on
 set -ga update-environment TERM
 set -ga update-environment TERM_PROGRAM
 
+# -- Clipboard over SSH (OSC 52) -----------------------------------------------
+# This config frequently runs on a remote host (Mac server) reached over SSH
+# from a local Wayland/Arch box. The base config (lines 122-131) and tmux-yank
+# both pick a clipboard tool based on THIS host, so on the Mac they fall back to
+# pbcopy and copied text lands in the *remote* clipboard — never reaching the
+# local machine. OSC 52 fixes this transport-agnostically: tmux emits an escape
+# sequence on every copy and the *local* terminal writes to its own clipboard,
+# working through SSH regardless of what's installed on the remote host.
+# Requires an OSC 52-capable local terminal (kitty, alacritty, wezterm, foot).
+set -g set-clipboard on
+set -ga terminal-features ',*:clipboard'
+
 # -- TPM (Tmux Plugin Manager) ------------------------------------------------
 
 # Auto-install TPM if missing
