@@ -39,10 +39,14 @@ bind Y run -b 'tmux display -p -F "#{q:pane_current_path}" | tr -d "\n" | tmux l
 # terminfo entry. tmux 3.6b + modern terminals all have tmux-256color.
 set -g default-terminal 'tmux-256color'
 
-# Extended keys (CSI u): disambiguated Ctrl+Shift+…, Ctrl+Enter etc. inside
-# nvim and newer TUIs when connecting from kitty/foot/alacritty.
-set -s extended-keys on
-set -as terminal-features ',xterm*:extkeys,foot*:extkeys,alacritty*:extkeys,kitty*:extkeys'
+# REVERTED: extended-keys (CSI u / Kitty keyboard protocol) — enabling it
+# caused real typing lag/misbehaving keys. The live client at the time
+# reported termname xterm-256color; when the actual terminal doesn't fully
+# implement CSI-u, tmux and the terminal disagree on key encoding and normal
+# typing gets delayed/garbled. The upside (disambiguated Ctrl+Shift+…,
+# Ctrl+Enter) isn't worth that risk — leave it off.
+# set -s extended-keys on
+# set -as terminal-features ',xterm*:extkeys,foot*:extkeys,alacritty*:extkeys,kitty*:extkeys'
 
 # 5000-line default is a few seconds of Claude/log output; 50k is still cheap.
 # (Applies to new panes only.)
