@@ -1,5 +1,5 @@
 {
-  "model": "claude-fable-5[1m]",
+  "model": "sonnet",
   "hooks": {
     "PreToolUse": [
       {
@@ -45,6 +45,17 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/subagent_stop.ts"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // empty\"); case \"$f\" in *.py) ruff check --fix \"$f\" >/dev/null 2>&1 || true;; esac"
           }
         ]
       }
