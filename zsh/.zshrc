@@ -250,6 +250,14 @@ alias jd='just --dry-run'
 alias jv='just --verbose'
 alias 'jq-'='just --quiet'
 
+# jm — shorthand for a scratch/temp justfile at ~/audit-followup.just, so
+# one-off `just -f ~/some-temp.just <recipe>` sessions don't need -f typed
+# every time. Point JM_JUSTFILE elsewhere (or edit the alias) to retarget it
+# at a different temp file; delete both the file and this alias once done.
+export JM_JUSTFILE="$HOME/audit-followup.just"
+alias jm='just -f "$JM_JUSTFILE"'
+alias jml='just -f "$JM_JUSTFILE" --list'
+
 # Git
 alias gs='git status'
 alias ga='git add'
