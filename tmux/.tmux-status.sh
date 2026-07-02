@@ -78,8 +78,11 @@ get_aws() {
 }
 
 get_kube() {
-    command -v kubectl >/dev/null 2>&1 || return 0
-    kubectl config current-context 2>/dev/null
+    # current-context straight from kubeconfig — no kubectl fork (a ~100ms+
+    # Go-binary exec every status-interval, forever, even when k8s is idle)
+    cfg="${KUBECONFIG:-$HOME/.kube/config}"
+    [ -f "$cfg" ] || return 0
+    awk '/^current-context:/ {print $2; exit}' "$cfg" 2>/dev/null
 }
 
 get_claude_state() {

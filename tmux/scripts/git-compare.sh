@@ -49,11 +49,12 @@ pick_branch() {
     {
         # Default branch first — cursor lands on line 1, just hit Enter for common case
         [[ -n "$default" ]] && echo "$default"
-        # Then everything else (sorted, dedupe, exclude current branch + default)
+        # Then everything else (sorted, dedupe, exclude current branch + default).
+        # -Fx = fixed-string exact match: branch names like fix.v2 are not regexes.
         git branch -a --format='%(refname:short)' \
             | grep -v '^HEAD' \
-            | grep -v "^${current}$" \
-            | grep -v "^${default}$" \
+            | grep -vFx "$current" \
+            | grep -vFx "$default" \
             | sort -u
     } | fzf \
         --prompt='compare against (Enter=default): ' \
@@ -71,7 +72,7 @@ pick_branch_default() {
         [[ -n "$def" ]] && echo "$def"
         git branch -a --format='%(refname:short)' \
             | grep -v '^HEAD' \
-            | grep -v "^${def}$" \
+            | grep -vFx "$def" \
             | sort -u
     } | fzf --prompt="$prompt" --height 60% --border \
             --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
@@ -259,7 +260,7 @@ case "$TOOL" in
             {
                 echo "$base_def"
                 git branch -a --format='%(refname:short)' \
-                    | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
+                    | grep -v '^HEAD' | grep -vFx "$base_def" | sort -u
             } | fzf --prompt="DiffView vs (Enter=$base_def): " \
                     --header=$'Enter → branch vs base (3-dot)   Tab → 2nd branch (3-dot/PR)   Ctrl-T → 2nd branch (2-dot/exact)   Ctrl-O → all uncommitted' \
                     --expect=tab,ctrl-t,ctrl-o \
@@ -335,7 +336,7 @@ case "$TOOL" in
         echo "→ files changed vs $TARGET" >&2
         FILE=$(git diff --name-only "$TARGET" \
             | fzf --prompt='changed file: ' --height 50% --border \
-                  --preview "git diff --color=always $TARGET -- {}")
+                  --preview "git diff --color=always '$TARGET' -- {}")
         [[ -z "$FILE" ]] && { echo "no file picked" >&2; exit 0; }
         exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $TARGET -- $FILE"
         ;;

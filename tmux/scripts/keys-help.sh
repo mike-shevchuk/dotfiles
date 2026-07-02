@@ -41,7 +41,7 @@ render() {
     row "prefix s"   "dotfiles stow status"
 
     grp "Diff / compare (fzf branch picker, Enter = default branch)"
-    row "prefix v"   "PR review: pick head + base branches (default: current vs origin)"
+    row "prefix v"   "DiffView vs branch — Enter=base, Tab=pick head, C-t exact (2-dot), C-o uncommitted"
     row "prefix V"   "CodeDiff — VSCode-style two-tier diff: pick head + base branches (PR-style)"
     row "prefix C-v" "Diff MENU — pick platform (codediff/diffview/delta/difftastic/tig) + head + base"
     row "prefix M"   "delta side-by-side pager vs branch"
