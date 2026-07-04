@@ -24,12 +24,29 @@ def test_all_files_all_hunks_present():
 def test_tree_and_copy_separation():
     html = render_page(META, _files(), [], None)
     assert f"go('f-{slug('a/b.py')}')" in html
-    assert "cpy('nvim +1 a/b.py')" in html
+    # cpy() attrs are HTML-escaped for XSS safety (see test_cpy_attr_escapes_quotes);
+    # un-escape apostrophes before matching the raw JS call.
+    assert "cpy('nvim +1 a/b.py')" in html.replace("&#x27;", "'")
 
 def test_split_toggle_only_on_mixed_hunks():
     html = render_page(META, _files(), [], None)
     assert html.count("fMode(") >= 2          # working toggle on the mixed hunk
     assert "split недоступний" in html         # disabled tooltip on add-only
+
+def test_split_views_per_hunk_unique_ids():
+    m1 = Hunk("F0H0", "@@ -1 +1 @@", 1, 1, [DiffLine("del", 1, None, "a"), DiffLine("add", None, 1, "b")])
+    m2 = Hunk("F0H1", "@@ -5 +5 @@", 5, 5, [DiffLine("del", 5, None, "c"), DiffLine("add", None, 5, "d")])
+    html = render_page(META, [FileDiff("x.py", "M", [m1, m2])], [], None)
+    for vid in ("x-py-f0h0", "x-py-f0h1"):
+        assert html.count(f'id="u-{vid}"') == 1 and html.count(f'id="s-{vid}"') == 1
+    assert "fMode(this,'u','x-py-f0h0')" in html.replace("&#x27;", "'")
+    assert "було" in html and "стало" in html
+
+def test_cpy_attr_escapes_quotes():
+    f = FileDiff("we'ird\".py", "M", [Hunk("F0H0","@@ -1 +1 @@",1,1,[DiffLine("add",None,1,"x")])])
+    html = render_page(META, [f], [], None)
+    assert "onclick=\"cpy('nvim +1 we'ird\".py')\"" not in html  # raw broken attr must not appear
+    assert "we&#x27;ird" in html or "\\'" in html               # escaped form present
 
 def test_finding_pinned_with_score():
     html = render_page(META, _files(), [_finding()], None)

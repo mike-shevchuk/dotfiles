@@ -14,6 +14,16 @@ LAYER_BADGE = {"claude": ("b-claude", "🟣"), "code-review": ("b-cr", "🔵"),
 def slug(path: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "-", path).strip("-").lower()
 
+def _cpy_attr(cmd: str) -> str:
+    """Safe onclick attribute value for cpy('<cmd>'): JS-escape then HTML-escape.
+
+    cmd may contain arbitrary user/data-controlled text (file paths, refs).
+    JS-escape first so the quoted JS string literal stays valid, then
+    HTML-escape the whole onclick value so it can't break out of the
+    surrounding double-quoted attribute (finding: raw path injection)."""
+    js = cmd.replace("\\", "\\\\").replace("'", "\\'")
+    return H.escape(f"cpy('{js}')", quote=True)
+
 def _t(d: dict | None, lang: str) -> str:
     if not d: return ""
     return d.get(lang) or d.get("ukr") or d.get("eng") or ""
@@ -45,38 +55,57 @@ def _tree_html(files: list[FileDiff], sev_by_file: dict[str, str]) -> str:
               f'<span class="plus">+{f.additions}</span>{minus}'
               f'{sev_span}'
               f'<span class="cico" onclick="event.stopPropagation();'
-              f'cpy(\'nvim +{ln} {f.path}\')">📋</span></div>')
+              f'{_cpy_attr(f"nvim +{ln} {f.path}")}">📋</span></div>')
         out.append("</div>")
     return "".join(out)
 
+def _row(cls: str, sign: str, ln, text: str) -> str:
+    return (f'<span class="{cls}"><span class="ln">{ln}</span>'
+            f'{sign}{H.escape(text)}</span>')
+
 def _hunk_html(f: FileDiff, h: Hunk, findings: list[Finding], lang: str) -> str:
-    rows = []
-    for l in h.lines:
-        ln = l.new_ln or l.old_ln or ""
-        cls = {"add": "add", "del": "del", "ctx": "ctx"}[l.kind]
-        sign = {"add": "+", "del": "-", "ctx": " "}[l.kind]
-        rows.append(f'<span class="{cls}"><span class="ln">{ln}</span>'
-                    f'{sign}{H.escape(l.text)}</span>')
+    rows = "".join(
+        _row({"add": "add", "del": "del", "ctx": "ctx"}[l.kind],
+             {"add": "+", "del": "-", "ctx": " "}[l.kind],
+             l.new_ln or l.old_ln or "", l.text)
+        for l in h.lines)
+    vid = f"{slug(f.path)}-{h.hunk_id.lower()}"
     if h.has_add and h.has_del:
         seg = ('<span class="seg" onclick="event.stopPropagation()">'
-               '<span class="on" onclick="fMode(this,\'u\')">unified</span>'
-               '<span onclick="fMode(this,\'s\')">split</span></span>')
+               f'<span class="on" onclick="fMode(this,\'u\',\'{vid}\')">unified</span>'
+               f'<span onclick="fMode(this,\'s\',\'{vid}\')">split</span></span>')
+        left_rows = "".join(
+            _row("ctx" if l.kind == "ctx" else "del",
+                 " " if l.kind == "ctx" else "-", l.old_ln or "", l.text)
+            for l in h.lines if l.kind in ("del", "ctx"))
+        right_rows = "".join(
+            _row("ctx" if l.kind == "ctx" else "add",
+                 " " if l.kind == "ctx" else "+", l.new_ln or "", l.text)
+            for l in h.lines if l.kind in ("add", "ctx"))
+        views = (
+            f'<div class="codeblk" id="u-{vid}" style="padding:5px 0">{rows}</div>'
+            f'<div class="split2" id="s-{vid}" style="display:none">'
+            f'<div><div style="padding:2px 6px;color:var(--dim);font-size:.8em">було</div>'
+            f'<div class="codeblk" style="padding:5px 0">{left_rows}</div></div>'
+            f'<div><div style="padding:2px 6px;color:var(--dim);font-size:.8em">стало</div>'
+            f'<div class="codeblk" style="padding:5px 0">{right_rows}</div></div></div>')
     else:
         kind = "add-only" if h.has_add else "del-only"
-        seg = (f'<span class="seg" style="opacity:.45" title="split недоступний: '
+        seg = (f'<span class="seg off" title="split недоступний: '
                f'{kind} ханк — друга колонка порожня">'
                '<span>unified</span><span style="text-decoration:line-through">split</span></span>')
+        views = f'<div class="codeblk" style="padding:5px 0">{rows}</div>'
     finds = "".join(_finding_html(x, lang) for x in findings if x.hunk == h.hunk_id)
     return (f'<div style="padding:6px 12px;background:var(--panel2);font-size:.85em;'
             f'color:var(--dim)">{H.escape(h.header)} · {h.hunk_id} {seg}</div>'
-            f'<div class="codeblk" style="padding:5px 0">{"".join(rows)}</div>{finds}')
+            f'{views}{finds}')
 
 def _finding_html(x: Finding, lang: str) -> str:
     cls, emoji = LAYER_BADGE.get(x.layer, ("b-claude", "🟣"))
     agrees = "".join(f'<span class="badge b-bot">🟢 {H.escape(a)}</span>' for a in x.agrees_with)
     code = f'<div class="codeblk">{H.escape(x.fix.get("code",""))}</div>' if x.fix.get("code") else ""
     cmd = f"nvim +{x.line} {x.file}"
-    return (f'<div class="find" onclick="cpy(\'{cmd}\')">'
+    return (f'<div class="find" onclick="{_cpy_attr(cmd)}">'
             f'<span class="badge {cls}">{emoji} {x.source} · {x.severity_emoji} '
             f'{x.severity_score}/100</span>{agrees}'
             f'<div style="margin-top:5px"><b>Проблема:</b> {H.escape(_t(x.problem, lang))}</div>'
@@ -110,7 +139,7 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
     total_f = len(files)
     header = (f'<b>LGTM</b> <span class="pill">⎇ {H.escape(meta.ref)}</span>'
               f'<span class="pill">base: {H.escape(meta.base)}</span>'
-              f'<span class="pill" onclick="cpy(\'jb2b review {H.escape(meta.ref)}\')">'
+              f'<span class="pill" onclick="{_cpy_attr(f"jb2b review {meta.ref}")}">'
               f'📋 jb2b review</span>'
               f'<span class="pill" onclick="helpTg()">❓ довідка</span>'
               f'<span class="pill" style="margin-left:auto">{total_f}/{total_f} файлів · '
@@ -171,6 +200,7 @@ CSS = r"""
   .rv .file{cursor:pointer;padding:1px 6px;border-radius:6px;display:flex;gap:7px;align-items:center}
   .rv .file:hover{background:rgba(88,166,255,.1)}
   .rv .m{color:var(--org);font-weight:700}.rv .a{color:var(--grn);font-weight:700}
+  .rv .d{color:var(--red);font-weight:700}
   .rv .plus{color:var(--grn);font-size:.82em}.rv .minus{color:var(--red);font-size:.82em}
   .rv .dir{color:var(--dim)}
   .rv .cico{margin-left:auto;cursor:pointer;opacity:.7}.rv .cico:hover{opacity:1}
@@ -184,6 +214,13 @@ CSS = r"""
   .rv .label{font-size:.76em;text-transform:uppercase;color:var(--dim)}
   .rv .arrow{width:14px;display:inline-block}
   @media(max-width:900px){.rv .lay{grid-template-columns:1fr}.rv .nav{border-right:none;border-bottom:1px solid var(--line);position:static;max-height:none}}
+  .rv .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:.78em;margin-left:auto}
+  .rv .seg span{padding:2px 9px;cursor:pointer;color:var(--dim)}
+  .rv .seg span.on{background:rgba(88,166,255,.15);color:var(--txt)}
+  .rv .seg.off{opacity:.45}
+  .rv .split2{display:grid;grid-template-columns:1fr 1fr}
+  .rv .split2>div{min-width:0;border-right:1px solid var(--line)}
+  @media(max-width:800px){.rv .split2{grid-template-columns:1fr}}
 """
 JS = r"""
   function cpy(cmd){
@@ -225,11 +262,11 @@ JS = r"""
     body.style.display = hidden ? '' : 'none';
     if (arrow) arrow.textContent = hidden ? '▾' : '▸';
   }
-  function fMode(el, m){
-    el.parentElement.querySelectorAll('span').forEach(function(s){ s.classList.remove('on'); s.style.background=''; s.style.color='var(--dim)'; });
-    el.classList.add('on'); el.style.background='rgba(88,166,255,.15)'; el.style.color='var(--txt)';
-    document.getElementById('fU').style.display = m==='u' ? '' : 'none';
-    document.getElementById('fS').style.display = m==='s' ? '' : 'none';
+  function fMode(el,m,vid){
+    el.parentElement.querySelectorAll('span').forEach(function(s){s.classList.remove('on');});
+    el.classList.add('on');
+    document.getElementById('u-'+vid).style.display = m==='u' ? '' : 'none';
+    document.getElementById('s-'+vid).style.display = m==='s' ? '' : 'none';
   }
   function helpTg(){var o=document.getElementById('helpOv');o.style.display=o.style.display==='none'?'':'none';}
   document.addEventListener('keydown',function(e){
