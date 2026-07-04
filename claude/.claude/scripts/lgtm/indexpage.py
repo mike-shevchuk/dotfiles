@@ -19,6 +19,8 @@ from lgtm.render import CSS, JS, FAVICON, _cpy_attr
 
 MAX_BRANCHES = 8
 MAX_RECENTS = 5
+MAX_WORKTREES = 8
+AGENT_SCRATCH_MARKER = "/.claude/worktrees/agent-"
 
 SECTION_ORDER = (
     ("head", "▸ поточний стан"),
@@ -108,6 +110,17 @@ def _collect_branches(repo: Path, skip: set[str]) -> list[IndexEntry]:
     return entries
 
 
+def _filter_worktrees(pairs: list[tuple[str, str]]) -> tuple[list[tuple[str, str]], int]:
+    """Pure filtering for worktree (path, branch) pairs.
+
+    Agent scratch worktrees (paths under .claude/worktrees/agent-*) are noise —
+    excluded entirely, not counted as hidden. Real worktrees are capped at
+    MAX_WORKTREES; the overflow count is returned so the page can show an
+    honest "…ще N приховано" line instead of silently truncating."""
+    real = [(p, b) for p, b in pairs if AGENT_SCRATCH_MARKER not in p]
+    return real[:MAX_WORKTREES], max(0, len(real) - MAX_WORKTREES)
+
+
 def _collect_worktrees(repo: Path) -> list[IndexEntry]:
     """Parse `git worktree list --porcelain` blank-line-separated blocks.
     The first block is always the main worktree (the repo itself) — skip it."""
@@ -116,7 +129,7 @@ def _collect_worktrees(repo: Path) -> list[IndexEntry]:
     except (subprocess.CalledProcessError, FileNotFoundError):
         return []
     blocks = out.strip("\n").split("\n\n") if out.strip() else []
-    entries = []
+    pairs = []
     for block in blocks[1:]:
         path, branch = None, None
         for line in block.splitlines():
@@ -125,8 +138,13 @@ def _collect_worktrees(repo: Path) -> list[IndexEntry]:
             elif line.startswith("branch "):
                 branch = line[len("branch "):].replace("refs/heads/", "")
         if branch:
-            entries.append(IndexEntry("worktree", branch, path or "", 0, 0, "",
-                                      f"jb2b review {branch}"))
+            pairs.append((path or "", branch))
+    kept, hidden = _filter_worktrees(pairs)
+    entries = [IndexEntry("worktree", branch, path, 0, 0, "", f"jb2b review {branch}")
+               for path, branch in kept]
+    if hidden:
+        # sentinel: empty cmd → render_index draws a plain dim line, not a card
+        entries.append(IndexEntry("worktree", "", f"…ще {hidden} приховано", 0, 0, "", ""))
     return entries
 
 
@@ -161,6 +179,10 @@ def _fuzzy_key(e: IndexEntry) -> str:
 
 
 def _card_html(e: IndexEntry) -> str:
+    if not e.cmd:
+        # sentinel entry (e.g. hidden-worktrees count): plain dim line, non-clickable
+        return (f'<div style="color:var(--dim);font-size:.85em;padding:4px 2px">'
+                f'{H.escape(e.title)}</div>')
     cls, label = CHIP[e.kind]
     title = f'<div class="title">{H.escape(e.title)}</div>' if e.title else ""
     stats = f" · +{e.plus}/−{e.minus}" if (e.plus or e.minus) else ""
