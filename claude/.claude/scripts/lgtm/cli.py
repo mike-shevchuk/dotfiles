@@ -1,6 +1,7 @@
 """LGTM CLI. Static mode (Milestone 1): collect → render → print page path."""
 from __future__ import annotations
 import argparse
+import dataclasses
 import datetime
 import subprocess
 import sys
@@ -40,12 +41,15 @@ def cmd_review(a: argparse.Namespace) -> int:
         if fpath.exists():
             fmeta, findings = load_findings(fpath)
             meta = fmeta
+            if a.lang is not None and a.lang != fmeta.lang:
+                meta = dataclasses.replace(fmeta, lang=a.lang)
+                _log(f"  --lang {a.lang} перекриває lang={fmeta.lang!r} з findings.json")
             _log(f"  findings.json: {len(findings)} знахідок")
         else:
             findings = []
             meta = ReviewMeta(ref=mdict["ref"], base=mdict["base"], mode=mdict["mode"],
                               generated=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                              repo=repo.name, lang=a.lang)
+                              repo=repo.name, lang=a.lang or "ukr")
             _log("  findings.json відсутній — рендерю без знахідок")
         page = out / "page.html"
         page.write_text(render_page(meta, files, findings, None), encoding="utf-8")
@@ -68,7 +72,7 @@ def main() -> int:
     r.add_argument("--refs", nargs=2, metavar=("BASE", "HEAD"))
     r.add_argument("--diff-file")
     r.add_argument("--ref-name")
-    r.add_argument("--lang", default="ukr", choices=["ukr", "eng", "both"])
+    r.add_argument("--lang", default=None, choices=["ukr", "eng", "both"])
     r.add_argument("--out")
     r.set_defaults(fn=cmd_review)
     a = p.parse_args()

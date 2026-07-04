@@ -48,3 +48,18 @@ def test_review_bad_pr_readable_error(tmp_path):
     assert r.returncode == 1
     assert "команда впала" in r.stderr
     assert "Traceback" not in r.stderr
+
+
+def test_lang_flag_overrides_findings_meta(tmp_path):
+    out = tmp_path / "rev"; out.mkdir()
+    (out / "findings.json").write_text(json.dumps({
+        "meta": {"ref": "test", "base": "x", "mode": "refs", "generated": "now",
+                 "repo": "demo", "lang": "ukr"},
+        "findings": []}, ensure_ascii=False))
+    r = subprocess.run([sys.executable, "-m", "lgtm.cli", "review",
+                        "--diff-file", str(FIX), "--ref-name", "test",
+                        "--lang", "eng", "--out", str(out)],
+                       cwd=SCRIPTS, capture_output=True, text=True)
+    page = Path(r.stdout.strip().splitlines()[-1]).read_text()
+    assert '<html lang="en"' in page
+    assert "перекриває" in r.stderr
