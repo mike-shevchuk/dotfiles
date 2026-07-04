@@ -9,12 +9,27 @@ from pathlib import Path
 
 from lgtm.collect import collect_diff
 from lgtm.diffparse import parse_unified_diff
+from lgtm.indexpage import collect_entries, render_index
 from lgtm.model import ReviewMeta, load_findings
 from lgtm.render import render_page
 
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr)
+
+
+def cmd_index(a: argparse.Namespace) -> int:
+    repo = Path(a.repo).resolve()
+    _log(f"→ збираю PR/гілки/worktrees/рев'ю для {repo.name}…")
+    entries = collect_entries(repo)
+    _log(f"  OK: {len(entries)} записів")
+    out_dir = repo / ".lgtm"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    page = out_dir / "index.html"
+    page.write_text(render_index(repo.name, entries), encoding="utf-8")
+    _log(f"  page: {page}")
+    print(page)
+    return 0
 
 
 def cmd_review(a: argparse.Namespace) -> int:
@@ -75,6 +90,9 @@ def main() -> int:
     r.add_argument("--lang", default=None, choices=["ukr", "eng", "both"])
     r.add_argument("--out")
     r.set_defaults(fn=cmd_review)
+    i = sub.add_parser("index")
+    i.add_argument("--repo", default=".")
+    i.set_defaults(fn=cmd_index)
     a = p.parse_args()
     return a.fn(a)
 
