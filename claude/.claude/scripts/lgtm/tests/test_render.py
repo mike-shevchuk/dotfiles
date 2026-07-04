@@ -67,3 +67,15 @@ def test_big_file_collapsed_by_default():
 def test_help_overlay_present():
     html = render_page(META, _files(), [], None)
     assert 'id="helpOv"' in html and "helpTg" in html and "keydown" in html
+
+def test_finding_source_escaped():
+    """XSS check: Finding.source must be HTML-escaped in badge."""
+    f = Finding(id="f1", layer="claude", source="<img src=x onerror=alert(1)>",
+                file="a.py", line=1, hunk="F0H0", severity_emoji="🟠", severity_score=1,
+                problem={"ukr": "p"}, harm={"ukr": "h"}, fix={"ukr": "f"},
+                agrees_with=[], coach=None)
+    html = render_page(META, _files(), [f], None)
+    # Raw unescaped XSS payload must not appear in output
+    assert "<img src=x onerror" not in html
+    # Escaped form must be present
+    assert "&lt;img" in html or "&#x3c;" in html

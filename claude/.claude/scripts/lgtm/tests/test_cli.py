@@ -63,3 +63,14 @@ def test_lang_flag_overrides_findings_meta(tmp_path):
     page = Path(r.stdout.strip().splitlines()[-1]).read_text()
     assert '<html lang="en"' in page
     assert "перекриває" in r.stderr
+
+def test_invalid_findings_json_readable_error(tmp_path):
+    """Malformed findings.json should produce readable error, not raw traceback."""
+    out = tmp_path / "rev"; out.mkdir()
+    (out / "findings.json").write_text("{not json")
+    r = subprocess.run([sys.executable, "-m", "lgtm.cli", "review",
+                        "--diff-file", str(FIX), "--ref-name", "test", "--out", str(out)],
+                       cwd=SCRIPTS, capture_output=True, text=True)
+    assert r.returncode == 1
+    assert "невалідний" in r.stderr.lower() or "invalid" in r.stderr.lower()
+    assert "Traceback" not in r.stderr

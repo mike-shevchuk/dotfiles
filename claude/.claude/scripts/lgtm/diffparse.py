@@ -40,6 +40,7 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
             flush_hunk()
             m = _HUNK_RE.match(raw)
             if m is None:
+                hunk_header = ""
                 continue
             hunk_old_start, hunk_new_start = int(m.group(1)), int(m.group(2))
             old_ln, new_ln = hunk_old_start, hunk_new_start

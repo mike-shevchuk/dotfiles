@@ -106,7 +106,7 @@ def _finding_html(x: Finding, lang: str) -> str:
     code = f'<div class="codeblk">{H.escape(x.fix.get("code",""))}</div>' if x.fix.get("code") else ""
     cmd = f"nvim +{x.line} {x.file}"
     return (f'<div class="find" onclick="{_cpy_attr(cmd)}">'
-            f'<span class="badge {cls}">{emoji} {x.source} · {x.severity_emoji} '
+            f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {x.severity_emoji} '
             f'{x.severity_score}/100</span>{agrees}'
             f'<div style="margin-top:5px"><b>Проблема:</b> {H.escape(_t(x.problem, lang))}</div>'
             f'<div><b>Шкода:</b> {H.escape(_t(x.harm, lang))}</div>'

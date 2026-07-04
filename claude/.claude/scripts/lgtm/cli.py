@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import datetime
+import json  # noqa: F401 (used in except clause)
 import subprocess
 import sys
 from pathlib import Path
@@ -54,7 +55,11 @@ def cmd_review(a: argparse.Namespace) -> int:
              f"+{sum(f.additions for f in files)} −{sum(f.deletions for f in files)}")
         fpath = out / "findings.json"
         if fpath.exists():
-            fmeta, findings = load_findings(fpath)
+            try:
+                fmeta, findings = load_findings(fpath)
+            except (json.JSONDecodeError, TypeError, KeyError) as e:
+                _log(f"✗ findings.json невалідний: {e}")
+                return 1
             meta = fmeta
             if a.lang is not None and a.lang != fmeta.lang:
                 meta = dataclasses.replace(fmeta, lang=a.lang)

@@ -49,3 +49,16 @@ def test_malformed_hunk_header_skipped():
     """Regression: malformed @@ lines should be skipped gracefully."""
     result = parse_unified_diff("diff --git a/x b/x\n@@ garbage\n")
     assert result == [FileDiff(path="x", status="M", hunks=[])]
+
+def test_malformed_hunk_header_resets_state():
+    """Phantom hunk regression: malformed @@ must reset hunk_header to prevent
+    subsequent content lines from being attributed to the broken header."""
+    text = ("diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1,1 +1,1 @@\n-a\n+b\n"
+            "@@ garbage\n+phantom\n")
+    f = parse_unified_diff(text)[0]
+    # Should have only 1 hunk (the valid one), not 2
+    assert len(f.hunks) == 1, f"expected 1 hunk, got {len(f.hunks)}"
+    # The valid hunk should have 1 addition and 1 deletion
+    assert f.hunks[0].additions == 1 and f.hunks[0].deletions == 1
+    # 'phantom' line should NOT be attributed to any hunk (lost but not corrupted)
+    assert not any("phantom" in l.text for h in f.hunks for l in h.lines)
