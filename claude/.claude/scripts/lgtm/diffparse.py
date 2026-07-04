@@ -39,12 +39,12 @@ def parse_unified_diff(text: str) -> list[FileDiff]:
         elif raw.startswith("@@"):
             flush_hunk()
             m = _HUNK_RE.match(raw)
+            if m is None:
+                continue
             hunk_old_start, hunk_new_start = int(m.group(1)), int(m.group(2))
             old_ln, new_ln = hunk_old_start, hunk_new_start
             hunk_header = raw
         elif hunk_header and raw[:1] in ("+", "-", " ", ""):
-            if raw.startswith("+++") or raw.startswith("---"):
-                continue
             if raw.startswith("+"):
                 lines_buf.append(DiffLine("add", None, new_ln, raw[1:])); new_ln += 1
             elif raw.startswith("-"):
