@@ -41,10 +41,10 @@ def test_filter_worktrees_excludes_agent_scratch_and_caps():
 
 
 def test_hidden_worktrees_line_not_clickable():
-    entries = [IndexEntry("worktree", "real-1", "/r/wt/real-1", 0, 0, "", "jb2b review real-1"),
-               IndexEntry("worktree", "", "…ще 2 приховано", 0, 0, "", "")]
-    html = render_index("x", entries)
+    entries = [IndexEntry(kind="worktree", ref="real-1", title="/r/wt/real-1",
+                          cmd="jb2b review real-1")]
+    html = render_index("x", entries, footnotes={"worktree": "…ще 2 приховано"})
     assert "…ще 2 приховано" in html
-    # the hidden-count line is a plain dim line: no card class, no onclick
+    # the footnote is a plain dim line rendered after the cards grid: no card class, no onclick
     seg = html.split("…ще 2 приховано")[0].rsplit("<div", 1)[1]
     assert "pcard" not in seg and "onclick" not in seg

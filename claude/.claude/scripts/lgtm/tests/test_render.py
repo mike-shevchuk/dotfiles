@@ -24,9 +24,9 @@ def test_all_files_all_hunks_present():
 def test_tree_and_copy_separation():
     html = render_page(META, _files(), [], None)
     assert f"go('f-{slug('a/b.py')}')" in html
-    # cpy() attrs are HTML-escaped for XSS safety (see test_cpy_attr_escapes_quotes);
-    # un-escape apostrophes before matching the raw JS call.
-    assert "cpy('nvim +1 a/b.py')" in html.replace("&#x27;", "'")
+    # cpy() attrs are JSON-encoded then HTML-escaped for XSS safety (see
+    # test_cpy_attr_escapes_quotes); un-escape the quotes before matching the raw JS call.
+    assert 'cpy("nvim +1 a/b.py")' in html.replace("&quot;", '"')
 
 def test_split_toggle_only_on_mixed_hunks():
     html = render_page(META, _files(), [], None)
@@ -45,8 +45,11 @@ def test_split_views_per_hunk_unique_ids():
 def test_cpy_attr_escapes_quotes():
     f = FileDiff("we'ird\".py", "M", [Hunk("F0H0","@@ -1 +1 @@",1,1,[DiffLine("add",None,1,"x")])])
     html = render_page(META, [f], [], None)
-    assert "onclick=\"cpy('nvim +1 we'ird\".py')\"" not in html  # raw broken attr must not appear
-    assert "we&#x27;ird" in html or "\\'" in html               # escaped form present
+    # raw double-quote from the path must never appear unescaped (would break out
+    # of the onclick="..." attribute); cpy() is now json.dumps-encoded then HTML-escaped.
+    assert 'we\'ird".py")"' not in html
+    assert "we&#x27;ird" in html          # single quote HTML-escaped
+    assert "&quot;.py&quot;" in html       # JSON-escaped double quote, then HTML-escaped
 
 def test_finding_pinned_with_score():
     html = render_page(META, _files(), [_finding()], None)

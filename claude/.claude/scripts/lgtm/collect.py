@@ -17,12 +17,12 @@ def pick_base(symbolic_ref_out: str | None, existing_refs: set[str]) -> str:
     return "HEAD"
 
 
-def collect_diff(repo: Path, mode: str = "local", pr: int | None = None,
+def collect_diff(repo: Path, pr: int | None = None,
                  base: str | None = None, head: str | None = None) -> tuple[str, dict]:
-    if mode == "pr":
+    if pr is not None:
         text = _run(["gh", "pr", "diff", str(pr)], repo)
         return text, {"ref": f"pr{pr}", "base": "(github)", "mode": "pr"}
-    if mode == "refs":
+    if base and head:
         text = _run(["git", "diff", f"{base}...{head}"], repo)
         return text, {"ref": head, "base": base, "mode": "refs"}
     # local: default-branch merge-base -> HEAD, uncommitted included (= prefix-v)

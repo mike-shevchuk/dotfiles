@@ -15,12 +15,18 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from lgtm.render import CSS, JS, FAVICON, _cpy_attr
+from lgtm.collect import _run
+from lgtm.render import _cpy_attr, _page_shell
 
 MAX_BRANCHES = 8
 MAX_RECENTS = 5
 MAX_WORKTREES = 8
+# Convention owned by Claude Code harness worktree scaffolding: if this marker
+# renames, the filter goes inert (worktrees reappear as clutter, no error).
 AGENT_SCRATCH_MARKER = "/.claude/worktrees/agent-"
+
+_GIT_ERR = (subprocess.CalledProcessError, FileNotFoundError)
+_GH_ERR = _GIT_ERR + (json.JSONDecodeError,)
 
 SECTION_ORDER = (
     ("head", "▸ поточний стан"),
@@ -43,58 +49,45 @@ CHIP = {
 class IndexEntry:
     kind: str          # 'head' | 'pr' | 'branch' | 'worktree' | 'recent'
     ref: str
-    title: str
-    plus: int
-    minus: int
-    when: str
-    cmd: str
+    title: str = ""
+    plus: int = 0
+    minus: int = 0
+    when: str = ""
+    cmd: str = ""
 
 
-def _run(cmd: list[str], cwd: Path) -> str:
-    return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout
-
-
-def _collect_head(repo: Path) -> list[IndexEntry]:
+def _collect_head(repo: Path, branch: str) -> list[IndexEntry]:
     try:
-        branch = _run(["git", "branch", "--show-current"], repo).strip() or "HEAD"
         n = len([l for l in _run(["git", "status", "--porcelain"], repo).splitlines() if l.strip()])
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except _GIT_ERR:
         return []
     title = f"{n} uncommitted файлів" if n else "чисто — немає uncommitted змін"
-    return [IndexEntry("head", branch, title, 0, 0, "", "jb2b review")]
+    return [IndexEntry(kind="head", ref=branch, title=title, cmd="jb2b review")]
 
 
-def _collect_prs(repo: Path) -> list[IndexEntry]:
+def _collect_prs(repo: Path) -> tuple[list[IndexEntry], set[str]]:
     try:
         out = _run(["gh", "pr", "list", "--author", "@me", "--state", "open", "--json",
                     "number,title,headRefName,additions,deletions"], repo)
         prs = json.loads(out)
-    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
-        return []
+    except _GH_ERR:
+        return [], set()
     entries = []
+    heads = set()
     for pr in prs:
         number = pr["number"]
-        entries.append(IndexEntry("pr", f"pr{number}", pr.get("title", ""),
-                                  pr.get("additions", 0), pr.get("deletions", 0),
-                                  "", f"jb2b review {number}"))
-    return entries
+        heads.add(pr["headRefName"])
+        entries.append(IndexEntry(kind="pr", ref=f"pr{number}", title=pr.get("title", ""),
+                                  plus=pr.get("additions", 0), minus=pr.get("deletions", 0),
+                                  cmd=f"jb2b review {number}"))
+    return entries, heads
 
 
-def _pr_heads(repo: Path) -> set[str]:
+def _collect_branches(repo: Path, skip: set[str], current: str) -> list[IndexEntry]:
     try:
-        out = _run(["gh", "pr", "list", "--author", "@me", "--state", "open", "--json",
-                    "headRefName"], repo)
-        return {pr["headRefName"] for pr in json.loads(out)}
-    except (subprocess.CalledProcessError, FileNotFoundError, json.JSONDecodeError):
-        return set()
-
-
-def _collect_branches(repo: Path, skip: set[str]) -> list[IndexEntry]:
-    try:
-        current = _run(["git", "branch", "--show-current"], repo).strip()
         out = _run(["git", "for-each-ref", "--sort=-committerdate", "refs/heads",
                     "--format=%(refname:short)|%(committerdate:relative)"], repo)
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except _GIT_ERR:
         return []
     skip = skip | {current}
     entries = []
@@ -104,7 +97,7 @@ def _collect_branches(repo: Path, skip: set[str]) -> list[IndexEntry]:
         name, when = line.split("|", 1)
         if name in skip:
             continue
-        entries.append(IndexEntry("branch", name, "", 0, 0, when, f"jb2b review {name}"))
+        entries.append(IndexEntry(kind="branch", ref=name, when=when, cmd=f"jb2b review {name}"))
         if len(entries) >= MAX_BRANCHES:
             break
     return entries
@@ -121,13 +114,13 @@ def _filter_worktrees(pairs: list[tuple[str, str]]) -> tuple[list[tuple[str, str
     return real[:MAX_WORKTREES], max(0, len(real) - MAX_WORKTREES)
 
 
-def _collect_worktrees(repo: Path) -> list[IndexEntry]:
+def _collect_worktrees(repo: Path) -> tuple[list[IndexEntry], int]:
     """Parse `git worktree list --porcelain` blank-line-separated blocks.
     The first block is always the main worktree (the repo itself) — skip it."""
     try:
         out = _run(["git", "worktree", "list", "--porcelain"], repo)
-    except (subprocess.CalledProcessError, FileNotFoundError):
-        return []
+    except _GIT_ERR:
+        return [], 0
     blocks = out.strip("\n").split("\n\n") if out.strip() else []
     pairs = []
     for block in blocks[1:]:
@@ -140,12 +133,9 @@ def _collect_worktrees(repo: Path) -> list[IndexEntry]:
         if branch:
             pairs.append((path or "", branch))
     kept, hidden = _filter_worktrees(pairs)
-    entries = [IndexEntry("worktree", branch, path, 0, 0, "", f"jb2b review {branch}")
+    entries = [IndexEntry(kind="worktree", ref=branch, title=path, cmd=f"jb2b review {branch}")
                for path, branch in kept]
-    if hidden:
-        # sentinel: empty cmd → render_index draws a plain dim line, not a card
-        entries.append(IndexEntry("worktree", "", f"…ще {hidden} приховано", 0, 0, "", ""))
-    return entries
+    return entries, hidden
 
 
 def _collect_recents(repo: Path) -> list[IndexEntry]:
@@ -159,19 +149,26 @@ def _collect_recents(repo: Path) -> list[IndexEntry]:
     dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
     entries = []
     for d in dirs[:MAX_RECENTS]:
-        entries.append(IndexEntry("recent", d.name, "", 0, 0, "", f"jb2b review {d.name}"))
+        entries.append(IndexEntry(kind="recent", ref=d.name, cmd=f"jb2b review {d.name}"))
     return entries
 
 
-def collect_entries(repo: Path) -> list[IndexEntry]:
-    entries = list(_collect_head(repo))
-    prs = _collect_prs(repo)
+def collect_entries(repo: Path) -> tuple[list[IndexEntry], dict[str, str]]:
+    try:
+        current = _run(["git", "branch", "--show-current"], repo).strip() or "HEAD"
+    except _GIT_ERR:
+        current = "HEAD"
+    entries = _collect_head(repo, current)
+    prs, pr_heads = _collect_prs(repo)
     entries += prs
-    pr_heads = _pr_heads(repo)
-    entries += _collect_branches(repo, pr_heads)
-    entries += _collect_worktrees(repo)
+    entries += _collect_branches(repo, pr_heads, current)
+    wt_entries, wt_hidden = _collect_worktrees(repo)
+    entries += wt_entries
     entries += _collect_recents(repo)
-    return entries
+    footnotes = {}
+    if wt_hidden:
+        footnotes["worktree"] = f"…ще {wt_hidden} приховано"
+    return entries, footnotes
 
 
 def _fuzzy_key(e: IndexEntry) -> str:
@@ -179,10 +176,6 @@ def _fuzzy_key(e: IndexEntry) -> str:
 
 
 def _card_html(e: IndexEntry) -> str:
-    if not e.cmd:
-        # sentinel entry (e.g. hidden-worktrees count): plain dim line, non-clickable
-        return (f'<div style="color:var(--dim);font-size:.85em;padding:4px 2px">'
-                f'{H.escape(e.title)}</div>')
     cls, label = CHIP[e.kind]
     title = f'<div class="title">{H.escape(e.title)}</div>' if e.title else ""
     stats = f" · +{e.plus}/−{e.minus}" if (e.plus or e.minus) else ""
@@ -193,18 +186,23 @@ def _card_html(e: IndexEntry) -> str:
             f'{title}{foot}</div>')
 
 
-def render_index(repo_name: str, entries: list[IndexEntry]) -> str:
+def render_index(repo_name: str, entries: list[IndexEntry],
+                  footnotes: dict[str, str] | None = None) -> str:
+    footnotes = footnotes or {}
     by_kind: dict[str, list[IndexEntry]] = {}
     for e in entries:
         by_kind.setdefault(e.kind, []).append(e)
     sections = []
     for kind, label in SECTION_ORDER:
         group = by_kind.get(kind)
-        if not group:
+        footnote = footnotes.get(kind)
+        if not group and not footnote:
             continue
-        cards = "".join(_card_html(e) for e in group)
+        cards = "".join(_card_html(e) for e in group) if group else ""
+        foot_html = (f'<div style="color:var(--dim);font-size:.85em;padding:4px 2px">'
+                     f'{H.escape(footnote)}</div>') if footnote else ""
         sections.append(f'<div class="sect" data-sect>{label}</div>'
-                        f'<div class="cards" data-grid>{cards}</div>')
+                        f'<div class="cards" data-grid>{cards}</div>{foot_html}')
     total = len(entries)
     header = (f'<div style="font-weight:800;letter-spacing:1px;font-size:1.1em">'
               f'<span style="color:var(--grn)">L</span><span style="color:var(--acc)">G</span>'
@@ -216,22 +214,17 @@ def render_index(repo_name: str, entries: list[IndexEntry]) -> str:
               f'oninput="ixFilter(this.value)"><span class="pill" id="ixcount">{total}</span></div>')
     empty = ('<div id="ixempty" class="hid" style="text-align:center;color:var(--dim);'
              'padding:30px">нічого не знайдено — спробуй інший запит</div>')
-    return f"""<!DOCTYPE html>
-<html lang="uk"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LGTM · index · {H.escape(repo_name)}</title>
-<link rel="icon" href="{FAVICON}">
-<style>{CSS}{IX_CSS}</style></head>
-<body><div class="ix">
-<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap">{header}</div>
-<div style="padding:16px">{"".join(sections)}{empty}</div>
-</div><div class="toast" id="cpToast"></div>
-<script>{JS}{IX_JS}</script></body></html>"""
+    body = (f'<div class="ix">'
+            f'<div style="display:flex;align-items:center;gap:12px;padding:12px 16px;'
+            f'border-bottom:1px solid var(--line);background:var(--panel);flex-wrap:wrap">{header}</div>'
+            f'<div style="padding:16px">{"".join(sections)}{empty}</div>'
+            f'</div>')
+    return _page_shell(f"LGTM · index · {H.escape(repo_name)}", "uk", body,
+                        extra_css=IX_CSS, extra_js=IX_JS)
 
 
 IX_CSS = r"""
-  .ix{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#30363d;--txt:#e6edf3;--dim:#8b949e;--acc:#58a6ff;--grn:#3fb950;--red:#f85149;--org:#d29922;--purple:#a371f7;
-    background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.5}
+  .ix{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.5}
   .ix code{font-family:ui-monospace,monospace}
   .ix .search{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;flex:1;min-width:200px}
   .ix .search input{flex:1;background:transparent;border:none;outline:none;color:var(--txt);font-family:ui-monospace,monospace;font-size:1em}
@@ -249,7 +242,6 @@ IX_CSS = r"""
   .ix .c-wt{background:rgba(210,153,34,.16);color:#f0d48a;border:1px solid rgba(210,153,34,.4)}
   .ix .c-head{background:rgba(88,166,255,.16);color:#a5d0ff;border:1px solid rgba(88,166,255,.4)}
   .ix .hid{display:none!important}
-  .ix .pill{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:.8em}
 """
 
 IX_JS = r"""

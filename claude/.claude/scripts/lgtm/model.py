@@ -42,12 +42,15 @@ class FileDiff:
 
 @dataclass(frozen=True)
 class ReviewMeta:
-    ref: str
-    base: str
-    mode: str                 # 'local' | 'refs' | 'pr'
-    generated: str
-    repo: str
     lang: str                 # 'ukr' | 'eng' | 'both'
+    # ref/base/mode/repo/generated are identity fields the CLI always recomputes
+    # fresh for the current run (see cli.cmd_review) — a findings.json only needs
+    # to carry `lang`; these default empty so a minimal meta block still loads.
+    ref: str = ""
+    base: str = ""
+    mode: str = ""             # 'local' | 'refs' | 'pr'
+    generated: str = ""
+    repo: str = ""
 
 @dataclass(frozen=True)
 class Finding:

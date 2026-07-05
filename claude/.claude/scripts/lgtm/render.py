@@ -2,6 +2,7 @@
 rescue-serverless/.superpowers/brainstorm/87136-1783148079/content/lgtm-pr1651-v2.html"""
 from __future__ import annotations
 import html as H
+import json
 import re
 from lgtm.model import FileDiff, Hunk, Finding, ReviewMeta
 
@@ -10,19 +11,23 @@ FAVICON = ("data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' "
            "viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>")
 LAYER_BADGE = {"claude": ("b-claude", "🟣"), "code-review": ("b-cr", "🔵"),
                "bot": ("b-bot", "🟢"), "coach": ("b-coach", "🎓")}
+# cls, sign per diff-line kind — shared by unified/left/right row builders in _hunk_html
+_KIND = {"add": ("add", "+"), "del": ("del", "-"), "ctx": ("ctx", " ")}
 
 def slug(path: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "-", path).strip("-").lower()
 
+def _nvim_cmd(line: int, path: str) -> str:
+    return f"nvim +{line} {path}"
+
 def _cpy_attr(cmd: str) -> str:
-    """Safe onclick attribute value for cpy('<cmd>'): JS-escape then HTML-escape.
+    """Safe onclick attribute value for cpy(<cmd>): JSON-encode then HTML-escape.
 
     cmd may contain arbitrary user/data-controlled text (file paths, refs).
-    JS-escape first so the quoted JS string literal stays valid, then
-    HTML-escape the whole onclick value so it can't break out of the
+    json.dumps produces a valid JS string literal (double-quoted, escaped),
+    then HTML-escape the whole onclick value so it can't break out of the
     surrounding double-quoted attribute (finding: raw path injection)."""
-    js = cmd.replace("\\", "\\\\").replace("'", "\\'")
-    return H.escape(f"cpy('{js}')", quote=True)
+    return H.escape(f"cpy({json.dumps(cmd)})", quote=True)
 
 def _t(d: dict | None, lang: str) -> str:
     if not d: return ""
@@ -55,7 +60,7 @@ def _tree_html(files: list[FileDiff], sev_by_file: dict[str, str]) -> str:
               f'<span class="plus">+{f.additions}</span>{minus}'
               f'{sev_span}'
               f'<span class="cico" onclick="event.stopPropagation();'
-              f'{_cpy_attr(f"nvim +{ln} {f.path}")}">📋</span></div>')
+              f'{_cpy_attr(_nvim_cmd(ln, f.path))}">📋</span></div>')
         out.append("</div>")
     return "".join(out)
 
@@ -63,25 +68,17 @@ def _row(cls: str, sign: str, ln, text: str) -> str:
     return (f'<span class="{cls}"><span class="ln">{ln}</span>'
             f'{sign}{H.escape(text)}</span>')
 
-def _hunk_html(f: FileDiff, h: Hunk, findings: list[Finding], lang: str) -> str:
-    rows = "".join(
-        _row({"add": "add", "del": "del", "ctx": "ctx"}[l.kind],
-             {"add": "+", "del": "-", "ctx": " "}[l.kind],
-             l.new_ln or l.old_ln or "", l.text)
-        for l in h.lines)
-    vid = f"{slug(f.path)}-{h.hunk_id.lower()}"
+def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str) -> str:
+    rows = "".join(_row(*_KIND[l.kind], l.new_ln or l.old_ln or "", l.text) for l in h.lines)
+    vid = f"{sid}-{h.hunk_id.lower()}"
     if h.has_add and h.has_del:
         seg = ('<span class="seg" onclick="event.stopPropagation()">'
                f'<span class="on" onclick="fMode(this,\'u\',\'{vid}\')">unified</span>'
                f'<span onclick="fMode(this,\'s\',\'{vid}\')">split</span></span>')
-        left_rows = "".join(
-            _row("ctx" if l.kind == "ctx" else "del",
-                 " " if l.kind == "ctx" else "-", l.old_ln or "", l.text)
-            for l in h.lines if l.kind in ("del", "ctx"))
-        right_rows = "".join(
-            _row("ctx" if l.kind == "ctx" else "add",
-                 " " if l.kind == "ctx" else "+", l.new_ln or "", l.text)
-            for l in h.lines if l.kind in ("add", "ctx"))
+        left_rows = "".join(_row(*_KIND[l.kind], l.old_ln or "", l.text)
+                            for l in h.lines if l.kind in ("del", "ctx"))
+        right_rows = "".join(_row(*_KIND[l.kind], l.new_ln or "", l.text)
+                             for l in h.lines if l.kind in ("add", "ctx"))
         views = (
             f'<div class="codeblk" id="u-{vid}" style="padding:5px 0">{rows}</div>'
             f'<div class="split2" id="s-{vid}" style="display:none">'
@@ -95,7 +92,7 @@ def _hunk_html(f: FileDiff, h: Hunk, findings: list[Finding], lang: str) -> str:
                f'{kind} ханк — друга колонка порожня">'
                '<span>unified</span><span style="text-decoration:line-through">split</span></span>')
         views = f'<div class="codeblk" style="padding:5px 0">{rows}</div>'
-    finds = "".join(_finding_html(x, lang) for x in findings if x.hunk == h.hunk_id)
+    finds = "".join(_finding_html(x, lang) for x in findings)
     return (f'<div style="padding:6px 12px;background:var(--panel2);font-size:.85em;'
             f'color:var(--dim)">{H.escape(h.header)} · {h.hunk_id} {seg}</div>'
             f'{views}{finds}')
@@ -104,7 +101,7 @@ def _finding_html(x: Finding, lang: str) -> str:
     cls, emoji = LAYER_BADGE.get(x.layer, ("b-claude", "🟣"))
     agrees = "".join(f'<span class="badge b-bot">🟢 {H.escape(a)}</span>' for a in x.agrees_with)
     code = f'<div class="codeblk">{H.escape(x.fix.get("code",""))}</div>' if x.fix.get("code") else ""
-    cmd = f"nvim +{x.line} {x.file}"
+    cmd = _nvim_cmd(x.line, x.file)
     return (f'<div class="find" onclick="{_cpy_attr(cmd)}">'
             f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {x.severity_emoji} '
             f'{x.severity_score}/100</span>{agrees}'
@@ -116,16 +113,19 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
                 findings: list[Finding], summary: dict | None) -> str:
     lang = meta.lang
     sev_by_file = {}
+    by_hunk: dict[str, list[Finding]] = {}
     for x in findings:
         sev_by_file[x.file] = sev_by_file.get(x.file, "") + x.severity_emoji
+        by_hunk.setdefault(x.hunk, []).append(x)
     cards = []
     for f in files:
         big = f.additions + f.deletions > BIG_FILE_LINES
         body_style = ' style="display:none"' if big else ""
         arrow = "▸" if big else "▾"
-        hunks = "".join(_hunk_html(f, h, findings, lang) for h in f.hunks)
+        sid = slug(f.path)
+        hunks = "".join(_hunk_html(sid, h, by_hunk.get(h.hunk_id, []), lang) for h in f.hunks)
         cards.append(
-          f'<div class="card" id="f-{slug(f.path)}">'
+          f'<div class="card" id="f-{sid}">'
           f'<div class="fhead" onclick="tg(this)"><span class="arrow">{arrow}</span>'
           f'<b>{H.escape(f.path)}</b><span style="color:var(--dim)">· {len(f.hunks)} ханків '
           f'· +{f.additions} −{f.deletions}{" · згорнуто (великий)" if big else ""}</span>'
@@ -156,25 +156,33 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
     </ul>
   </div>
 </div>"""
+    body = (f'<div class="rv">'
+            f'<div class="topbar">{header}</div>'
+            f'<div class="lay"><div class="nav">{_tree_html(files, sev_by_file)}</div>'
+            f'<div class="center">{summary_html}{"".join(cards)}</div></div>'
+            f'</div>{help_overlay}')
+    return _page_shell(f"LGTM · {H.escape(meta.ref)} · {H.escape(meta.repo)}",
+                        'uk' if lang == 'ukr' else 'en', body)
+
+def _page_shell(title: str, lang_attr: str, body: str,
+                extra_css: str = "", extra_js: str = "") -> str:
+    """Shared DOCTYPE/head/meta/viewport/favicon/style/toast/script skeleton
+    for both the review page (render_page) and the index page (indexpage.render_index)."""
     return f"""<!DOCTYPE html>
-<html lang="{'uk' if lang == 'ukr' else 'en'}"><head><meta charset="utf-8">
+<html lang="{lang_attr}"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>LGTM · {H.escape(meta.ref)} · {H.escape(meta.repo)}</title>
+<title>{title}</title>
 <link rel="icon" href="{FAVICON}">
-<style>{CSS}</style></head>
-<body><div class="rv">
-<div class="topbar">{header}</div>
-<div class="lay"><div class="nav">{_tree_html(files, sev_by_file)}</div>
-<div class="center">{summary_html}{"".join(cards)}</div></div>
-</div>{help_overlay}<div class="toast" id="cpToast"></div>
-<script>{JS}</script></body></html>"""
+<style>{CSS}{extra_css}</style></head>
+<body>{body}<div class="toast" id="cpToast"></div>
+<script>{JS}{extra_js}</script></body></html>"""
 
 # CSS and JS: copied verbatim from the canonical mockup (see module docstring),
 # with .lay/.nav/.center/.topbar/.prsum grid classes added to match this template.
 CSS = r"""
   .rv * { box-sizing:border-box; }
-  .rv{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#30363d;--txt:#e6edf3;--dim:#8b949e;--acc:#58a6ff;--grn:#3fb950;--red:#f85149;--org:#d29922;--purple:#a371f7;
-    background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.55}
+  :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#30363d;--txt:#e6edf3;--dim:#8b949e;--acc:#58a6ff;--grn:#3fb950;--red:#f85149;--org:#d29922;--purple:#a371f7}
+  .rv{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.55}
   .rv code{font-family:ui-monospace,monospace}
   .rv .codeblk{font-family:ui-monospace,monospace;font-size:.85em;white-space:pre;overflow-x:auto;line-height:1.45}
   .rv .ln{opacity:.35;display:inline-block;width:36px;text-align:right;margin-right:10px;user-select:none}
@@ -182,8 +190,8 @@ CSS = r"""
   .rv .add{background:rgba(63,185,80,.13);color:#7ee787;display:block;padding:0 6px}
   .rv .ctx{display:block;opacity:.7;padding:0 6px}
   .rv .fold{display:block;background:rgba(88,166,255,.07);color:var(--acc);cursor:pointer;padding:2px 8px;text-align:center;font-size:.82em}
-  .rv .pill{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:.8em;cursor:pointer}
-  .rv .pill:hover{border-color:var(--acc)}
+  .pill{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:.8em;cursor:pointer}
+  .pill:hover{border-color:var(--acc)}
   .rv .badge{padding:2px 9px;border-radius:20px;font-size:.78em;display:inline-block;margin:2px 3px 0 0}
   .rv .b-claude{background:rgba(163,113,247,.18);color:#d2b8ff;border:1px solid rgba(163,113,247,.4)}
   .rv .b-coach{background:rgba(210,153,34,.16);color:#f0d48a;border:1px solid rgba(210,153,34,.4)}
@@ -212,7 +220,6 @@ CSS = r"""
   .rv .center{padding:14px;overflow:auto;min-width:0}
   .rv .prsum{background:rgba(88,166,255,.07);border:1px solid rgba(88,166,255,.3);border-radius:10px;padding:11px 13px;margin-bottom:12px}
   .rv .label{font-size:.76em;text-transform:uppercase;color:var(--dim)}
-  .rv .arrow{width:14px;display:inline-block}
   @media(max-width:900px){.rv .lay{grid-template-columns:1fr}.rv .nav{border-right:none;border-bottom:1px solid var(--line);position:static;max-height:none}}
   .rv .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;font-size:.78em;margin-left:auto}
   .rv .seg span{padding:2px 9px;cursor:pointer;color:var(--dim)}

@@ -18,6 +18,15 @@ def test_filediff_totals():
     f = FileDiff(path="a.py", status="M", hunks=[_hunk(), _hunk()])
     assert f.additions == 4 and f.deletions == 2
 
+def test_review_meta_minimal_lang_only():
+    """ref/base/mode/repo/generated are identity fields the CLI always recomputes
+    fresh (see cli.cmd_review's meta-ownership fix) — ReviewMeta must load from a
+    findings.json meta block that carries only `lang`."""
+    meta = ReviewMeta(**{"lang": "eng"})
+    assert meta.lang == "eng"
+    assert meta.ref == "" and meta.base == "" and meta.mode == ""
+    assert meta.repo == "" and meta.generated == ""
+
 def test_findings_roundtrip(tmp_path):
     meta = ReviewMeta(ref="pr1651", base="(github)", mode="pr",
                       generated="2026-07-04 10:00", repo="rescue-serverless", lang="ukr")

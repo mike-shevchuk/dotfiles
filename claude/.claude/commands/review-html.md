@@ -40,16 +40,19 @@ findings-less page — expected, not an error.
    an existing enum or helper), and frontend impact. **Verify every claim against the
    codebase** (grep/read the actual file(s) involved) before writing it down — no
    speculative findings.
-3. For each finding, work out its hunk id by parsing `diff.txt` the same way
-   `lgtm.diffparse` does: files in top-to-bottom order get `F0`, `F1`, … (0-indexed);
-   within a file, hunks (`@@ … @@` blocks) get `H0`, `H1`, … in order. Use the hunk
+3. For each finding, get its hunk id from `$OUT/hunks.json` (written by Step 1) —
+   don't hand-count `@@ … @@` blocks in `diff.txt` yourself. It lists, per file in
+   order, each hunk's `id` (`F#H#`), `header`, and `first_new_line`. Use the hunk
    that actually contains the flagged code — don't assume it's a file's first hunk.
-   `line` = a real line number from that hunk (prefer an added line).
+   `line` = a real line number from that hunk (prefer an added line; `first_new_line`
+   is a good default when the flagged code is the first changed line). The CLI
+   validates every finding's `hunk` against this map on the next run and warns
+   (`⚠ невідомий hunk`) if it doesn't match — keep `diff.txt` open for the actual
+   before/after content.
 4. Write `$OUT/findings.json` matching `lgtm.model.Finding` **exactly** — flat
    `severity_emoji` + `severity_score`, not nested:
    ```json
-   {"meta": {"ref": "…", "base": "…", "mode": "local|refs|pr",
-             "generated": "YYYY-MM-DD HH:MM", "repo": "…", "lang": "ukr|eng|both"},
+   {"meta": {"lang": "ukr|eng|both"},
     "findings": [
       {"id": "…", "layer": "claude", "source": "claude-deep",
        "file": "…", "line": N, "hunk": "F#H#",
@@ -61,9 +64,10 @@ findings-less page — expected, not an error.
    ```
    - Fill only the requested language key(s) in `problem`/`harm`/`fix`; for `both`,
      fill both `ukr` and `eng`.
-   - `meta.ref`/`base`/`mode`/`repo` must match exactly what Step 1 just used (read
-     them back from the stderr log or from `$OUT`'s directory name) — the CLI reloads
-     this meta verbatim on the next run.
+   - `meta` identity fields (`ref`/`base`/`mode`/`repo`/`generated`) are recomputed
+     fresh by the CLI on every run — only `lang` is read back from `findings.json`
+     (unless `--lang` is passed, which always wins). Don't bother writing the other
+     meta fields; the block above is the minimal shape that matters.
    - No verified findings? Write `"findings": []` — an empty array is a valid result,
      not a failure.
 
