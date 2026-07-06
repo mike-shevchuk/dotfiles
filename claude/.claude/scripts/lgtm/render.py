@@ -34,6 +34,11 @@ def _cpy_attr(cmd: str) -> str:
     surrounding double-quoted attribute (finding: raw path injection)."""
     return H.escape(f"cpy({json.dumps(cmd)})", quote=True)
 
+def _js_str_attr(s: str) -> str:
+    """JS string literal safe to embed inside an HTML attribute (same rules
+    as _cpy_attr: JSON-encode → HTML-escape)."""
+    return H.escape(json.dumps(s), quote=True)
+
 def _t(d: dict | None, lang: str) -> str:
     if not d: return ""
     return d.get(lang) or d.get("ukr") or d.get("eng") or ""
@@ -74,7 +79,8 @@ def _row(cls: str, sign: str, ln, text: str) -> str:
     return (f'<span class="{cls}"><span class="ln">{ln}</span>'
             f'{sign}{H.escape(text)}</span>')
 
-def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str) -> str:
+def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str,
+               path: str = "") -> str:
     rows = "".join(_row(*_KIND[l.kind], l.new_ln or l.old_ln or "", l.text) for l in h.lines)
     vid = f"{sid}-{h.hunk_id.lower()}"
     if h.has_add and h.has_del:
@@ -98,19 +104,37 @@ def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str) -> str:
                f'{kind} ханк — друга колонка порожня">'
                '<span>unified</span><span style="text-decoration:line-through">split</span></span>')
         views = f'<div class="codeblk" style="padding:5px 0">{rows}</div>'
-    finds = "".join(_finding_html(x, lang) for x in findings)
+    finds = "".join(_finding_html(x, lang, vid) for x in findings)
+    # live-loop surface (design §3): thread container + ask-Claude form.
+    # Hidden on file:// (static mode) — JS reveals it only when served over http.
+    thread = (
+        f'<div class="lthread" id="th-{vid}"></div>'
+        f'<div class="ask" id="ask-{vid}" style="display:none" '
+        f'data-hunk="{H.escape(h.hunk_id, quote=True)}" '
+        f'data-file="{H.escape(path, quote=True)}" '
+        f'data-line="{h.first_new_line}">'
+        f'<textarea rows="2" placeholder="💬 запитати Claude про цей ханк… '
+        f'(Ctrl-Enter — надіслати)"></textarea>'
+        f'<button onclick="askSend(\'{vid}\')">▶</button>'
+        f'<input type="hidden" class="fid" value="">'
+        f'</div>')
     return (f'<div style="padding:6px 12px;background:var(--panel2);font-size:.85em;'
             f'color:var(--dim)">{H.escape(h.header)} · {h.hunk_id} {seg}</div>'
-            f'{views}{finds}')
+            f'{views}{finds}{thread}')
 
-def _finding_html(x: Finding, lang: str) -> str:
+def _finding_html(x: Finding, lang: str, vid: str = "") -> str:
     cls, emoji = LAYER_BADGE.get(x.layer, ("b-claude", "🟣"))
     agrees = "".join(f'<span class="badge b-bot">🟢 {H.escape(a)}</span>' for a in x.agrees_with)
     code = f'<div class="codeblk">{H.escape(x.fix.get("code",""))}</div>' if x.fix.get("code") else ""
     cmd = _nvim_cmd(x.line, x.file)
-    return (f'<div class="find" onclick="{_cpy_attr(cmd)}">'
+    # 💬 pre-targets the hunk's ask form at THIS finding (live mode only)
+    ask = (f'<span class="cico ask-live" style="display:none" title="запитати Claude '
+           f'про цю знахідку" onclick="event.stopPropagation();'
+           f'askFor(\'{vid}\',{_js_str_attr(x.id)})">💬</span>') if vid else ""
+    return (f'<div class="find" data-fid="{H.escape(x.id, quote=True)}" '
+            f'onclick="{_cpy_attr(cmd)}">'
             f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {H.escape(x.severity_emoji)} '
-            f'{H.escape(str(x.severity_score))}/100</span>{agrees}'
+            f'{H.escape(str(x.severity_score))}/100</span>{agrees}{ask}'
             f'<div style="margin-top:5px"><b>Проблема:</b> {H.escape(_t(x.problem, lang))}</div>'
             f'<div><b>Шкода:</b> {H.escape(_t(x.harm, lang))}</div>'
             f'<div><b>Фікс:</b> {H.escape(_t(x.fix, lang))}</div>{code}</div>')
@@ -129,7 +153,8 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
         body_style = ' style="display:none"' if big else ""
         arrow = "▸" if big else "▾"
         sid = slug(f.path)
-        hunks = "".join(_hunk_html(sid, h, by_hunk.get(h.hunk_id, []), lang) for h in f.hunks)
+        hunks = "".join(_hunk_html(sid, h, by_hunk.get(h.hunk_id, []), lang, f.path)
+                        for h in f.hunks)
         cards.append(
           f'<div class="card" id="f-{sid}">'
           f'<div class="fhead" onclick="tg(this)"><span class="arrow">{arrow}</span>'
@@ -148,6 +173,8 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
               f'<span class="pill" onclick="{_cpy_attr(_jb2b_review_cmd(meta.ref))}">'
               f'📋 jb2b review</span>'
               f'<span class="pill" onclick="helpTg()">❓ довідка</span>'
+              f'<span class="pill" id="liveDot" title="live-петля з Claude: '
+              f'запусти jb2b review-serve + /lgtm-listen">○ static</span>'
               f'<span class="pill" style="margin-left:auto">{total_f}/{total_f} файлів · '
               f'{sum(f.additions for f in files)}+ {sum(f.deletions for f in files)}−</span>')
     help_overlay = """<div id="helpOv" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:98" onclick="helpTg()">
@@ -233,6 +260,20 @@ CSS = r"""
   .rv .split2{display:grid;grid-template-columns:1fr 1fr}
   .rv .split2>div{min-width:0;border-right:1px solid var(--line)}
   @media(max-width:800px){.rv .split2{grid-template-columns:1fr}}
+  /* live loop (design §3) */
+  .rv .lthread{padding:0 12px}
+  .rv .msg{border:1px solid var(--line);border-radius:10px;padding:7px 11px;margin:7px 0;max-width:92%;white-space:pre-wrap}
+  .rv .msg.mike{border-color:rgba(88,166,255,.5);background:rgba(88,166,255,.08);margin-left:auto}
+  .rv .msg.claude{border-color:rgba(163,113,247,.5);background:rgba(163,113,247,.07)}
+  .rv .msg .mwho{font-size:.75em;color:var(--dim);margin-bottom:3px}
+  .rv .msg .codeblk{margin-top:6px;padding:6px;border-radius:6px;background:var(--bg)}
+  .rv .msg.thinking{opacity:.65;font-style:italic}
+  .rv .ask{display:flex;gap:8px;padding:8px 12px;align-items:flex-end}
+  .rv .ask textarea{flex:1;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;resize:vertical;min-width:0}
+  .rv .ask textarea:focus{border-color:var(--acc);outline:none}
+  .rv .ask button{background:rgba(88,166,255,.15);color:var(--acc);border:1px solid var(--acc);border-radius:8px;padding:7px 14px;cursor:pointer}
+  .rv .ask button:hover{background:rgba(88,166,255,.3)}
+  #liveDot.on{border-color:var(--grn);color:var(--grn)}
 """
 JS = r"""
   function cpy(cmd){
@@ -284,4 +325,74 @@ JS = r"""
   document.addEventListener('keydown',function(e){
     if(e.key==='?'&&!/INPUT|TEXTAREA/.test(document.activeElement.tagName))helpTg();
     if(e.key==='Escape')document.getElementById('helpOv').style.display='none';});
+
+  /* ===== live loop (design §3): SSE thread + ask-Claude forms ===== */
+  var LIVE = location.protocol.indexOf('http') === 0 && document.querySelector('.ask');
+  function thBox(hunk, file){
+    // hunk container id = th-<file-slug>-<hunkid lower>; find by data-attrs
+    var forms = document.querySelectorAll('.ask');
+    for (var k = 0; k < forms.length; k++)
+      if (forms[k].dataset.hunk === hunk && (!file || forms[k].dataset.file === file))
+        return document.getElementById('th-' + forms[k].id.slice(4));
+    return null;
+  }
+  function msgHtml(m){
+    var d = document.createElement('div');
+    d.className = 'msg ' + (m.who === 'claude' ? 'claude' : 'mike');
+    d.dataset.mid = m.id || '';
+    var who = document.createElement('div'); who.className = 'mwho';
+    who.textContent = (m.who === 'claude' ? '🟣 claude' : '💬 mike') + ' · ' + (m.ts || '');
+    var tx = document.createElement('div'); tx.textContent = m.text || '';
+    d.appendChild(who); d.appendChild(tx);
+    if (m.code){ var c = document.createElement('div'); c.className = 'codeblk';
+                 c.textContent = m.code; d.appendChild(c); }
+    return d;
+  }
+  function addMsg(m){
+    if (m.id && document.querySelector('[data-mid="' + m.id + '"]')) return; // echo dedup
+    var box = thBox(m.hunk || '', m.file || '') || document.querySelector('.lthread');
+    if (!box) return;
+    var th = box.querySelector('.msg.thinking');
+    if (m.who === 'claude' && th) th.remove();
+    box.appendChild(msgHtml(m));
+  }
+  function askFor(vid, fid){
+    var f = document.getElementById('ask-' + vid);
+    if (!f) return;
+    f.querySelector('.fid').value = fid || '';
+    var ta = f.querySelector('textarea');
+    ta.placeholder = '💬 запитати Claude про знахідку ' + fid + '…';
+    ta.focus();
+  }
+  function askSend(vid){
+    var f = document.getElementById('ask-' + vid);
+    var ta = f.querySelector('textarea');
+    var text = ta.value.trim();
+    if (!text) return;
+    var payload = {text: text, hunk: f.dataset.hunk, file: f.dataset.file,
+                   line: parseInt(f.dataset.line || '0', 10),
+                   finding_id: f.querySelector('.fid').value};
+    fetch('/comment', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                       body: JSON.stringify(payload)})
+      .then(function(r){ if (!r.ok) throw new Error(r.status);
+        ta.value = ''; f.querySelector('.fid').value = '';
+        var box = document.getElementById('th-' + vid);
+        var th = document.createElement('div');
+        th.className = 'msg claude thinking'; th.textContent = '🟣 Claude думає…';
+        box.appendChild(th); })
+      .catch(function(e){ cpy2('не надіслалось: ' + e + ' — сервер живий? jb2b review-serve'); });
+  }
+  if (LIVE){
+    document.querySelectorAll('.ask').forEach(function(f){ f.style.display = 'flex';
+      f.querySelector('textarea').addEventListener('keydown', function(e){
+        if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askSend(f.id.slice(4)); }); });
+    document.querySelectorAll('.ask-live').forEach(function(b){ b.style.display = ''; });
+    var dot = document.getElementById('liveDot');
+    var es = new EventSource('/events?after=0.0');
+    es.onopen = function(){ if (dot){ dot.textContent = '● live'; dot.classList.add('on'); } };
+    es.onerror = function(){ if (dot){ dot.textContent = '○ reconnect…'; dot.classList.remove('on'); } };
+    es.onmessage = function(e){
+      try { addMsg(JSON.parse(e.data)); } catch(err) {}
+    };
+  }
 """

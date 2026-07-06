@@ -116,6 +116,26 @@ def cmd_review(a: argparse.Namespace) -> int:
         return 1
 
 
+def cmd_serve(a: argparse.Namespace) -> int:
+    from lgtm.serve import run
+    repo = Path(a.repo).resolve()
+    if a.dir:
+        root = Path(a.dir).resolve()
+    else:
+        # newest review under .lgtm/reviews/ — matches "continue where I left off"
+        reviews = repo / ".lgtm" / "reviews"
+        cands = sorted((d for d in reviews.glob("*") if (d / "page.html").exists()),
+                       key=lambda d: (d / "page.html").stat().st_mtime, reverse=True) \
+            if reviews.exists() else []
+        if not cands:
+            _log(f"✗ немає жодного рев'ю у {reviews} — спершу: lgtm review")
+            return 1
+        root = cands[0]
+    _log(f"→ live-сервер для {root.name} (port {a.port})…")
+    run(root, a.port, a.key)
+    return 0
+
+
 def main() -> int:
     p = argparse.ArgumentParser(prog="lgtm")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -131,6 +151,12 @@ def main() -> int:
     i = sub.add_parser("index")
     i.add_argument("--repo", default=".")
     i.set_defaults(fn=cmd_index)
+    s = sub.add_parser("serve")
+    s.add_argument("--repo", default=".")
+    s.add_argument("--dir", help="явний шлях до .lgtm/reviews/<ref>/ (дефолт: найсвіжіший)")
+    s.add_argument("--port", type=int, default=8642)
+    s.add_argument("--key", default=None, help="короткий ключ доступу (?key=…)")
+    s.set_defaults(fn=cmd_serve)
     a = p.parse_args()
     return a.fn(a)
 

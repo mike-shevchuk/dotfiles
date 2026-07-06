@@ -26,6 +26,97 @@
 default:
     @just -g --choose
 
+# --- Cheatsheets ------------------------------------------------------------
+#
+# ONE fuzzy entry point for every cheatsheet on the machine. Sources:
+#   1. ~/dotfiles/README.md   — each `## …` section, split into the cache
+#   2. ~/zettelkasten/IT/cheatsheet/**/*.md
+#   3. ~/zettelkasten/claude_code/**/*cheatsheet*.md
+# Nothing is moved: README sections are exploded into ~/.cache/cheat/readme/
+# only when README is newer than the cache. fzf shows "SOURCE  title",
+# previews with bat, Enter opens the full sheet in the pager.
+#
+#   just -g cheat            → browse everything
+#   just -g cheat tmux       → pre-filter the fzf query to "tmux"
+#   just -g cheat-list       → plain list of all sheets (no fzf, scriptable)
+# To add a sheet: drop any *.md into ~/zettelkasten/IT/cheatsheet/ — done.
+
+# Fuzzy-browse every cheatsheet (README sections + zettelkasten notes)
+[group('cheat')]
+cheat query="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cache="$HOME/.cache/cheat/readme"
+    readme="$HOME/dotfiles/README.md"
+    mkdir -p "$cache"
+
+    # Rebuild the README split only when README changed (mtime compare)
+    marker="$cache/.src-mtime"
+    src_mtime=$(stat -f %m "$readme" 2>/dev/null || stat -c %Y "$readme" 2>/dev/null || echo 0)
+    if [ "$(cat "$marker" 2>/dev/null || echo 0)" != "$src_mtime" ]; then
+        echo "→ indexing README sections into $cache ..." >&2
+        rm -f "$cache"/*.md
+        awk -v dir="$cache" '
+            /^## / {
+                n++; title=$0; sub(/^## /,"",title)
+                slug=tolower(title); gsub(/[^a-z0-9]+/,"-",slug); gsub(/^-|-$/,"",slug)
+                cur=sprintf("%s/%02d-%s.md", dir, n, slug)
+            }
+            cur { print > cur }
+        ' "$readme"
+        echo "$src_mtime" > "$marker"
+    fi
+
+    # Build the index:  "SOURCE\tTITLE\tPATH"  (tab-delimited)
+    build_index() {
+        for f in "$cache"/*.md; do
+            [ -f "$f" ] || continue
+            t=$(head -1 "$f" | sed 's/^#* *//')
+            printf 'README\t%s\t%s\n' "$t" "$f"
+        done
+        for f in "$HOME/zettelkasten/IT/cheatsheet"/**/*.md \
+                 "$HOME/zettelkasten/IT/cheatsheet"/*.md; do
+            [ -f "$f" ] || continue
+            printf 'zettel\t%s\t%s\n' "$(basename "$f" .md)" "$f"
+        done
+        for f in "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
+            [ -f "$f" ] || continue
+            printf 'claude\t%s\t%s\n' "$(basename "$(dirname "$f")")/$(basename "$f" .md)" "$f"
+        done
+    }
+
+    index=$(build_index | sort -u)
+    if [ -z "$index" ]; then echo "  no cheatsheets found" >&2; exit 1; fi
+
+    # fzf: show "SOURCE  title" (fields 1-2), preview field 3 with bat.
+    pick=$(printf '%s\n' "$index" | \
+        fzf --query="{{query}}" --delimiter='\t' --with-nth=1,2 \
+            --prompt='cheat ❯ ' --height=90% --border --ansi \
+            --preview='bat --color=always --style=numbers,grid {3} 2>/dev/null || cat {3}' \
+            --preview-window='right,65%,wrap')
+    [ -z "$pick" ] && { echo "  (nothing selected)" >&2; exit 0; }
+
+    path=$(printf '%s' "$pick" | cut -f3)
+    bat --paging=always --style=full "$path" 2>/dev/null || less "$path"
+
+# Plain list of all cheatsheets — scriptable, no fzf (SOURCE · title · path)
+[group('cheat')]
+cheat-list:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just -g cheat >/dev/null 2>&1 &  # warm the README cache in background
+    cache="$HOME/.cache/cheat/readme"
+    printf "\n  %-8s  %s\n" "SOURCE" "CHEATSHEET"
+    printf "  %-8s  %s\n" "------" "----------"
+    for f in "$cache"/*.md; do
+        [ -f "$f" ] && printf "  %-8s  %s\n" "README" "$(head -1 "$f" | sed 's/^#* *//')"
+    done
+    for f in "$HOME/zettelkasten/IT/cheatsheet"/*.md \
+             "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
+        [ -f "$f" ] && printf "  %-8s  %s\n" "zettel" "$(basename "$f" .md)"
+    done
+    printf "\n"
+
 # --- Git / repo sync --------------------------------------------------------
 
 # Pull dotfiles, show status — used by night-job
@@ -460,6 +551,45 @@ rgp pattern:
     rg --color=always --line-number -- "{{pattern}}" \
         | fzf --ansi --delimiter=: \
               --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2'
+
+# --- TIL: engineering growth loop -------------------------------------------
+# Capture: /til у Claude-сесії пише wiki/til-*.md у zettelkasten.
+# Review:  ці рецепти — читання, повторення (spaced repetition), пошук.
+
+TIL_DIR := env_var('HOME') / "zettelkasten/claude_code/wiki"
+
+# Browse all TILs: fzf + bat preview, Enter = open in nvim
+[group('til')]
+til:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ TIL browser ({{TIL_DIR}}/til-*.md) → fzf+bat..." >&2
+    pick=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -r \
+        | fzf --prompt="TIL → " --height=80% --border \
+              --preview='bat --color=always --style=plain {}' \
+              --preview-window='right,65%') || { echo "  (нічого не обрано)" >&2; exit 0; }
+    nvim "$pick"
+
+# Random TIL in the terminal — spaced repetition, add to shell startup or cron
+[group('til')]
+til-random:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -R | head -1)
+    if [ -z "$f" ]; then echo "  поки нема TIL — у Claude-сесії: /til <що вивчив>" >&2; exit 0; fi
+    echo "━━━ 🎲 random TIL: $(basename "$f") ━━━" >&2
+    bat --color=always --style=plain "$f"
+
+# Full-text search across TILs (rg + fzf + bat)
+[group('til')]
+til-grep pattern:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ rg '{{pattern}}' у TIL-ах..." >&2
+    rg --color=always --line-number -- "{{pattern}}" "{{TIL_DIR}}" --glob 'til-*.md' \
+        | fzf --ansi --delimiter=: \
+              --preview='bat --color=always --style=plain --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
 
 # --- Self-help --------------------------------------------------------------
