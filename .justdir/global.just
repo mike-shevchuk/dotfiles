@@ -597,6 +597,28 @@ rgp pattern:
               --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
 
+# П'ятнична stale-тріаж (self-review pro-note #1): кожен PR старший за
+# N днів без оновлень — merge / close / явний план. Мета: у п'ятницю 0 рядків.
+[group('git')]
+pr-stale days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ мої open PR, stale > {{days}}d (мета: порожньо)…" >&2
+    gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.createdAt | fromdateiso8601)) / 86400 | floor | tostring) + "d open"),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:55], .url] | @tsv' \
+        | { grep . || { echo "  ✅ 0 stale PR — тріаж чистий" >&2; exit 0; }; } \
+        | while IFS=$'\t' read -r n open stale title url; do
+            printf "  🔴 #%-5s %-9s %-10s %s\n     %s\n" "$n" "$open" "$stale" "$title" "$url"
+          done
+    echo "" >&2
+    echo "  Правило: merge / close / коментар-план — третього не дано." >&2
+
 # gh-dash: TUI-дашборд усіх PR/issues (0 токенів — без Claude). Розділи й
 # фільтри — стандартний конфіг gh-dash (~/.config/gh-dash/config.yml).
 [group('git')]
@@ -605,6 +627,36 @@ dash:
     set -euo pipefail
     echo "→ gh dash (q — вийти, ? — довідка)…" >&2
     gh dash
+
+# house-rules gate (self-review pro-note #2): ast-grep по ЗМІНЕНИХ python-файлах
+# vs merge-base — ловить машинно-перевірювані правила ДО пушу/рев'ю.
+# Патерни = найчастіші класи зі 123 feedback-пам'ятей.
+[group('git')]
+rules-check base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ house-rules gate: ast-grep по diff vs {{base}}…" >&2
+    mb=$(git merge-base {{base}} HEAD 2>/dev/null || echo {{base}})
+    files=$( { git diff --name-only "$mb"; git diff --name-only; } | sort -u | grep '\.py$' || true)
+    if [ -z "$files" ]; then echo "  ✅ python-файлів у diff нема" >&2; exit 0; fi
+    echo "  файлів: $(echo "$files" | wc -l | tr -d ' ')" >&2
+    fail=0
+    check() { # $1=pattern $2=label
+        local hits
+        hits=$(echo "$files" | xargs ast-grep run -p "$1" -l python 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+            echo ""; echo "  🔴 $2  (pattern: $1)"
+            echo "$hits" | sed 's/^/     /' | head -12
+            fail=1
+        fi
+    }
+    check 'getattr($O, $A)'   'getattr заборонений — прямий доступ до Pydantic-поля'
+    check 'hasattr($O, $A)'   'hasattr заборонений'
+    check '$T.scan($$$)'      'DynamoDB scan без дозволу — Query або GSI'
+    check 'print($$$)'        'debug print — прибери або logger'
+    check 'except $E: pass'   'проковтнутий exception — logger.exception обов'"'"'язковий'
+    if [ "$fail" -eq 0 ]; then echo "  ✅ house-rules чисто" >&2
+    else echo "" ; echo "  FAIL — виправ або усвідомлено проігноруй (звіт вище)" >&2; exit 1; fi
 
 # --- TIL: engineering growth loop -------------------------------------------
 # Capture: /til у Claude-сесії пише wiki/til-*.md у zettelkasten.
