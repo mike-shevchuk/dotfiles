@@ -85,6 +85,8 @@ def test_minimal_findings_meta_lang_only(tmp_path):
     page = Path(r.stdout.strip().splitlines()[-1]).read_text()
     assert "65/100" in page
     assert '<html lang="en"' in page          # meta.lang="eng" honored
+    # documented minimal-meta path is NOT stale — no false-positive warning
+    assert "застарілі" not in r.stderr
 
 
 def test_unknown_hunk_id_warns_and_hunks_json_written(tmp_path):
@@ -109,6 +111,10 @@ def test_unknown_hunk_id_warns_and_hunks_json_written(tmp_path):
     assert "невідомий hunk" in r.stderr
     hunks = json.loads((out / "hunks.json").read_text())
     assert hunks["files"][0]["hunks"][0]["id"] == "F0H0"
+    # «не буде показаний» must be TRUE: the orphaned finding is filtered out
+    # entirely, so its severity badge must not leak into the tree/card header
+    page = (out / "page.html").read_text()
+    assert "🟠" not in page
 
 
 def test_invalid_findings_json_readable_error(tmp_path):

@@ -82,3 +82,16 @@ def test_finding_source_escaped():
     assert "<img src=x onerror" not in html
     # Escaped form must be present
     assert "&lt;img" in html or "&#x3c;" in html
+
+def test_finding_severity_emoji_escaped():
+    """XSS check: severity_emoji is data-controlled (findings.json) and must be
+    HTML-escaped both in the finding badge and in the file-tree severity summary
+    (sev_by_file)."""
+    f = Finding(id="f1", layer="claude", source="claude-deep",
+                file="a/b.py", line=1, hunk="F0H0",
+                severity_emoji="<img src=x onerror=1>", severity_score=1,
+                problem={"ukr": "p"}, harm={"ukr": "h"}, fix={"ukr": "f"},
+                agrees_with=[], coach=None)
+    html = render_page(META, _files(), [f], None)
+    assert "<img src=x onerror" not in html
+    assert "&lt;img" in html or "&#x3c;" in html

@@ -1,11 +1,16 @@
 """Collect the diff to review: local branch (merge-base + uncommitted), two refs, or a PR."""
 from __future__ import annotations
 import subprocess
+import sys
 from pathlib import Path
 
 
-def _run(cmd: list[str], cwd: Path) -> str:
+def run_cmd(cmd: list[str], cwd: Path) -> str:
     return subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, check=True).stdout
+
+
+# transitional alias for internal call sites
+_run = run_cmd
 
 
 def pick_base(symbolic_ref_out: str | None, existing_refs: set[str]) -> str:
@@ -22,7 +27,11 @@ def collect_diff(repo: Path, pr: int | None = None,
     if pr is not None:
         text = _run(["gh", "pr", "diff", str(pr)], repo)
         return text, {"ref": f"pr{pr}", "base": "(github)", "mode": "pr"}
-    if base and head:
+    if base is not None or head is not None:
+        # refs intent stated explicitly — an empty value is a malformed request,
+        # not "fall back to local diff"
+        if not (base and head):
+            raise ValueError(f"порожній base/head: base={base!r} head={head!r}")
         text = _run(["git", "diff", f"{base}...{head}"], repo)
         return text, {"ref": head, "base": base, "mode": "refs"}
     # local: default-branch merge-base -> HEAD, uncommitted included (= prefix-v)
@@ -30,6 +39,8 @@ def collect_diff(repo: Path, pr: int | None = None,
         sym = _run(["git", "symbolic-ref", "refs/remotes/origin/HEAD"], repo)
     except subprocess.CalledProcessError:
         sym = None
+        print("⚠ git symbolic-ref origin/HEAD не вдався — вгадую базу з origin/main|master|develop",
+              file=sys.stderr)
     refs = set(_run(["git", "for-each-ref", "--format=%(refname:short)",
                      "refs/remotes"], repo).split())
     b = pick_base(sym, refs)

@@ -13,7 +13,13 @@ to the exact hunks, and open it.
 refs `<base> <head>` or a single integer `<PR#>` (no refs = current branch vs its
 merge-base, uncommitted included), and `--help`.
 
-## Step 0 — `--help`
+## Step 0 — `--reply` / `--help`
+If `--reply` is present: tell the user this mode is retired — comments from
+old-style pages were also saved to a downloaded `comments.md` (clipboard
+fallback of the legacy page); paste them here directly instead. The live
+comment→Claude loop returns as a real server-backed feature in Milestone 2.
+Then STOP.
+
 If `--help` or the bare word `help` is present: try `jb2b review-help`. That shell
 function currently fails in repos where `justfile.v2` isn't at the git root (rescue-serverless
 keeps it at `backend/src/lambdas/api/fast/justfile.v2`) — on `no justfile.v2 at <root>`,

@@ -17,6 +17,11 @@ _KIND = {"add": ("add", "+"), "del": ("del", "-"), "ctx": ("ctx", " ")}
 def slug(path: str) -> str:
     return re.sub(r"[^a-zA-Z0-9]+", "-", path).strip("-").lower()
 
+def _jb2b_review_cmd(ref: str = "") -> str:
+    """Single source for the copy-to-buffer run command (6 call sites across pages)."""
+    return f"jb2b review {ref}".strip()
+
+
 def _nvim_cmd(line: int, path: str) -> str:
     return f"nvim +{line} {path}"
 
@@ -36,7 +41,8 @@ def _t(d: dict | None, lang: str) -> str:
 def _first_new_line(f: FileDiff) -> int:
     for h in f.hunks:
         for l in h.lines:
-            if l.new_ln: return l.new_ln
+            if l.new_ln:
+                return h.first_new_line
     return 1
 
 def _tree_html(files: list[FileDiff], sev_by_file: dict[str, str]) -> str:
@@ -103,8 +109,8 @@ def _finding_html(x: Finding, lang: str) -> str:
     code = f'<div class="codeblk">{H.escape(x.fix.get("code",""))}</div>' if x.fix.get("code") else ""
     cmd = _nvim_cmd(x.line, x.file)
     return (f'<div class="find" onclick="{_cpy_attr(cmd)}">'
-            f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {x.severity_emoji} '
-            f'{x.severity_score}/100</span>{agrees}'
+            f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {H.escape(x.severity_emoji)} '
+            f'{H.escape(str(x.severity_score))}/100</span>{agrees}'
             f'<div style="margin-top:5px"><b>Проблема:</b> {H.escape(_t(x.problem, lang))}</div>'
             f'<div><b>Шкода:</b> {H.escape(_t(x.harm, lang))}</div>'
             f'<div><b>Фікс:</b> {H.escape(_t(x.fix, lang))}</div>{code}</div>')
@@ -115,7 +121,7 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
     sev_by_file = {}
     by_hunk: dict[str, list[Finding]] = {}
     for x in findings:
-        sev_by_file[x.file] = sev_by_file.get(x.file, "") + x.severity_emoji
+        sev_by_file[x.file] = sev_by_file.get(x.file, "") + H.escape(x.severity_emoji)
         by_hunk.setdefault(x.hunk, []).append(x)
     cards = []
     for f in files:
@@ -139,7 +145,7 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
     total_f = len(files)
     header = (f'<b>LGTM</b> <span class="pill">⎇ {H.escape(meta.ref)}</span>'
               f'<span class="pill">base: {H.escape(meta.base)}</span>'
-              f'<span class="pill" onclick="{_cpy_attr(f"jb2b review {meta.ref}")}">'
+              f'<span class="pill" onclick="{_cpy_attr(_jb2b_review_cmd(meta.ref))}">'
               f'📋 jb2b review</span>'
               f'<span class="pill" onclick="helpTg()">❓ довідка</span>'
               f'<span class="pill" style="margin-left:auto">{total_f}/{total_f} файлів · '
@@ -182,14 +188,13 @@ def _page_shell(title: str, lang_attr: str, body: str,
 CSS = r"""
   .rv * { box-sizing:border-box; }
   :root{--bg:#0d1117;--panel:#161b22;--panel2:#1c2330;--line:#30363d;--txt:#e6edf3;--dim:#8b949e;--acc:#58a6ff;--grn:#3fb950;--red:#f85149;--org:#d29922;--purple:#a371f7}
-  .rv{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.55}
+  .rv,.ix{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.55}
   .rv code{font-family:ui-monospace,monospace}
   .rv .codeblk{font-family:ui-monospace,monospace;font-size:.85em;white-space:pre;overflow-x:auto;line-height:1.45}
   .rv .ln{opacity:.35;display:inline-block;width:36px;text-align:right;margin-right:10px;user-select:none}
   .rv .del{background:rgba(248,81,73,.13);color:#ff9a94;display:block;padding:0 6px}
   .rv .add{background:rgba(63,185,80,.13);color:#7ee787;display:block;padding:0 6px}
   .rv .ctx{display:block;opacity:.7;padding:0 6px}
-  .rv .fold{display:block;background:rgba(88,166,255,.07);color:var(--acc);cursor:pointer;padding:2px 8px;text-align:center;font-size:.82em}
   .pill{background:var(--panel2);border:1px solid var(--line);border-radius:20px;padding:2px 10px;font-size:.8em;cursor:pointer}
   .pill:hover{border-color:var(--acc)}
   .rv .badge{padding:2px 9px;border-radius:20px;font-size:.78em;display:inline-block;margin:2px 3px 0 0}

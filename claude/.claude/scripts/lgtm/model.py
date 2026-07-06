@@ -29,6 +29,15 @@ class Hunk:
     @property
     def has_del(self) -> bool: return self.deletions > 0
 
+    @property
+    def first_new_line(self) -> int:
+        """First line number on the new side; never 0 (nvim/rg semantics) —
+        delete-only hunks have new_start=0, clamp to 1."""
+        for l in self.lines:
+            if l.new_ln:
+                return l.new_ln
+        return max(self.new_start, 1)
+
 @dataclass(frozen=True)
 class FileDiff:
     path: str
@@ -77,5 +86,16 @@ def save_findings(path: Path | str, meta: ReviewMeta, findings: list[Finding]) -
 def load_findings(path: Path | str) -> tuple[ReviewMeta, list[Finding]]:
     doc = json.loads(Path(path).read_text(encoding="utf-8"))
     meta = ReviewMeta(**doc["meta"])
-    findings = [Finding(**f) for f in doc.get("findings", [])]
+    findings = []
+    for f in doc.get("findings", []):
+        # normalize explicit JSON nulls at the load boundary (hand-/LLM-authored
+        # findings.json may carry them) so render never sees None where dict/list
+        # is expected
+        f = {**f,
+             "problem": f.get("problem") or {},
+             "harm": f.get("harm") or {},
+             "fix": f.get("fix") or {},
+             "agrees_with": f.get("agrees_with") or [],
+             "thread": f.get("thread") or []}
+        findings.append(Finding(**f))
     return meta, findings

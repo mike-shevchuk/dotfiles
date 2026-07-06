@@ -27,6 +27,36 @@ def test_review_meta_minimal_lang_only():
     assert meta.ref == "" and meta.base == "" and meta.mode == ""
     assert meta.repo == "" and meta.generated == ""
 
+def test_hunk_first_new_line_delete_only_never_zero():
+    """Delete-only hunk (`@@ -1,5 +0,0 @@`, no add/ctx lines) has no truthy new_ln
+    anywhere; first_new_line must fall back to max(new_start, 1) so nvim/rg
+    commands never target line 0."""
+    h = Hunk(hunk_id="F0H0", header="@@ -1,5 +0,0 @@", old_start=1, new_start=0,
+              lines=[DiffLine("del", 1, None, "a"), DiffLine("del", 2, None, "b")])
+    assert h.first_new_line == 1
+
+def test_hunk_first_new_line_uses_first_truthy_new_ln():
+    h = _hunk()
+    assert h.first_new_line == 1   # first line is ctx with new_ln=1
+
+def test_load_findings_null_tolerant(tmp_path):
+    """findings.json produced by hand (or an older Claude pass) may carry
+    explicit JSON nulls for problem/harm/fix/agrees_with/thread — load_findings
+    must normalize these to {}/[] at the load boundary instead of exploding."""
+    p = tmp_path / "findings.json"
+    p.write_text(json.dumps({
+        "meta": {"lang": "ukr"},
+        "findings": [{"id": "f1", "layer": "claude", "source": "claude-deep",
+                      "file": "a.py", "line": 1, "hunk": "F0H0",
+                      "severity_emoji": "🟠", "severity_score": 1,
+                      "problem": None, "harm": None, "fix": None,
+                      "agrees_with": None, "coach": None,
+                      "status": "open", "thread": None}]}))
+    meta, findings = load_findings(p)
+    f = findings[0]
+    assert f.problem == {} and f.harm == {} and f.fix == {}
+    assert f.agrees_with == [] and f.thread == []
+
 def test_findings_roundtrip(tmp_path):
     meta = ReviewMeta(ref="pr1651", base="(github)", mode="pr",
                       generated="2026-07-04 10:00", repo="rescue-serverless", lang="ukr")

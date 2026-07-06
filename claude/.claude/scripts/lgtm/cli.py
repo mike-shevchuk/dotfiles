@@ -2,7 +2,7 @@
 from __future__ import annotations
 import argparse
 import datetime
-import json  # noqa: F401 (used in except clause)
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -16,13 +16,6 @@ from lgtm.render import render_page
 
 def _log(msg: str) -> None:
     print(msg, file=sys.stderr)
-
-
-def _hunk_first_new_line(h) -> int:
-    for l in h.lines:
-        if l.new_ln:
-            return l.new_ln
-    return h.new_start
 
 
 def cmd_index(a: argparse.Namespace) -> int:
@@ -55,13 +48,18 @@ def cmd_review(a: argparse.Namespace) -> int:
             text, mdict = collect_diff(repo)
         out = Path(a.out) if a.out else repo / ".lgtm" / "reviews" / mdict["ref"].replace("/", "-")
         out.mkdir(parents=True, exist_ok=True)
+        old_diff = out / "diff.txt"
+        if (out / "findings.json").exists() and old_diff.exists() \
+                and old_diff.read_text(encoding="utf-8") != text:
+            _log("⚠ diff змінився після створення findings.json — hunk-прив'язки можуть "
+                 "бути зміщені; перегенеруй findings.json")
         (out / "diff.txt").write_text(text, encoding="utf-8")
         files = parse_unified_diff(text)
         _log(f"  OK: {len(files)} файлів, "
              f"+{sum(f.additions for f in files)} −{sum(f.deletions for f in files)}")
         hunks_doc = {"files": [{"path": f.path, "status": f.status,
                                 "hunks": [{"id": h.hunk_id, "header": h.header,
-                                          "first_new_line": _hunk_first_new_line(h)}
+                                          "first_new_line": h.first_new_line}
                                          for h in f.hunks]}
                                for f in files]}
         (out / "hunks.json").write_text(json.dumps(hunks_doc, ensure_ascii=False, indent=2),
@@ -81,18 +79,23 @@ def cmd_review(a: argparse.Namespace) -> int:
             # meta identity (ref/base/mode/repo/generated) is always fresh from this
             # run, not carried over from a possibly-stale findings.json — only lang
             # (and its explicit --lang override) is meta ownership findings.json keeps.
-            stale = [k for k, v in {"ref": mdict["ref"], "base": mdict["base"],
-                                    "mode": mdict["mode"], "repo": repo.name}.items()
-                     if getattr(fmeta, k) != v]
+            # Warn only when the file carried a REAL (non-empty) value that differs;
+            # the documented minimal-meta path (lang-only, "" defaults) is not stale.
+            fresh = {"ref": mdict["ref"], "base": mdict["base"],
+                     "mode": mdict["mode"], "repo": repo.name}
+            stale = [k for k, v in fresh.items()
+                     if getattr(fmeta, k) and getattr(fmeta, k) != v]
             if stale:
                 _log(f"  findings.json meta.{{{','.join(stale)}}} застарілі — "
                      f"перезаписано свіжими значеннями цього запуску")
             meta = ReviewMeta(ref=mdict["ref"], base=mdict["base"], mode=mdict["mode"],
                               generated=now, repo=repo.name, lang=lang)
             _log(f"  findings.json: {len(findings)} знахідок")
-            for f in findings:
-                if f.hunk not in known_hunks:
-                    _log(f"⚠ finding {f.id}: невідомий hunk {f.hunk!r} — не буде показаний")
+            unknown = [f for f in findings if f.hunk not in known_hunks]
+            for f in unknown:
+                _log(f"⚠ finding {f.id}: невідомий hunk {f.hunk!r} — не буде показаний")
+            if unknown:
+                findings = [f for f in findings if f.hunk in known_hunks]
         else:
             findings = []
             meta = ReviewMeta(ref=mdict["ref"], base=mdict["base"], mode=mdict["mode"],
@@ -103,6 +106,9 @@ def cmd_review(a: argparse.Namespace) -> int:
         _log(f"  page: {page}")
         print(page)
         return 0
+    except ValueError as e:
+        _log(f"✗ {e}")
+        return 1
     except subprocess.CalledProcessError as e:
         _log(f"✗ команда впала: {' '.join(e.cmd)}")
         if e.stderr:

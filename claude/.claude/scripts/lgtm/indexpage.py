@@ -15,8 +15,14 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from lgtm.collect import _run
+import sys
+
+from lgtm.collect import run_cmd as _run
 from lgtm.render import _cpy_attr, _page_shell
+
+
+def _log(msg: str) -> None:
+    print(msg, file=sys.stderr)
 
 MAX_BRANCHES = 8
 MAX_RECENTS = 5
@@ -59,10 +65,11 @@ class IndexEntry:
 def _collect_head(repo: Path, branch: str) -> list[IndexEntry]:
     try:
         n = len([l for l in _run(["git", "status", "--porcelain"], repo).splitlines() if l.strip()])
-    except _GIT_ERR:
+    except _GIT_ERR as e:
+        _log(f"⚠ git status не вдався ({e.__class__.__name__}) — секція «поточний стан» порожня")
         return []
     title = f"{n} uncommitted файлів" if n else "чисто — немає uncommitted змін"
-    return [IndexEntry(kind="head", ref=branch, title=title, cmd="jb2b review")]
+    return [IndexEntry(kind="head", ref=branch, title=title, cmd=_jb2b_review_cmd())]
 
 
 def _collect_prs(repo: Path) -> tuple[list[IndexEntry], set[str]]:
@@ -70,7 +77,9 @@ def _collect_prs(repo: Path) -> tuple[list[IndexEntry], set[str]]:
         out = _run(["gh", "pr", "list", "--author", "@me", "--state", "open", "--json",
                     "number,title,headRefName,additions,deletions"], repo)
         prs = json.loads(out)
-    except _GH_ERR:
+    except _GH_ERR as e:
+        _log(f"⚠ gh pr list не вдався ({e.__class__.__name__}) — секція PR порожня "
+             f"(перевір gh auth status)")
         return [], set()
     entries = []
     heads = set()
@@ -79,7 +88,7 @@ def _collect_prs(repo: Path) -> tuple[list[IndexEntry], set[str]]:
         heads.add(pr["headRefName"])
         entries.append(IndexEntry(kind="pr", ref=f"pr{number}", title=pr.get("title", ""),
                                   plus=pr.get("additions", 0), minus=pr.get("deletions", 0),
-                                  cmd=f"jb2b review {number}"))
+                                  cmd=_jb2b_review_cmd(str(number))))
     return entries, heads
 
 
@@ -87,7 +96,8 @@ def _collect_branches(repo: Path, skip: set[str], current: str) -> list[IndexEnt
     try:
         out = _run(["git", "for-each-ref", "--sort=-committerdate", "refs/heads",
                     "--format=%(refname:short)|%(committerdate:relative)"], repo)
-    except _GIT_ERR:
+    except _GIT_ERR as e:
+        _log(f"⚠ git for-each-ref не вдався ({e.__class__.__name__}) — секція гілок порожня")
         return []
     skip = skip | {current}
     entries = []
@@ -97,7 +107,7 @@ def _collect_branches(repo: Path, skip: set[str], current: str) -> list[IndexEnt
         name, when = line.split("|", 1)
         if name in skip:
             continue
-        entries.append(IndexEntry(kind="branch", ref=name, when=when, cmd=f"jb2b review {name}"))
+        entries.append(IndexEntry(kind="branch", ref=name, when=when, cmd=_jb2b_review_cmd(name)))
         if len(entries) >= MAX_BRANCHES:
             break
     return entries
@@ -119,7 +129,8 @@ def _collect_worktrees(repo: Path) -> tuple[list[IndexEntry], int]:
     The first block is always the main worktree (the repo itself) — skip it."""
     try:
         out = _run(["git", "worktree", "list", "--porcelain"], repo)
-    except _GIT_ERR:
+    except _GIT_ERR as e:
+        _log(f"⚠ git worktree list не вдався ({e.__class__.__name__}) — секція worktrees порожня")
         return [], 0
     blocks = out.strip("\n").split("\n\n") if out.strip() else []
     pairs = []
@@ -133,7 +144,7 @@ def _collect_worktrees(repo: Path) -> tuple[list[IndexEntry], int]:
         if branch:
             pairs.append((path or "", branch))
     kept, hidden = _filter_worktrees(pairs)
-    entries = [IndexEntry(kind="worktree", ref=branch, title=path, cmd=f"jb2b review {branch}")
+    entries = [IndexEntry(kind="worktree", ref=branch, title=path, cmd=_jb2b_review_cmd(branch))
                for path, branch in kept]
     return entries, hidden
 
@@ -144,19 +155,23 @@ def _collect_recents(repo: Path) -> list[IndexEntry]:
         return []
     try:
         dirs = [d for d in reviews_dir.iterdir() if d.is_dir()]
-    except (OSError, FileNotFoundError):
+    except OSError as e:
+        _log(f"⚠ не вдалося прочитати {reviews_dir} ({e.__class__.__name__}) — "
+             f"секція «нещодавні» порожня")
         return []
     dirs.sort(key=lambda d: d.stat().st_mtime, reverse=True)
     entries = []
     for d in dirs[:MAX_RECENTS]:
-        entries.append(IndexEntry(kind="recent", ref=d.name, cmd=f"jb2b review {d.name}"))
+        entries.append(IndexEntry(kind="recent", ref=d.name, cmd=_jb2b_review_cmd(d.name)))
     return entries
 
 
 def collect_entries(repo: Path) -> tuple[list[IndexEntry], dict[str, str]]:
     try:
         current = _run(["git", "branch", "--show-current"], repo).strip() or "HEAD"
-    except _GIT_ERR:
+    except _GIT_ERR as e:
+        _log(f"⚠ git branch --show-current не вдався ({e.__class__.__name__}) — "
+             f"вважаю current=HEAD (фільтр гілок може змінитись)")
         current = "HEAD"
     entries = _collect_head(repo, current)
     prs, pr_heads = _collect_prs(repo)
@@ -224,7 +239,7 @@ def render_index(repo_name: str, entries: list[IndexEntry],
 
 
 IX_CSS = r"""
-  .ix{background:var(--bg);color:var(--txt);border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:clamp(13px,.5vw + 11px,15px);line-height:1.5}
+  /* container chrome shared with .rv — see render.py CSS (.rv,.ix{...}) */
   .ix code{font-family:ui-monospace,monospace}
   .ix .search{display:flex;align-items:center;gap:8px;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:7px 12px;flex:1;min-width:200px}
   .ix .search input{flex:1;background:transparent;border:none;outline:none;color:var(--txt);font-family:ui-monospace,monospace;font-size:1em}

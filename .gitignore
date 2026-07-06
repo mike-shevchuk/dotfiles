@@ -22,3 +22,4 @@ hammerspoon/.hammerspoon/.env
 
 # /review-html skill artifacts (generated HTML, explanations, comments)
 .claude-review/
+__pycache__/
