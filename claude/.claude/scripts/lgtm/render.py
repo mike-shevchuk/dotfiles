@@ -131,7 +131,9 @@ def _finding_html(x: Finding, lang: str, vid: str = "") -> str:
     ask = (f'<span class="cico ask-live" style="display:none" title="запитати Claude '
            f'про цю знахідку" onclick="event.stopPropagation();'
            f'askFor(\'{vid}\',{_js_str_attr(x.id)})">💬</span>') if vid else ""
-    return (f'<div class="find" data-fid="{H.escape(x.id, quote=True)}" '
+    # bugfix: .find.coach / .find.ok CSS existed but the class was never applied
+    extra = " coach" if x.layer == "coach" else (" ok" if x.severity_score <= 5 else "")
+    return (f'<div class="find{extra}" data-fid="{H.escape(x.id, quote=True)}" '
             f'onclick="{_cpy_attr(cmd)}">'
             f'<span class="badge {cls}">{emoji} {H.escape(x.source)} · {H.escape(x.severity_emoji)} '
             f'{H.escape(str(x.severity_score))}/100</span>{agrees}{ask}'
@@ -139,8 +141,42 @@ def _finding_html(x: Finding, lang: str, vid: str = "") -> str:
             f'<div><b>Шкода:</b> {H.escape(_t(x.harm, lang))}</div>'
             f'<div><b>Фікс:</b> {H.escape(_t(x.fix, lang))}</div>{code}</div>')
 
+def _coach_panel(findings: list[Finding], stats: dict | None, lang: str) -> str:
+    """🎓 right column (design §6): per-file patterns from THIS codebase +
+    progress between reviews. Empty string when there is nothing to show."""
+    coach = [x for x in findings if x.layer == "coach" or x.coach]
+    cards = []
+    for x in coach:
+        c = x.coach or {}
+        ref = c.get("ref", "")
+        read = c.get("read", "")
+        parts = [f'<div class="ccard" onclick="go(\'f-{slug(x.file)}\')">'
+                 f'<b>{H.escape(c.get("pattern") or _t(x.problem, lang)[:80])}</b>']
+        if ref:
+            parts.append(f'<div class="cref" onclick="event.stopPropagation();'
+                         f'{_cpy_attr(_nvim_cmd(1, ref))}">📋 {H.escape(ref)}</div>')
+        if read:
+            parts.append(f'<div style="color:var(--dim)">📖 {H.escape(read)}</div>')
+        parts.append("</div>")
+        cards.append("".join(parts))
+    stat_html = ""
+    if stats:
+        rows = []
+        for pat, pts in stats.items():
+            counts = [c for _, c in pts]
+            mark = " 🎉" if counts and counts[-1] == 0 and any(counts[:-1]) else ""
+            rows.append(f'<div class="srow"><span>{H.escape(pat)}</span>'
+                        f'<span>{" → ".join(str(c) for c in counts)}{mark}</span></div>')
+        stat_html = ('<div class="label" style="margin-top:12px">📈 прогрес між рев\'ю</div>'
+                     + "".join(rows))
+    if not cards and not stat_html:
+        return ""
+    return (f'<div class="coach"><div class="label">🎓 coach</div>'
+            f'{"".join(cards)}{stat_html}</div>')
+
 def render_page(meta: ReviewMeta, files: list[FileDiff],
-                findings: list[Finding], summary: dict | None) -> str:
+                findings: list[Finding], summary: dict | None,
+                stats: dict | None = None) -> str:
     lang = meta.lang
     sev_by_file = {}
     by_hunk: dict[str, list[Finding]] = {}
@@ -189,10 +225,13 @@ def render_page(meta: ReviewMeta, files: list[FileDiff],
     </ul>
   </div>
 </div>"""
+    coach_html = _coach_panel(findings, stats, lang)
+    lay_cls = "lay with-coach" if coach_html else "lay"
     body = (f'<div class="rv">'
             f'<div class="topbar">{header}</div>'
-            f'<div class="lay"><div class="nav">{_tree_html(files, sev_by_file)}</div>'
-            f'<div class="center">{summary_html}{"".join(cards)}</div></div>'
+            f'<div class="{lay_cls}"><div class="nav">{_tree_html(files, sev_by_file)}</div>'
+            f'<div class="center">{summary_html}{"".join(cards)}</div>'
+            f'{coach_html}</div>'
             f'</div>{help_overlay}')
     return _page_shell(f"LGTM · {H.escape(meta.ref)} · {H.escape(meta.repo)}",
                         'uk' if lang == 'ukr' else 'en', body)
@@ -260,6 +299,14 @@ CSS = r"""
   .rv .split2{display:grid;grid-template-columns:1fr 1fr}
   .rv .split2>div{min-width:0;border-right:1px solid var(--line)}
   @media(max-width:800px){.rv .split2{grid-template-columns:1fr}}
+  /* coach panel (design §6 right column) */
+  .rv .lay.with-coach{grid-template-columns:minmax(250px,320px) minmax(0,1fr) minmax(220px,280px)}
+  .rv .coach{border-left:1px solid var(--line);background:var(--panel);padding:12px;overflow:auto;position:sticky;top:0;align-self:start;max-height:100vh}
+  .rv .ccard{border:1px solid rgba(210,153,34,.4);background:rgba(210,153,34,.07);border-radius:10px;padding:8px 11px;margin:8px 0;cursor:pointer;font-size:.9em}
+  .rv .ccard:hover{border-color:var(--org)}
+  .rv .cref{font-family:ui-monospace,monospace;font-size:.85em;color:var(--acc);cursor:pointer}
+  .rv .srow{display:flex;justify-content:space-between;gap:8px;font-size:.85em;padding:3px 0;border-bottom:1px dashed var(--line)}
+  @media(max-width:1100px){.rv .lay.with-coach{grid-template-columns:minmax(250px,320px) minmax(0,1fr)}.rv .coach{grid-column:1/-1;border-left:none;border-top:1px solid var(--line);position:static;max-height:none}}
   /* live loop (design §3) */
   .rv .lthread{padding:0 12px}
   .rv .msg{border:1px solid var(--line);border-radius:10px;padding:7px 11px;margin:7px 0;max-width:92%;white-space:pre-wrap}

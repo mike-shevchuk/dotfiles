@@ -101,8 +101,14 @@ def cmd_review(a: argparse.Namespace) -> int:
             meta = ReviewMeta(ref=mdict["ref"], base=mdict["base"], mode=mdict["mode"],
                               generated=now, repo=repo.name, lang=a.lang or "ukr")
             _log("  findings.json відсутній — рендерю без знахідок")
+        # coach progress (design §4): aggregate review-stats.jsonl into the page
+        from lgtm.stats import aggregate, load_series
+        series = load_series(repo)
+        stats = aggregate(series) if series else None
+        if stats:
+            _log(f"  coach: прогрес по {len(stats)} патернах ({len(series)} рев'ю)")
         page = out / "page.html"
-        page.write_text(render_page(meta, files, findings, None), encoding="utf-8")
+        page.write_text(render_page(meta, files, findings, None, stats), encoding="utf-8")
         _log(f"  page: {page}")
         print(page)
         return 0
@@ -114,6 +120,15 @@ def cmd_review(a: argparse.Namespace) -> int:
         if e.stderr:
             _log(f"  stderr: {e.stderr.strip()}")
         return 1
+
+
+def cmd_stats(a: argparse.Namespace) -> int:
+    """Coach progress across the last N reviews (review-stats.jsonl)."""
+    from lgtm.stats import load_series, render_progress, stats_path
+    repo = Path(a.repo).resolve()
+    _log(f"→ coach-статистика {stats_path(repo)} (останні {a.last})…")
+    print(render_progress(load_series(repo, a.last)))
+    return 0
 
 
 def cmd_serve(a: argparse.Namespace) -> int:
@@ -151,6 +166,10 @@ def main() -> int:
     i = sub.add_parser("index")
     i.add_argument("--repo", default=".")
     i.set_defaults(fn=cmd_index)
+    st = sub.add_parser("stats")
+    st.add_argument("--repo", default=".")
+    st.add_argument("--last", type=int, default=5)
+    st.set_defaults(fn=cmd_stats)
     s = sub.add_parser("serve")
     s.add_argument("--repo", default=".")
     s.add_argument("--dir", help="явний шлях до .lgtm/reviews/<ref>/ (дефолт: найсвіжіший)")

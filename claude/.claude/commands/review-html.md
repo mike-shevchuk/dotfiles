@@ -14,11 +14,10 @@ refs `<base> <head>` or a single integer `<PR#>` (no refs = current branch vs it
 merge-base, uncommitted included), and `--help`.
 
 ## Step 0 — `--reply` / `--help`
-If `--reply` is present: tell the user this mode is retired — comments from
-old-style pages were also saved to a downloaded `comments.md` (clipboard
-fallback of the legacy page); paste them here directly instead. The live
-comment→Claude loop returns as a real server-backed feature in Milestone 2.
-Then STOP.
+If `--reply` is present: tell the user this mode is retired — the live
+comment→Claude loop now EXISTS as a server-backed feature: run
+`jb2b review-serve` (SSE server) + `/lgtm-listen` (Claude watcher), then
+comment right on the page. Then STOP.
 
 If `--help` or the bare word `help` is present: try `jb2b review-help`. That shell
 function currently fails in repos where `justfile.v2` isn't at the git root (rescue-serverless
@@ -76,6 +75,31 @@ findings-less page — expected, not an error.
      meta fields; the block above is the minimal shape that matters.
    - No verified findings? Write `"findings": []` — an empty array is a valid result,
      not a failure.
+5. **Coach layer (design §4):** where a finding maps to a house-rule pattern, fill its
+   `coach` field: `{"pattern": "<slug>", "ref": "<existing good example file:line>",
+   "read": "<what to read>"}`. Standalone lessons (no bug, just a pattern worth
+   knowing) go as separate findings with `"layer": "coach"`.
+
+## Step 2.5 — append the coach stats line (progress between reviews)
+
+Append ONE line to `$REPO/.lgtm/review-stats.jsonl` (create if missing) counting
+house-rule patterns among THIS review's findings — **zeroes included**, they are the
+win being tracked:
+
+```bash
+python3 - "$REPO/.lgtm/review-stats.jsonl" <<'PY'
+import json, sys, time
+line = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "ref": "<OUT basename, e.g. pr1700>",
+        "patterns": {  # count per pattern in THIS review; keep keys stable:
+            "two-sources-of-truth": 0, "inline-import": 0, "getattr-hasattr": 0,
+            "dynamodb-scan": 0, "truthiness-vs-presence": 0, "missing-log-exception": 0,
+            "string-literal-vs-enum": 0}}
+open(sys.argv[1], "a", encoding="utf-8").write(json.dumps(line, ensure_ascii=False) + "\n")
+PY
+```
+
+Add new pattern keys when a new house rule shows up; `lgtm stats` and the page's
+🎓 panel aggregate them automatically (`python3 -m lgtm.cli stats --repo "$REPO"`).
 
 ## Step 3 — re-render and open
 Re-run the **exact same command** from Step 1 (same `--repo`/`--pr`/`--refs`, same
@@ -86,7 +110,8 @@ findings inline, pinned to their hunks. Open the printed page path (`open` on ma
 you directly in this session (no clipboard loop).
 
 ## Notes
-- `--reply` / the live comment→Claude loop is **removed** here — it returns as a real
-  server-backed live loop in Milestone 2 (SSE, inbox/outbox), not as a static rebuild.
+- The live comment→Claude loop is a separate, real feature now:
+  `jb2b review-serve` (LAN SSE server) + `/lgtm-listen` (watcher). This command
+  only builds the page; suggest the pair when the user wants to discuss inline.
 - Engine lives in `~/dotfiles/claude/.claude/scripts/lgtm/` (`cli.py`, `render.py`,
   `diffparse.py`, …). Full contract: `rescue-serverless/.lgtm/design.md`.

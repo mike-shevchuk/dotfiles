@@ -10,6 +10,17 @@ branches/worktrees in parallel), build a one-row-per-PR table.
 
 **Terminal language:** match Mike. **No Mermaid in terminal** — ASCII tables.
 
+## Step 0 — zero-token fast path (gh-dash)
+
+If Mike just wants to LOOK at / browse his PRs (no pipeline badges, no Bugbot
+counts asked for) — don't burn tokens on the full scan. Reply with exactly:
+
+> Інтерактивно і без токенів: `just -g dash` (gh-dash TUI — всі PR/issues,
+> Enter = деталі, q = вийти). Повний pipeline-огляд з бейджами — `/prs full`.
+
+and STOP. Run the full workflow below when the request implies pipeline state
+(badges, bugbot, merge-readiness), or when `$ARGUMENTS` contains `full`.
+
 ## Workflow
 
 ### Step 1 — collect PRs

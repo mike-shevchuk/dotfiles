@@ -543,6 +543,50 @@ pickdir:
     fd --type d --hidden --exclude .git --exclude node_modules . "$HOME" \
         | fzf --prompt="cd → " --height=50% --border --preview='ls -la {}'
 
+# ast-grep: structural (AST-aware) code search — matches SYNTAX, not text.
+# $CODE-patterns with metavariables: $X = one node, $$$ = any number of nodes.
+# Unlike rg, ніколи не спрацює на коментарі/рядку — тільки на реальному коді.
+[group('search')]
+astg pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} ━━━" >&2
+    ast-grep run -p '{{pattern}}' -l {{lang}} .
+
+# ast-grep interactive: results → fzf + bat preview, Enter = nvim at the line
+[group('search')]
+astgp pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} --json ━━━" >&2
+    pick=$(ast-grep run -p '{{pattern}}' -l {{lang}} --json=compact . \
+        | jq -r '.[] | "\(.file):\(.range.start.line + 1): \(.lines | split("\n")[0])"' \
+        | fzf --prompt='ast-grep → ' --height=70% --border --delimiter=: \
+              --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2') || exit 0
+    nvim "+$(echo "$pick" | cut -d: -f2)" "$(echo "$pick" | cut -d: -f1)"
+
+# ast-grep cheatsheet — house-rule hunts for rescue-serverless
+[group('search')]
+astg-help:
+    @echo 'ast-grep — структурний пошук по AST (не текст — синтаксис)'
+    @echo ''
+    @echo '  СУТЬ: $X = будь-який ОДИН вузол, $$$ = скільки завгодно вузлів.'
+    @echo '  rg знайде getattr і в коментарі/рядку — ast-grep тільки РЕАЛЬНИЙ виклик.'
+    @echo ''
+    @echo '  Полювання на house-rule порушення:'
+    @echo '    just -g astg "getattr($O, $A)"            # заборонений getattr'
+    @echo '    just -g astg "hasattr($O, $A)"            # заборонений hasattr'
+    @echo '    just -g astg "$T.scan($$$)"               # DynamoDB scan без дозволу'
+    @echo '    just -g astg "print($$$)"                 # debug-leftover print'
+    @echo '    just -g astg "except $E: pass"            # проковтнутий exception'
+    @echo ''
+    @echo '  Рефакторинг з заміною (spot-check перед --update-all):'
+    @echo '    ast-grep run -p "$X.format($$$)" -r "f-string тут" -l python .'
+    @echo ''
+    @echo '  Інтерактивно: just -g astgp "<pattern>"     # fzf+bat, Enter → nvim'
+    @echo '  Мови: -l python|ts|tsx|js|rust|go|lua ...'
+
 # rg + bat preview from the current dir
 [group('search')]
 rgp pattern:
@@ -552,6 +596,15 @@ rgp pattern:
         | fzf --ansi --delimiter=: \
               --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
+
+# gh-dash: TUI-дашборд усіх PR/issues (0 токенів — без Claude). Розділи й
+# фільтри — стандартний конфіг gh-dash (~/.config/gh-dash/config.yml).
+[group('git')]
+dash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ gh dash (q — вийти, ? — довідка)…" >&2
+    gh dash
 
 # --- TIL: engineering growth loop -------------------------------------------
 # Capture: /til у Claude-сесії пише wiki/til-*.md у zettelkasten.
@@ -591,6 +644,19 @@ til-grep pattern:
         | fzf --ansi --delimiter=: \
               --preview='bat --color=always --style=plain --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
+
+# TIL cheatsheet
+[group('til')]
+til-help:
+    @echo "TIL — конвеєр інженерного росту (capture → review → repeat)"
+    @echo ""
+    @echo "  /til <урок>        # у Claude-сесії: перевірена лекція → wiki/til-*.md"
+    @echo "  /til               # без арг.: Claude майнить уроки з поточної сесії"
+    @echo "  just -g til        # fzf+bat браузер, Enter → nvim"
+    @echo "  just -g til-random # випадковий TIL (spaced repetition; 1/день у новому терміналі)"
+    @echo "  just -g til-grep X # повнотекстовий пошук"
+    @echo ""
+    @echo "  Файли: ~/zettelkasten/claude_code/wiki/til-YYYY-MM-DD-<slug>.md"
 
 # --- Self-help --------------------------------------------------------------
 
