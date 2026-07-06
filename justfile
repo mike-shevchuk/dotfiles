@@ -42,6 +42,10 @@ migrate:
     #!/usr/bin/env bash
     set -euo pipefail
     dotfiles_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    # destructive (mass rm of symlinks) — gum confirm when available
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Видалити ВСІ ручні symlinks у \$HOME, що вказують у dotfiles?" || { echo "скасовано"; exit 0; }
+    fi
     echo "Removing manual symlinks pointing into dotfiles..."
     count=0
     while IFS= read -r -d '' link; do

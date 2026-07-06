@@ -619,6 +619,44 @@ pr-stale days="7":
     echo "" >&2
     echo "  Правило: merge / close / коментар-план — третього не дано." >&2
 
+# Інтерактивна тріаж stale PR-ів (gum): по кожному — merge / план / close / skip.
+# П'ятничний ритуал з pr-stale, але з діями замість списку. Merge = --merge
+# (конвенція репо — merge commits). Всі дії робиш ТИ — з confirm-ами.
+[group('git')]
+pr-stale-fix days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    echo "→ інтерактивна тріаж stale > {{days}}d…" >&2
+    list=$(gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:60], .url] | @tsv')
+    if [ -z "$list" ]; then gum style --foreground 2 --bold "✅ 0 stale PR — тріаж чистий"; exit 0; fi
+    while IFS=$'\t' read -r n age title url; do
+        gum style --border rounded --padding "0 1" --border-foreground 3 "#$n · $age" "$title"
+        act=$(gum choose --header "Що робимо з #$n?" \
+            "🌐 відкрити в браузері" "✅ merge" "📝 план-коментар" "❌ close" "⏭ skip") || act="⏭ skip"
+        case "$act" in
+            🌐*) echo "  → open $url" >&2; open "$url" ;;
+            ✅*) gum confirm "Merge #$n (--merge)?" \
+                    && { echo "  ━━━ gh pr merge $n --merge ━━━" >&2; gh pr merge "$n" --merge; } ;;
+            📝*) plan=$(gum write --header "План по #$n (порожньо = скасувати)" \
+                        --placeholder "що і коли зробиш; це піде коментарем у PR") || plan=""
+                 if [ -n "$plan" ]; then
+                     echo "  ━━━ gh pr comment $n --body <план> ━━━" >&2
+                     gh pr comment "$n" --body "$plan" >/dev/null && echo "  OK — коментар запощено" >&2
+                 fi ;;
+            ❌*) gum confirm "Close #$n?" \
+                    && { echo "  ━━━ gh pr close $n ━━━" >&2; gh pr close "$n"; } ;;
+            *) echo "  ⏭ пропущено" >&2 ;;
+        esac
+    done <<< "$list"
+    echo "" >&2; just -g pr-stale {{days}}
+
 # gh-dash: TUI-дашборд усіх PR/issues (0 токенів — без Claude). Розділи й
 # фільтри — стандартний конфіг gh-dash (~/.config/gh-dash/config.yml).
 [group('git')]
@@ -697,6 +735,34 @@ til-grep pattern:
               --preview='bat --color=always --style=plain --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
 
+# Новий TIL з терміналу (gum) — без Claude: title → topic → body → нотатка
+# з vault-frontmatter + рядок у log.md. Для перевірених технічних фактів
+# краще /til (Claude верифікує) — це швидкий ручний шлях.
+[group('til')]
+til-new:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    title=$(gum input --header "TIL — що вивчив? (один рядок)" --width 80) || exit 0
+    [ -z "$title" ] && exit 0
+    topic=$(gum choose --header "Топік:" \
+        "topic/backend" "topic/aws" "topic/python" "topic/devops" \
+        "topic/tooling" "topic/dotfiles" "topic/git" "topic/llm") || topic="topic/misc"
+    body=$(gum write --header "Тіло (Що вивчив / Чому так / Приклад / Як застосовувати)" \
+        --width 100 --height 12) || body=""
+    slug=$(echo "$title" | iconv -t ascii//TRANSLIT 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+    [ -z "$slug" ] && slug="note-$(date +%H%M%S)"
+    d=$(date +%F)
+    f="{{TIL_DIR}}/til-$d-$slug.md"
+    {
+        printf -- '---\ntags: [wiki, til, %s]\ntype: wiki\nproject: misc\ndate: %s\naliases: []\n---\n\n' "$topic" "$d"
+        printf '# TIL — %s\n\n%s\n\n## Related\n- [[MOC-wiki]]\n' "$title" "$body"
+    } > "$f"
+    echo "- [[wiki/til-$d-$slug]] \`til\` — $title  $d" >> "$HOME/zettelkasten/claude_code/log.md"
+    gum style --border rounded --padding "0 1" --border-foreground 2 \
+        "✅ $f" "переглянути: just -g til · повторення: til-random"
+
 # TIL cheatsheet
 [group('til')]
 til-help:
@@ -704,6 +770,7 @@ til-help:
     @echo ""
     @echo "  /til <урок>        # у Claude-сесії: перевірена лекція → wiki/til-*.md"
     @echo "  /til               # без арг.: Claude майнить уроки з поточної сесії"
+    @echo "  just -g til-new    # швидкий TIL з терміналу (gum, без Claude)"
     @echo "  just -g til        # fzf+bat браузер, Enter → nvim"
     @echo "  just -g til-random # випадковий TIL (spaced repetition; 1/день у новому терміналі)"
     @echo "  just -g til-grep X # повнотекстовий пошук"
