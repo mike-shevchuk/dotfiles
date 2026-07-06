@@ -1,3 +1,10 @@
+---
+description: "Toggle English coaching for the current session (📚 block after replies). Default at session start: OFF"
+argument-hint: "[on|off|status]"
+---
+
+# English coaching
+
 Toggle English coaching for the current session. Default at session start: OFF.
 
 Usage: /coaching [on|off|status]

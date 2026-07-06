@@ -1,3 +1,10 @@
+---
+description: "Toggle auto-mode for tool permissions (no confirmation prompts) — flips permissions.defaultMode in settings.local.json"
+argument-hint: "[on|off|status]"
+---
+
+# Auto-mode
+
 Toggle auto-mode for tool permissions (no confirmation prompts).
 
 Usage: /auto-mode [on|off|status]

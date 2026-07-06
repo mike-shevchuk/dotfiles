@@ -1,3 +1,10 @@
+---
+description: "Manually trigger a scheduled task (standup | digest | reddit | all) to run immediately via RemoteTrigger"
+argument-hint: "<standup|digest|reddit|all>"
+---
+
+# Trigger scheduled task
+
 Manually trigger a scheduled task to run immediately.
 
 Usage: /trigger <task>
