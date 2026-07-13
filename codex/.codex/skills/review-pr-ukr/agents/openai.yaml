@@ -1,0 +1,4 @@
+interface:
+  display_name: "review pr ukr"
+  short_description: "Run the review pr ukr workflow"
+  default_prompt: "Use $review-pr-ukr for this task."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "check pr"
+  short_description: "Run the check pr workflow"
+  default_prompt: "Use $check-pr for this task."

@@ -30,6 +30,7 @@ just sync
 | Package | Stows to | What |
 |---------|----------|------|
 | `claude` | `~/.claude/` | Claude Code settings, hooks, sounds, statusline |
+| `codex` | `~/.codex/` | Codex settings and migrated command prompts |
 | `zsh` | `~/.zshrc`, `~/.zsh_zinit`, `~/.zsh_spaces/` | ZSH config, zinit plugins, spaces (job/ssh modules) |
 | `tmux` | `~/.tmux.conf`, `~/.tmux.conf.local` | tmux base config + local overrides with TPM |
 | `kitty` | `~/.config/kitty/` | Kitty terminal config |

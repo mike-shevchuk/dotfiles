@@ -2,6 +2,7 @@ import '.justdir/stow.just'
 import '.justdir/health.just'
 import '.justdir/mise.just'
 import '.justdir/claude.just'
+import '.justdir/codex.just'
 import '.justdir/sync.just'
 
 # Default recipe: launch the fzf-powered recipe picker (`just help`)
@@ -9,7 +10,7 @@ default:
     @just help
 
 # Setup core packages on a new system
-setup: install-deps claude zsh tmux kitty lz yazi claudes-link hooks-install install-global
+setup: install-deps claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
     @echo "Core packages stowed successfully"
 
 # Install stow if missing
