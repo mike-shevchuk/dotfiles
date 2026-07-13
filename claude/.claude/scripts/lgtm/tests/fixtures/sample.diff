@@ -1,0 +1,28 @@
+diff --git a/backend/app.py b/backend/app.py
+index 1111111..2222222 100644
+--- a/backend/app.py
++++ b/backend/app.py
+@@ -10,4 +10,5 @@ def handler():
+ ctx1
+-old_line
++new_line
++added_line
+ ctx2
+@@ -30,2 +31,2 @@ def second():
+-removed
++replaced
+diff --git a/backend/newfile.py b/backend/newfile.py
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/backend/newfile.py
+@@ -0,0 +1,2 @@
++first
++second
+diff --git a/old/dead.py b/old/dead.py
+deleted file mode 100644
+index 4444444..0000000
+--- a/old/dead.py
++++ /dev/null
+@@ -1,1 +0,0 @@
+-gone

@@ -4,6 +4,18 @@
 claude:
     stow --no-folding --adopt --restow -t ~ claude
 
+# Stow Codex configuration into ~/.codex
+codex:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    config="$HOME/.codex/config.toml"
+    if [ -f "$config" ] && [ ! -L "$config" ]; then
+        backup="$config.pre-stow-$(date +%Y%m%d-%H%M%S)"
+        mv "$config" "$backup"
+        echo "Backed up existing Codex config to $backup"
+    fi
+    stow --no-folding --restow -t ~ codex
+
 # Zsh config, plugins, spaces
 zsh:
     stow --no-folding --adopt --restow -t ~ zsh
@@ -18,6 +30,7 @@ tmux:
         tpm=tmux-plugins/tpm
         tmux-yank=tmux-plugins/tmux-yank
         tmux-sidebar=tmux-plugins/tmux-sidebar
+        tubular-tmux=dabstractor/tubular-tmux
     "
     # Disabled plugins (uncomment in .tmux.conf.local to re-enable):
     #   tmux-resurrect=tmux-plugins/tmux-resurrect  — session save/restore across reboots
@@ -90,7 +103,7 @@ hyperland:
     stow --no-folding --adopt --restow -t ~ hyperland
 
 # Stow all packages
-all: claude zsh tmux kitty lz pnv tnv yazi todoist fonts hammerspoon hyperland
+all: claude codex zsh tmux kitty lz pnv tnv yazi todoist fonts hammerspoon hyperland
     @echo "All packages stowed"
 
 # Unstow a package: just remove <pkg>

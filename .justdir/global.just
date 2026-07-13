@@ -26,6 +26,97 @@
 default:
     @just -g --choose
 
+# --- Cheatsheets ------------------------------------------------------------
+#
+# ONE fuzzy entry point for every cheatsheet on the machine. Sources:
+#   1. ~/dotfiles/README.md   — each `## …` section, split into the cache
+#   2. ~/zettelkasten/IT/cheatsheet/**/*.md
+#   3. ~/zettelkasten/claude_code/**/*cheatsheet*.md
+# Nothing is moved: README sections are exploded into ~/.cache/cheat/readme/
+# only when README is newer than the cache. fzf shows "SOURCE  title",
+# previews with bat, Enter opens the full sheet in the pager.
+#
+#   just -g cheat            → browse everything
+#   just -g cheat tmux       → pre-filter the fzf query to "tmux"
+#   just -g cheat-list       → plain list of all sheets (no fzf, scriptable)
+# To add a sheet: drop any *.md into ~/zettelkasten/IT/cheatsheet/ — done.
+
+# Fuzzy-browse every cheatsheet (README sections + zettelkasten notes)
+[group('cheat')]
+cheat query="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cache="$HOME/.cache/cheat/readme"
+    readme="$HOME/dotfiles/README.md"
+    mkdir -p "$cache"
+
+    # Rebuild the README split only when README changed (mtime compare)
+    marker="$cache/.src-mtime"
+    src_mtime=$(stat -f %m "$readme" 2>/dev/null || stat -c %Y "$readme" 2>/dev/null || echo 0)
+    if [ "$(cat "$marker" 2>/dev/null || echo 0)" != "$src_mtime" ]; then
+        echo "→ indexing README sections into $cache ..." >&2
+        rm -f "$cache"/*.md
+        awk -v dir="$cache" '
+            /^## / {
+                n++; title=$0; sub(/^## /,"",title)
+                slug=tolower(title); gsub(/[^a-z0-9]+/,"-",slug); gsub(/^-|-$/,"",slug)
+                cur=sprintf("%s/%02d-%s.md", dir, n, slug)
+            }
+            cur { print > cur }
+        ' "$readme"
+        echo "$src_mtime" > "$marker"
+    fi
+
+    # Build the index:  "SOURCE\tTITLE\tPATH"  (tab-delimited)
+    build_index() {
+        for f in "$cache"/*.md; do
+            [ -f "$f" ] || continue
+            t=$(head -1 "$f" | sed 's/^#* *//')
+            printf 'README\t%s\t%s\n' "$t" "$f"
+        done
+        for f in "$HOME/zettelkasten/IT/cheatsheet"/**/*.md \
+                 "$HOME/zettelkasten/IT/cheatsheet"/*.md; do
+            [ -f "$f" ] || continue
+            printf 'zettel\t%s\t%s\n' "$(basename "$f" .md)" "$f"
+        done
+        for f in "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
+            [ -f "$f" ] || continue
+            printf 'claude\t%s\t%s\n' "$(basename "$(dirname "$f")")/$(basename "$f" .md)" "$f"
+        done
+    }
+
+    index=$(build_index | sort -u)
+    if [ -z "$index" ]; then echo "  no cheatsheets found" >&2; exit 1; fi
+
+    # fzf: show "SOURCE  title" (fields 1-2), preview field 3 with bat.
+    pick=$(printf '%s\n' "$index" | \
+        fzf --query="{{query}}" --delimiter='\t' --with-nth=1,2 \
+            --prompt='cheat ❯ ' --height=90% --border --ansi \
+            --preview='bat --color=always --style=numbers,grid {3} 2>/dev/null || cat {3}' \
+            --preview-window='right,65%,wrap')
+    [ -z "$pick" ] && { echo "  (nothing selected)" >&2; exit 0; }
+
+    path=$(printf '%s' "$pick" | cut -f3)
+    bat --paging=always --style=full "$path" 2>/dev/null || less "$path"
+
+# Plain list of all cheatsheets — scriptable, no fzf (SOURCE · title · path)
+[group('cheat')]
+cheat-list:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just -g cheat >/dev/null 2>&1 &  # warm the README cache in background
+    cache="$HOME/.cache/cheat/readme"
+    printf "\n  %-8s  %s\n" "SOURCE" "CHEATSHEET"
+    printf "  %-8s  %s\n" "------" "----------"
+    for f in "$cache"/*.md; do
+        [ -f "$f" ] && printf "  %-8s  %s\n" "README" "$(head -1 "$f" | sed 's/^#* *//')"
+    done
+    for f in "$HOME/zettelkasten/IT/cheatsheet"/*.md \
+             "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
+        [ -f "$f" ] && printf "  %-8s  %s\n" "zettel" "$(basename "$f" .md)"
+    done
+    printf "\n"
+
 # --- Git / repo sync --------------------------------------------------------
 
 # Pull dotfiles, show status — used by night-job
@@ -452,6 +543,50 @@ pickdir:
     fd --type d --hidden --exclude .git --exclude node_modules . "$HOME" \
         | fzf --prompt="cd → " --height=50% --border --preview='ls -la {}'
 
+# ast-grep: structural (AST-aware) code search — matches SYNTAX, not text.
+# $CODE-patterns with metavariables: $X = one node, $$$ = any number of nodes.
+# Unlike rg, ніколи не спрацює на коментарі/рядку — тільки на реальному коді.
+[group('search')]
+astg pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} ━━━" >&2
+    ast-grep run -p '{{pattern}}' -l {{lang}} .
+
+# ast-grep interactive: results → fzf + bat preview, Enter = nvim at the line
+[group('search')]
+astgp pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} --json ━━━" >&2
+    pick=$(ast-grep run -p '{{pattern}}' -l {{lang}} --json=compact . \
+        | jq -r '.[] | "\(.file):\(.range.start.line + 1): \(.lines | split("\n")[0])"' \
+        | fzf --prompt='ast-grep → ' --height=70% --border --delimiter=: \
+              --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2') || exit 0
+    nvim "+$(echo "$pick" | cut -d: -f2)" "$(echo "$pick" | cut -d: -f1)"
+
+# ast-grep cheatsheet — house-rule hunts for rescue-serverless
+[group('search')]
+astg-help:
+    @echo 'ast-grep — структурний пошук по AST (не текст — синтаксис)'
+    @echo ''
+    @echo '  СУТЬ: $X = будь-який ОДИН вузол, $$$ = скільки завгодно вузлів.'
+    @echo '  rg знайде getattr і в коментарі/рядку — ast-grep тільки РЕАЛЬНИЙ виклик.'
+    @echo ''
+    @echo '  Полювання на house-rule порушення:'
+    @echo '    just -g astg "getattr($O, $A)"            # заборонений getattr'
+    @echo '    just -g astg "hasattr($O, $A)"            # заборонений hasattr'
+    @echo '    just -g astg "$T.scan($$$)"               # DynamoDB scan без дозволу'
+    @echo '    just -g astg "print($$$)"                 # debug-leftover print'
+    @echo '    just -g astg "except $E: pass"            # проковтнутий exception'
+    @echo ''
+    @echo '  Рефакторинг з заміною (spot-check перед --update-all):'
+    @echo '    ast-grep run -p "$X.format($$$)" -r "f-string тут" -l python .'
+    @echo ''
+    @echo '  Інтерактивно: just -g astgp "<pattern>"     # fzf+bat, Enter → nvim'
+    @echo '  Мови: -l python|ts|tsx|js|rust|go|lua ...'
+
 # rg + bat preview from the current dir
 [group('search')]
 rgp pattern:
@@ -461,6 +596,186 @@ rgp pattern:
         | fzf --ansi --delimiter=: \
               --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
               --preview-window='right,60%,+{2}/2'
+
+# П'ятнична stale-тріаж (self-review pro-note #1): кожен PR старший за
+# N днів без оновлень — merge / close / явний план. Мета: у п'ятницю 0 рядків.
+[group('git')]
+pr-stale days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ мої open PR, stale > {{days}}d (мета: порожньо)…" >&2
+    gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.createdAt | fromdateiso8601)) / 86400 | floor | tostring) + "d open"),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:55], .url] | @tsv' \
+        | { grep . || { echo "  ✅ 0 stale PR — тріаж чистий" >&2; exit 0; }; } \
+        | while IFS=$'\t' read -r n open stale title url; do
+            printf "  🔴 #%-5s %-9s %-10s %s\n     %s\n" "$n" "$open" "$stale" "$title" "$url"
+          done
+    echo "" >&2
+    echo "  Правило: merge / close / коментар-план — третього не дано." >&2
+
+# Інтерактивна тріаж stale PR-ів (gum): по кожному — merge / план / close / skip.
+# П'ятничний ритуал з pr-stale, але з діями замість списку. Merge = --merge
+# (конвенція репо — merge commits). Всі дії робиш ТИ — з confirm-ами.
+[group('git')]
+pr-stale-fix days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    echo "→ інтерактивна тріаж stale > {{days}}d…" >&2
+    list=$(gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:60], .url] | @tsv')
+    if [ -z "$list" ]; then gum style --foreground 2 --bold "✅ 0 stale PR — тріаж чистий"; exit 0; fi
+    while IFS=$'\t' read -r n age title url; do
+        gum style --border rounded --padding "0 1" --border-foreground 3 "#$n · $age" "$title"
+        act=$(gum choose --header "Що робимо з #$n?" \
+            "🌐 відкрити в браузері" "✅ merge" "📝 план-коментар" "❌ close" "⏭ skip") || act="⏭ skip"
+        case "$act" in
+            🌐*) echo "  → open $url" >&2; open "$url" ;;
+            ✅*) gum confirm "Merge #$n (--merge)?" \
+                    && { echo "  ━━━ gh pr merge $n --merge ━━━" >&2; gh pr merge "$n" --merge; } ;;
+            📝*) plan=$(gum write --header "План по #$n (порожньо = скасувати)" \
+                        --placeholder "що і коли зробиш; це піде коментарем у PR") || plan=""
+                 if [ -n "$plan" ]; then
+                     echo "  ━━━ gh pr comment $n --body <план> ━━━" >&2
+                     gh pr comment "$n" --body "$plan" >/dev/null && echo "  OK — коментар запощено" >&2
+                 fi ;;
+            ❌*) gum confirm "Close #$n?" \
+                    && { echo "  ━━━ gh pr close $n ━━━" >&2; gh pr close "$n"; } ;;
+            *) echo "  ⏭ пропущено" >&2 ;;
+        esac
+    done <<< "$list"
+    echo "" >&2; just -g pr-stale {{days}}
+
+# gh-dash: TUI-дашборд усіх PR/issues (0 токенів — без Claude). Розділи й
+# фільтри — стандартний конфіг gh-dash (~/.config/gh-dash/config.yml).
+[group('git')]
+dash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ gh dash (q — вийти, ? — довідка)…" >&2
+    gh dash
+
+# house-rules gate (self-review pro-note #2): ast-grep по ЗМІНЕНИХ python-файлах
+# vs merge-base — ловить машинно-перевірювані правила ДО пушу/рев'ю.
+# Патерни = найчастіші класи зі 123 feedback-пам'ятей.
+[group('git')]
+rules-check base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ house-rules gate: ast-grep по diff vs {{base}}…" >&2
+    mb=$(git merge-base {{base}} HEAD 2>/dev/null || echo {{base}})
+    files=$( { git diff --name-only "$mb"; git diff --name-only; } | sort -u | grep '\.py$' || true)
+    if [ -z "$files" ]; then echo "  ✅ python-файлів у diff нема" >&2; exit 0; fi
+    echo "  файлів: $(echo "$files" | wc -l | tr -d ' ')" >&2
+    fail=0
+    check() { # $1=pattern $2=label
+        local hits
+        hits=$(echo "$files" | xargs ast-grep run -p "$1" -l python 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+            echo ""; echo "  🔴 $2  (pattern: $1)"
+            echo "$hits" | sed 's/^/     /' | head -12
+            fail=1
+        fi
+    }
+    check 'getattr($O, $A)'   'getattr заборонений — прямий доступ до Pydantic-поля'
+    check 'hasattr($O, $A)'   'hasattr заборонений'
+    check '$T.scan($$$)'      'DynamoDB scan без дозволу — Query або GSI'
+    check 'print($$$)'        'debug print — прибери або logger'
+    check 'except $E: pass'   'проковтнутий exception — logger.exception обов'"'"'язковий'
+    if [ "$fail" -eq 0 ]; then echo "  ✅ house-rules чисто" >&2
+    else echo "" ; echo "  FAIL — виправ або усвідомлено проігноруй (звіт вище)" >&2; exit 1; fi
+
+# --- TIL: engineering growth loop -------------------------------------------
+# Capture: /til у Claude-сесії пише wiki/til-*.md у zettelkasten.
+# Review:  ці рецепти — читання, повторення (spaced repetition), пошук.
+
+TIL_DIR := env_var('HOME') / "zettelkasten/claude_code/wiki"
+
+# Browse all TILs: fzf + bat preview, Enter = open in nvim
+[group('til')]
+til:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ TIL browser ({{TIL_DIR}}/til-*.md) → fzf+bat..." >&2
+    pick=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -r \
+        | fzf --prompt="TIL → " --height=80% --border \
+              --preview='bat --color=always --style=plain {}' \
+              --preview-window='right,65%') || { echo "  (нічого не обрано)" >&2; exit 0; }
+    nvim "$pick"
+
+# Random TIL in the terminal — spaced repetition, add to shell startup or cron
+[group('til')]
+til-random:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -R | head -1)
+    if [ -z "$f" ]; then echo "  поки нема TIL — у Claude-сесії: /til <що вивчив>" >&2; exit 0; fi
+    echo "━━━ 🎲 random TIL: $(basename "$f") ━━━" >&2
+    bat --color=always --style=plain "$f"
+
+# Full-text search across TILs (rg + fzf + bat)
+[group('til')]
+til-grep pattern:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ rg '{{pattern}}' у TIL-ах..." >&2
+    rg --color=always --line-number -- "{{pattern}}" "{{TIL_DIR}}" --glob 'til-*.md' \
+        | fzf --ansi --delimiter=: \
+              --preview='bat --color=always --style=plain --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2'
+
+# Новий TIL з терміналу (gum) — без Claude: title → topic → body → нотатка
+# з vault-frontmatter + рядок у log.md. Для перевірених технічних фактів
+# краще /til (Claude верифікує) — це швидкий ручний шлях.
+[group('til')]
+til-new:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    title=$(gum input --header "TIL — що вивчив? (один рядок)" --width 80) || exit 0
+    [ -z "$title" ] && exit 0
+    topic=$(gum choose --header "Топік:" \
+        "topic/backend" "topic/aws" "topic/python" "topic/devops" \
+        "topic/tooling" "topic/dotfiles" "topic/git" "topic/llm") || topic="topic/misc"
+    body=$(gum write --header "Тіло (Що вивчив / Чому так / Приклад / Як застосовувати)" \
+        --width 100 --height 12) || body=""
+    slug=$(echo "$title" | iconv -t ascii//TRANSLIT 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+    [ -z "$slug" ] && slug="note-$(date +%H%M%S)"
+    d=$(date +%F)
+    f="{{TIL_DIR}}/til-$d-$slug.md"
+    {
+        printf -- '---\ntags: [wiki, til, %s]\ntype: wiki\nproject: misc\ndate: %s\naliases: []\n---\n\n' "$topic" "$d"
+        printf '# TIL — %s\n\n%s\n\n## Related\n- [[MOC-wiki]]\n' "$title" "$body"
+    } > "$f"
+    echo "- [[wiki/til-$d-$slug]] \`til\` — $title  $d" >> "$HOME/zettelkasten/claude_code/log.md"
+    gum style --border rounded --padding "0 1" --border-foreground 2 \
+        "✅ $f" "переглянути: just -g til · повторення: til-random"
+
+# TIL cheatsheet
+[group('til')]
+til-help:
+    @echo "TIL — конвеєр інженерного росту (capture → review → repeat)"
+    @echo ""
+    @echo "  /til <урок>        # у Claude-сесії: перевірена лекція → wiki/til-*.md"
+    @echo "  /til               # без арг.: Claude майнить уроки з поточної сесії"
+    @echo "  just -g til-new    # швидкий TIL з терміналу (gum, без Claude)"
+    @echo "  just -g til        # fzf+bat браузер, Enter → nvim"
+    @echo "  just -g til-random # випадковий TIL (spaced repetition; 1/день у новому терміналі)"
+    @echo "  just -g til-grep X # повнотекстовий пошук"
+    @echo ""
+    @echo "  Файли: ~/zettelkasten/claude_code/wiki/til-YYYY-MM-DD-<slug>.md"
 
 # --- Self-help --------------------------------------------------------------
 

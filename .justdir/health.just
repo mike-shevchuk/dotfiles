@@ -46,6 +46,7 @@ status:
     }
 
     check_pkg claude  ".claude/settings.json"
+    check_pkg codex   ".codex/config.toml"
     check_pkg zsh     ".zshrc"
     check_pkg tmux    ".tmux.conf"
     check_pkg kitty   ".config/kitty/kitty.conf"
@@ -64,6 +65,15 @@ status:
     [ "$missing" -gt 0 ] && printf "  ${dim}$missing missing${reset}"
     printf "\n\n"
 
+    # Claude package is stowed file-by-file (commands/hooks), so a green
+    # "stowed" above only proves settings.json is linked. Surface any custom
+    # ~/.claude file that never made it into the repo.
+    drift=$(just --justfile "$dotfiles_dir/justfile" claude-drift 2>/dev/null \
+            | grep -c 'not in repo' || true)
+    if [ "${drift:-0}" -gt 0 ]; then
+        printf "  ${yellow}⚠ $drift unmanaged ~/.claude file(s) — run 'just claude-drift'${reset}\n\n"
+    fi
+
 # Check all dependencies are installed
 health:
     #!/usr/bin/env bash
@@ -74,6 +84,8 @@ health:
     git -C "{{justfile_directory()}}" pull || printf "  ${yellow}pull failed (offline?)${reset}\n"
     printf "\n  ${dim}Applying claude config...${reset}\n"
     just claude || printf "  ${yellow}claude stow failed${reset}\n"
+    printf "  ${dim}Applying codex config...${reset}\n"
+    just codex || printf "  ${yellow}codex stow failed${reset}\n"
     printf "\n"
 
     ok=0; warn=0; fail=0
@@ -112,6 +124,10 @@ health:
     check "jq"                jq           required  "statusline JSON parsing"    "brew/apt/pacman install jq"
     check "gh"                gh           optional  "statusline PR info"         "brew/apt/pacman install gh"
     check "curl"              curl         required  "statusline usage API"       "brew/apt/pacman install curl"
+
+    # Codex deps
+    check "codex"             codex        optional  "Codex CLI"                  "brew install --cask codex"
+    check "python3"           python3      required  "Codex hooks runtime"        "install Python 3"
 
     # Editors
     check "mise"              mise         optional  "tool version manager"       "just mise-install"

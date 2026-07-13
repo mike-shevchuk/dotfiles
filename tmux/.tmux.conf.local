@@ -22,6 +22,40 @@ set -ga update-environment TERM_PROGRAM
 set -g set-clipboard on
 set -ga terminal-features ',*:clipboard'
 
+# prefix + y → copy top paste-buffer to the LOCAL clipboard via OSC 52.
+# Overrides base .tmux.conf:128 which pipes to pbcopy = Mac-only clipboard —
+# the exact failure mode the OSC 52 block above exists to fix.
+# load-buffer -w (tmux 3.2+) re-loads the buffer and emits OSC 52 to the client.
+bind y run -b 'tmux save-buffer - | tmux load-buffer -w -'
+
+# prefix + Y → copy the pane's current path (kept from tmux-yank, which was
+# removed — see plugin note below), OSC 52 via load-buffer -w.
+bind Y run -b 'tmux display -p -F "#{q:pane_current_path}" | tr -d "\n" | tmux load-buffer -w -'
+
+# -- Terminal quality ------------------------------------------------------------
+
+# Pin tmux-256color: the base config's runtime probe silently degrades to
+# screen-256color (no italics, worse keys) if a macOS update loses the
+# terminfo entry. tmux 3.6b + modern terminals all have tmux-256color.
+set -g default-terminal 'tmux-256color'
+
+# REVERTED: extended-keys (CSI u / Kitty keyboard protocol) — enabling it
+# caused real typing lag/misbehaving keys. The live client at the time
+# reported termname xterm-256color; when the actual terminal doesn't fully
+# implement CSI-u, tmux and the terminal disagree on key encoding and normal
+# typing gets delayed/garbled. The upside (disambiguated Ctrl+Shift+…,
+# Ctrl+Enter) isn't worth that risk — leave it off.
+# set -s extended-keys on
+# set -as terminal-features ',xterm*:extkeys,foot*:extkeys,alacritty*:extkeys,kitty*:extkeys'
+
+# 5000-line default is a few seconds of Claude/log output; 50k is still cheap.
+# (Applies to new panes only.)
+set -g history-limit 50000
+
+# Incremental copy-mode search — highlight-as-you-type instead of enter-then-jump
+bind -T copy-mode-vi / command-prompt -i -T search -p '(search down)' { send-keys -X search-forward-incremental '%%' }
+bind -T copy-mode-vi ? command-prompt -i -T search -p '(search up)'   { send-keys -X search-backward-incremental '%%' }
+
 # -- TPM (Tmux Plugin Manager) ------------------------------------------------
 
 # Auto-install TPM if missing
@@ -30,8 +64,29 @@ if "test ! -d ~/.tmux/plugins/tpm" \
 
 # Plugins
 set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-yank'
 set -g @plugin 'Ataraxy-Labs/opensessions'
+
+# tmux-yank removed: on tmux 3.6b with `set-clipboard on` every buffer copy
+# already emits OSC 52; the plugin only raced the gpakosz binding rewriter
+# and left mixed pbcopy bindings. Its one used feature (prefix Y = copy pane
+# pwd) is re-bound natively above.
+
+# tmux-fingers — hint-based copy of URLs/paths/SHAs/IPs from scrollback
+# (prefix + u). Copies go through the tmux buffer → OSC 52 delivers them to
+# the LOCAL clipboard over SSH. ('u' was a duplicate TPM update-plugins key;
+# 'U' still does that.)
+set -g @plugin 'Morantron/tmux-fingers'
+set -g @fingers-key 'u'
+
+# tubular-tmux — mode-reactive theme: repaints the WHOLE status bar and pane
+# borders with the current mode's color (prefix held / copy mode / pane zoomed
+# / resting). @tubular_prefix_key MUST match the real prefix (C-b here — C-a is
+# only prefix2) and MUST be set before tpm loads at the bottom of this file.
+# NOTE: tubular takes over status-left/right/tabs — because tpm runs AFTER all
+# the custom catppuccin status-* lines below, tubular wins and those custom
+# segments (cpu/ram/claude/git/PR from ~/.tmux-status.sh) no longer render.
+set -g @tubular_prefix_key 'C-b'
+set -g @plugin 'dabstractor/tubular-tmux'
 
 # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
 # To re-enable, uncomment below:
@@ -126,16 +181,17 @@ run-shell -b "~/.tmux-status.sh refresh-pane"
 # -- DevOps layout bindings ----------------------------------------------------
 
 # prefix + D → 3-pane devops layout (editor top, logs + shell bottom)
-bind D split-window -v -p 30 \; \
-     split-window -h -p 50 \; \
+# (-l N% instead of deprecated -p N, tmux 3.1+)
+bind D split-window -v -l 30% \; \
+     split-window -h -l 50% \; \
      select-pane -t 0 \; \
      display "DevOps layout: editor | logs | shell"
 
 # prefix + C-d → 4-pane quad layout for log tailing
-bind C-d split-window -v -p 50 \; \
-       split-window -h -p 50 \; \
+bind C-d split-window -v -l 50% \; \
+       split-window -h -l 50% \; \
        select-pane -t 0 \; \
-       split-window -h -p 50 \; \
+       split-window -h -l 50% \; \
        select-pane -t 0 \; \
        display "Quad layout for log tailing"
 
@@ -143,7 +199,7 @@ bind C-d split-window -v -p 50 \; \
 # -- Claude Code layout --------------------------------------------------------
 
 # prefix + C → 3-pane Claude Code layout (nvim top, claude + shell bottom)
-bind C split-window -v -p 35 \; \
+bind C split-window -v -l 35% \; \
      split-window -h -p 50 \; \
      select-pane -t 1 \; \
      send-keys 'claude' Enter \; \

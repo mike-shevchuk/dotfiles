@@ -40,6 +40,18 @@ detect_default_branch() {
     return 1
 }
 
+# ─── List branches, hiding remote twins of local ones ──────────────────────
+# `git branch -a` shows both `foo` and `origin/foo`; the twin is noise in a
+# picker. Keep origin/* only when no local branch of the same name exists.
+list_branches() {
+    git branch -a --format='%(refname:short)' | grep -v '^HEAD' \
+        | awk '{ n=$0; sub(/^origin\//, "", n);
+                 if ($0 == n) { local[n]=1; print }        # local branch
+                 else remote[n]=$0 }                        # origin/<n>
+               END { for (n in remote) if (!(n in local)) print remote[n] }' \
+        | sort -u
+}
+
 # ─── fzf branch picker (default branch first → cursor lands on it) ─────────
 pick_branch() {
     local current default
@@ -49,12 +61,11 @@ pick_branch() {
     {
         # Default branch first — cursor lands on line 1, just hit Enter for common case
         [[ -n "$default" ]] && echo "$default"
-        # Then everything else (sorted, dedupe, exclude current branch + default)
-        git branch -a --format='%(refname:short)' \
-            | grep -v '^HEAD' \
-            | grep -v "^${current}$" \
-            | grep -v "^${default}$" \
-            | sort -u
+        # Then everything else (sorted, dedupe, exclude current branch + default).
+        # -Fx = fixed-string exact match: branch names like fix.v2 are not regexes.
+        list_branches \
+            | grep -vFx "$current" \
+            | grep -vFx "$default"
     } | fzf \
         --prompt='compare against (Enter=default): ' \
         --height 60% \
@@ -69,10 +80,7 @@ pick_branch_default() {
     local def="$1" prompt="$2"
     {
         [[ -n "$def" ]] && echo "$def"
-        git branch -a --format='%(refname:short)' \
-            | grep -v '^HEAD' \
-            | grep -v "^${def}$" \
-            | sort -u
+        list_branches | grep -vFx "$def"
     } | fzf --prompt="$prompt" --height 60% --border \
             --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
 }
@@ -143,7 +151,7 @@ launch_view() {
 # ─── Pick target branch ────────────────────────────────────────────────────
 # review + codediff + menu + diffview pick their OWN refs (custom pickers);
 # the other modes compare the working tree against a single picked branch.
-if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" && "$TOOL" != "diffview" ]]; then
+if [[ "$TOOL" != "review" && "$TOOL" != "codediff" && "$TOOL" != "menu" && "$TOOL" != "diffview" && "$TOOL" != "help" ]]; then
     TARGET=$(pick_branch)
     if [[ -z "$TARGET" ]]; then
         echo "no branch picked — aborted" >&2
@@ -246,23 +254,16 @@ case "$TOOL" in
         #            files are never shown — DiffView has no support for them.)
         # The compared refs + dot-mode are shown in nvim on open (notify + panel).
         cur=$(git branch --show-current 2>/dev/null)
-        # Default (first line) prefers origin/main, then origin/master, then the
-        # detected origin HEAD — whichever exists.
-        if git rev-parse --verify -q origin/main >/dev/null 2>&1; then
-            base_def="origin/main"
-        elif git rev-parse --verify -q origin/master >/dev/null 2>&1; then
-            base_def="origin/master"
-        else
-            base_def=$(detect_default_branch || echo "origin/master")
-        fi
+        # Default (first line): detect_default_branch already prefers
+        # origin/HEAD → origin/main → origin/master (single source of truth).
+        base_def=$(detect_default_branch || echo "origin/master")
         dv_out=$(
             {
                 echo "$base_def"
-                git branch -a --format='%(refname:short)' \
-                    | grep -v '^HEAD' | grep -v "^${base_def}$" | sort -u
+                list_branches | grep -vFx "$base_def"
             } | fzf --prompt="DiffView vs (Enter=$base_def): " \
-                    --header=$'Enter → branch vs base (3-dot)   Tab → 2nd branch (3-dot/PR)   Ctrl-T → 2nd branch (2-dot/exact)   Ctrl-O → all uncommitted' \
-                    --expect=tab,ctrl-t,ctrl-o \
+                    --header=$'Enter → branch vs base (3-dot)   Tab → 2nd branch (3-dot/PR)   Ctrl-T → 2nd branch (2-dot/exact)   Ctrl-O → all uncommitted   Ctrl-L → + LGTM findings (quickfix)' \
+                    --expect=tab,ctrl-t,ctrl-o,ctrl-l \
                     --height 60% --border \
                     --preview 'git log --oneline -10 {}' --preview-window 'right:50%'
         )
@@ -274,14 +275,55 @@ case "$TOOL" in
         # is being compared.  $1 = DiffviewOpen args, $2 = human label.
         dv_open() {
             echo "→ DiffView: $2" >&2
+            # escape single quotes for the lua string (branch names can carry them)
+            local label="${2//\'/\\\'}"
             exec env NVIM_APPNAME=LazyVIM nvim \
                 -c "DiffviewOpen $1" \
-                -c "lua vim.defer_fn(function() pcall(vim.notify, 'Comparing: $2', vim.log.levels.INFO, { title = 'DiffView' }) end, 250)"
+                -c "lua vim.defer_fn(function() pcall(vim.notify, 'Comparing: $label', vim.log.levels.INFO, { title = 'DiffView' }) end, 250)"
+        }
+
+        # Ctrl-L: same as Enter, but LGTM findings ride along as a quickfix list —
+        # j/k through review findings INSIDE the diff (design.md §9, plugin-free).
+        # Uses the newest .lgtm/reviews/*/findings.json; :copen is pre-executed.
+        dv_open_lgtm() {
+            local spec="$1" label="$2"
+            local repo qf newest
+            repo=$(git rev-parse --show-toplevel)
+            newest=$(ls -td "$repo"/.lgtm/reviews/*/ 2>/dev/null | head -1)
+            if [[ -z "$newest" || ! -f "$newest/findings.json" ]]; then
+                echo "⚠️  немає findings.json під .lgtm/reviews/ — спершу: jb2b review …" >&2
+                sleep 2
+                dv_open "$spec" "$label"
+                return
+            fi
+            qf=$(mktemp /tmp/lgtm-qf.XXXXXX)
+            python3 - "$newest/findings.json" > "$qf" <<'PY'
+import json, sys
+doc = json.load(open(sys.argv[1]))
+for f in doc.get("findings", []):
+    prob = (f.get("problem") or {})
+    txt = prob.get("ukr") or prob.get("eng") or f.get("id", "")
+    sev = f"{f.get('severity_emoji','')} {f.get('severity_score','')}/100"
+    print(f"{f['file']}:{f['line']}: {sev} {txt}")
+PY
+            echo "→ DiffView + LGTM quickfix: $(basename "$newest") ($(wc -l < "$qf" | tr -d ' ') знахідок)" >&2
+            local label2="${label//\'/\\\'}"
+            exec env NVIM_APPNAME=LazyVIM nvim -q "$qf" \
+                -c "DiffviewOpen $spec" -c "copen 8" \
+                -c "lua vim.defer_fn(function() pcall(vim.notify, 'Comparing: $label2 + LGTM findings (:cnext/:cprev)', vim.log.levels.INFO, { title = 'DiffView' }) end, 250)"
         }
 
         case "$dv_key" in
             ctrl-o)
                 dv_open "--untracked-files=true" "working tree → HEAD  (all uncommitted, +untracked)"
+                ;;
+            ctrl-l)
+                [[ -z "$dv_base" ]] && { echo "no branch picked — aborted" >&2; exit 0; }
+                if git diff --quiet "$dv_base...HEAD" 2>/dev/null; then
+                    dv_open_lgtm "$dv_base" "working tree → $dv_base + findings"
+                else
+                    dv_open_lgtm "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD} + findings"
+                fi
                 ;;
             tab|ctrl-t)
                 [[ -z "$dv_base" ]] && { echo "no base picked — aborted" >&2; exit 0; }
@@ -335,14 +377,34 @@ case "$TOOL" in
         echo "→ files changed vs $TARGET" >&2
         FILE=$(git diff --name-only "$TARGET" \
             | fzf --prompt='changed file: ' --height 50% --border \
-                  --preview "git diff --color=always $TARGET -- {}")
+                  --preview "git diff --color=always '$TARGET' -- {}")
         [[ -z "$FILE" ]] && { echo "no file picked" >&2; exit 0; }
-        exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $TARGET -- $FILE"
+        # quoted path in the ex command — filenames with spaces must not split
+        exec env NVIM_APPNAME=LazyVIM nvim -c "DiffviewOpen $TARGET -- '$FILE'"
+        ;;
+
+    help)
+        cat >&2 <<'EOF'
+git-compare.sh — diff viewers behind tmux bindings
+
+  prefix v    diffview   DiffView side-by-side; fzf keys:
+                           Enter  → branch vs base (3-dot; порожній → working tree)
+                           Tab    → 2nd branch, 3-dot (PR view)
+                           Ctrl-T → 2nd branch, 2-dot (exact tips)
+                           Ctrl-O → all uncommitted (+untracked)
+                           Ctrl-L → + LGTM findings як quickfix (:cnext/:cprev)
+  prefix V    codediff   VSCode-style two-tier diff (line+char)
+  prefix C-v  menu       спершу платформа (codediff/diffview/delta/difftastic/tig)
+              review     GitHub-PR-style unified delta
+              delta/difftastic/files — разові режими
+
+  usage: git-compare.sh <menu|review|codediff|diffview|delta|difftastic|files|help>
+EOF
         ;;
 
     *)
         echo "ERR: unknown tool '$TOOL'" >&2
-        echo "valid: menu | review | codediff | diffview | delta | difftastic | files" >&2
+        echo "valid: menu | review | codediff | diffview | delta | difftastic | files | help" >&2
         exit 2
         ;;
 esac

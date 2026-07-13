@@ -2,6 +2,7 @@ import '.justdir/stow.just'
 import '.justdir/health.just'
 import '.justdir/mise.just'
 import '.justdir/claude.just'
+import '.justdir/codex.just'
 import '.justdir/sync.just'
 
 # Default recipe: launch the fzf-powered recipe picker (`just help`)
@@ -9,7 +10,7 @@ default:
     @just help
 
 # Setup core packages on a new system
-setup: install-deps claude zsh tmux kitty lz yazi claudes-link hooks-install install-global
+setup: install-deps claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
     @echo "Core packages stowed successfully"
 
 # Install stow if missing
@@ -42,6 +43,10 @@ migrate:
     #!/usr/bin/env bash
     set -euo pipefail
     dotfiles_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    # destructive (mass rm of symlinks) — gum confirm when available
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Видалити ВСІ ручні symlinks у \$HOME, що вказують у dotfiles?" || { echo "скасовано"; exit 0; }
+    fi
     echo "Removing manual symlinks pointing into dotfiles..."
     count=0
     while IFS= read -r -d '' link; do

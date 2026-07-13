@@ -1,78 +1,117 @@
 ---
-description: Render the current branch's changes (prefix-v diff) as an interactive HTML review page with per-hunk explanations (ukr/eng/both) and a comment-back-to-Claude loop.
-argument-hint: "[eng|ukr|both] [ <base> <head> | <PR#> ] [--reply] [--help]"
+description: Render the current branch's changes (or a PR) as an interactive LGTM HTML review page — Claude reads the diff, writes verified findings (bugs, two-sources-of-truth, frontend impact), then the static lgtm.cli engine renders them pinned to the right hunks.
+argument-hint: "[eng|ukr|both] [ <base> <head> | <PR#> ] [--help]"
 ---
 
 # /review-html
 
-Turn the changes under review into a self-contained HTML page the user can browse,
-collapse, comment on, and discuss with you.
+Drive the LGTM static review engine (`lgtm.cli`, Milestone 1) end-to-end: collect the
+diff, do a deep verified analysis of it, render an HTML page with your findings pinned
+to the exact hunks, and open it.
 
-`$ARGUMENTS` may contain: a language (`eng|ukr|both`, default `ukr`), either two
-git refs `<base> <head>` or a single integer `<PR#>`, and the flags `--reply` / `--help`.
+`$ARGUMENTS` may contain: a language (`eng|ukr|both`, default `ukr`), either two git
+refs `<base> <head>` or a single integer `<PR#>` (no refs = current branch vs its
+merge-base, uncommitted included), and `--help`.
 
-## Step 0 — `--help`
-If `--help` or the bare word `help` is present, print the contents of the
-"Usage examples" section of
-`docs/superpowers/specs/2026-06-02-review-html-skill-design.md` (§11) and STOP.
+## Step 0 — `--reply` / `--help`
+If `--reply` is present: tell the user this mode is retired — the live
+comment→Claude loop now EXISTS as a server-backed feature: run
+`jb2b review-serve` (SSE server) + `/lgtm-listen` (Claude watcher), then
+comment right on the page. Then STOP.
 
-## Step 1 — resolve paths
-- `GEN=~/dotfiles/claude/.claude/scripts/review_html.py`
-- `DIR=.claude-review` (create it). All artifacts go here.
-- Confirm you are inside a git repo (`git rev-parse --is-inside-work-tree`); if not,
-  tell the user and STOP.
+If `--help` or the bare word `help` is present: try `jb2b review-help`. That shell
+function currently fails in repos where `justfile.v2` isn't at the git root (rescue-serverless
+keeps it at `backend/src/lambdas/api/fast/justfile.v2`) — on `no justfile.v2 at <root>`,
+fall back to `just --justfile backend/src/lambdas/api/fast/justfile.v2 review-help`
+(adjust the path for other repos). Print the recipe list it outputs and STOP.
 
-## Step 2 — `--reply` mode
-If `--reply` is present:
-1. Obtain the comments, trying in order until non-empty:
-   `pbpaste` (macOS) → `xclip -selection clipboard -o` / `wl-paste` (Linux) →
-   `.claude-review/comments.md` → newest `~/Downloads/comments.md`.
-2. Save them verbatim to `.claude-review/comments.md`.
-3. Read the existing `.claude-review/explanations.json`. For each comment (it carries
-   `file:` and `hunk:` lines), find the matching file+hunk and append to that hunk's
-   `replies` array an object: `{"comment": "<user text>", "reply": {"<lang>": "<your answer>"}, "status": "addressed"}`.
-   Answer in the same language the page was generated with (read `meta.lang`).
-4. Re-run the generator (Step 4) to regenerate the page, then open it (Step 5). STOP.
+## Step 1 — run the CLI once (collect the diff)
+`REPO=$(git rev-parse --show-toplevel)`. From `~/dotfiles/claude/.claude/scripts`:
 
-## Step 3 — compute the diff (normal mode)
-Decide the mode from `$ARGUMENTS`:
-- **PR number** (a lone integer, e.g. `28`): `gh pr diff <N> > .claude-review/diff.txt`
-  (if `gh` is missing or the PR is invalid, tell the user and STOP). meta.mode=`pr`,
-  head=`pr<N>`, base=`(github)`.
-- **Two refs** `<base> <head>`: `git diff "<base>...<head>" > .claude-review/diff.txt`.
-  meta.mode=`refs`.
-- **No refs** (default): detect the base like git-compare.sh
-  (`git symbolic-ref refs/remotes/origin/HEAD` → else `origin/main`→`origin/master`→`origin/develop`),
-  then `BASE=$(git merge-base <default> HEAD)` and
-  `git diff "$BASE" > .claude-review/diff.txt` (includes uncommitted work, = `prefix v`).
-  meta.mode=`local`, head=current branch, base=the default ref.
-If `.claude-review/diff.txt` is empty, still proceed — the generator renders a clear
-"Nothing to review" page.
+```bash
+python3 -m lgtm.cli review --repo "$REPO" [--pr <N> | --refs <base> <head>] --lang <lang>
+```
 
-## Step 4 — write explanations + generate
-1. Read `.claude-review/diff.txt`. Split it into files → hunks **in the same order
-   `review_html.py` does** (hunks counted top-to-bottom per file; hunk ids `F<fileIdx>H<hunkIdx>`).
-2. Write `.claude-review/explanations.json`:
+(Omit `--pr`/`--refs` for local mode.) Don't pass `--out` — the CLI derives it itself
+(`$REPO/.lgtm/reviews/<ref>/`, e.g. `pr1651` or the branch name) and prints it as the
+**last line of stdout**. Call that path `PAGE`; `OUT=$(dirname "$PAGE")`.
+
+This first run has no `findings.json` yet, so it writes `$OUT/diff.txt` and renders a
+findings-less page — expected, not an error.
+
+## Step 2 — deep pass: read the diff, write findings.json
+1. Read `$OUT/diff.txt` in full.
+2. Analyze for real bugs, two-sources-of-truth (a new literal/set/if-chain duplicating
+   an existing enum or helper), and frontend impact. **Verify every claim against the
+   codebase** (grep/read the actual file(s) involved) before writing it down — no
+   speculative findings.
+3. For each finding, get its hunk id from `$OUT/hunks.json` (written by Step 1) —
+   don't hand-count `@@ … @@` blocks in `diff.txt` yourself. It lists, per file in
+   order, each hunk's `id` (`F#H#`), `header`, and `first_new_line`. Use the hunk
+   that actually contains the flagged code — don't assume it's a file's first hunk.
+   `line` = a real line number from that hunk (prefer an added line; `first_new_line`
+   is a good default when the flagged code is the first changed line). The CLI
+   validates every finding's `hunk` against this map on the next run and warns
+   (`⚠ невідомий hunk`) if it doesn't match — keep `diff.txt` open for the actual
+   before/after content.
+4. Write `$OUT/findings.json` matching `lgtm.model.Finding` **exactly** — flat
+   `severity_emoji` + `severity_score`, not nested:
    ```json
-   {"meta":{"head":"…","base":"…","mode":"…","generated":"<YYYY-MM-DD HH:MM>","repo":"<basename of toplevel>","lang":"<ukr|eng|both>"},
-    "files":[{"path":"…","summary":{"<lang>":"…"},
-      "hunks":[{"description":{"<lang>":"…"},"problems":[{"severity":"warn|info","text":{"<lang>":"…"}}]}]}]}
+   {"meta": {"lang": "ukr|eng|both"},
+    "findings": [
+      {"id": "…", "layer": "claude", "source": "claude-deep",
+       "file": "…", "line": N, "hunk": "F#H#",
+       "severity_emoji": "🟢|🟡|🟠|🔴", "severity_score": 0,
+       "problem": {"<lang>": "…"}, "harm": {"<lang>": "…"},
+       "fix": {"<lang>": "…", "code": "…"},
+       "agrees_with": [], "coach": null, "status": "open", "thread": []}
+    ]}
    ```
-   - Fill only the requested language key(s); for `both`, fill both `ukr` and `eng`.
-   - `summary`: one line per file. `description`: what changed & why, per hunk.
-   - `problems`: ONLY when you actually see a risk/bug/smell; otherwise omit the key.
-   - Keep order aligned with the diff so hunk ids match.
-3. Generate:
-   ```bash
-   python3 "$GEN" --diff .claude-review/diff.txt \
-     --explanations .claude-review/explanations.json \
-     --lang <lang> --meta .claude-review/explanations.json \
-     --out ".claude-review/review-<ref>.html"
-   ```
-   `<ref>` = head ref with `/`→`-`, or `pr<N>`. (`--meta` reads the `meta` block from the
-   same JSON.)
+   - Fill only the requested language key(s) in `problem`/`harm`/`fix`; for `both`,
+     fill both `ukr` and `eng`.
+   - `meta` identity fields (`ref`/`base`/`mode`/`repo`/`generated`) are recomputed
+     fresh by the CLI on every run — only `lang` is read back from `findings.json`
+     (unless `--lang` is passed, which always wins). Don't bother writing the other
+     meta fields; the block above is the minimal shape that matters.
+   - No verified findings? Write `"findings": []` — an empty array is a valid result,
+     not a failure.
+5. **Coach layer (design §4):** where a finding maps to a house-rule pattern, fill its
+   `coach` field: `{"pattern": "<slug>", "ref": "<existing good example file:line>",
+   "read": "<what to read>"}`. Standalone lessons (no bug, just a pattern worth
+   knowing) go as separate findings with `"layer": "coach"`.
 
-## Step 5 — open
-`open .claude-review/review-<ref>.html` (macOS) or `xdg-open …` (Linux). Print the path.
-Tell the user: comment in the page, then either "Copy for Claude" (paste here) or
-"Export for Claude" → `/review-html --reply`.
+## Step 2.5 — append the coach stats line (progress between reviews)
+
+Append ONE line to `$REPO/.lgtm/review-stats.jsonl` (create if missing) counting
+house-rule patterns among THIS review's findings — **zeroes included**, they are the
+win being tracked:
+
+```bash
+python3 - "$REPO/.lgtm/review-stats.jsonl" <<'PY'
+import json, sys, time
+line = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), "ref": "<OUT basename, e.g. pr1700>",
+        "patterns": {  # count per pattern in THIS review; keep keys stable:
+            "two-sources-of-truth": 0, "inline-import": 0, "getattr-hasattr": 0,
+            "dynamodb-scan": 0, "truthiness-vs-presence": 0, "missing-log-exception": 0,
+            "string-literal-vs-enum": 0}}
+open(sys.argv[1], "a", encoding="utf-8").write(json.dumps(line, ensure_ascii=False) + "\n")
+PY
+```
+
+Add new pattern keys when a new house rule shows up; `lgtm stats` and the page's
+🎓 panel aggregate them automatically (`python3 -m lgtm.cli stats --repo "$REPO"`).
+
+## Step 3 — re-render and open
+Re-run the **exact same command** from Step 1 (same `--repo`/`--pr`/`--refs`, same
+`--lang` if you want to force it — the CLI logs when `--lang` overrides
+`findings.json`'s stored language). It now finds `findings.json` and renders your
+findings inline, pinned to their hunks. Open the printed page path (`open` on macOS,
+`xdg-open` on Linux). Tell the user it's ready — comment/discuss happens by talking to
+you directly in this session (no clipboard loop).
+
+## Notes
+- The live comment→Claude loop is a separate, real feature now:
+  `jb2b review-serve` (LAN SSE server) + `/lgtm-listen` (watcher). This command
+  only builds the page; suggest the pair when the user wants to discuss inline.
+- Engine lives in `~/dotfiles/claude/.claude/scripts/lgtm/` (`cli.py`, `render.py`,
+  `diffparse.py`, …). Full contract: `rescue-serverless/.lgtm/design.md`.

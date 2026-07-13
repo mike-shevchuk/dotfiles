@@ -1,0 +1,62 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "^Bash$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/danger_guard.py",
+            "statusMessage": "Checking command safety"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "apply_patch|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/format.py",
+            "statusMessage": "Formatting edited file"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/notify.py stop"
+          },
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/cost_logger.py"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 ~/.codex/hooks/notify.py subagent_stop"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.codex/hooks/gsd-check-update.js\""
+          }
+        ]
+      }
+    ]
+  }
+}

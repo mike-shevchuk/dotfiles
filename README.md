@@ -30,6 +30,7 @@ just sync
 | Package | Stows to | What |
 |---------|----------|------|
 | `claude` | `~/.claude/` | Claude Code settings, hooks, sounds, statusline |
+| `codex` | `~/.codex/` | Codex settings and migrated command prompts |
 | `zsh` | `~/.zshrc`, `~/.zsh_zinit`, `~/.zsh_spaces/` | ZSH config, zinit plugins, spaces (job/ssh modules) |
 | `tmux` | `~/.tmux.conf`, `~/.tmux.conf.local` | tmux base config + local overrides with TPM |
 | `kitty` | `~/.config/kitty/` | Kitty terminal config |
@@ -238,7 +239,21 @@ Claude Code CLI with custom hooks, statusline, and sound notifications.
 
 - Effort level: high
 - Voice: enabled
-- Plugins: context7, code-review, code-simplifier, playwright, superpowers, huggingface, claude-md-management
+- Plugins (reinstall via `/plugin`, not backed up): context7, code-review, code-simplifier, playwright, superpowers, huggingface-skills, claude-md-management, ralph-loop, telegram, linear, frontend-design, claude-code-kanban, ui-ux-pro-max, stop-slop, ralph-skills
+
+### Migrating to a new machine
+
+Full checklist: [`docs/claude-migration.md`](docs/claude-migration.md) — what the
+`claude` stow package carries, what must be copied by hand (secrets, per-project
+memory), and what to reinstall (GSD, plugins, MCP auth).
+
+Maintenance recipes (`.justdir/claude.just`):
+
+| Recipe | Purpose |
+|--------|---------|
+| `just claude-drift` | list `~/.claude` files not symlinked into this repo (new commands/hooks that never got committed) |
+| `just claude-orphans` | kill orphaned plugin daemons (telegram `bun server.ts`) that spin at ~30% CPU after a session ends |
+| `just hooks-status` | verify hook scripts + sounds exist and are registered |
 
 ---
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "just test"
+  short_description: "Run the just test workflow"
+  default_prompt: "Use $just-test for this task."

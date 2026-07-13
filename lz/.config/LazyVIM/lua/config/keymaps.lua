@@ -111,7 +111,8 @@ commander.add({
 
   {
     desc = "Switch window in terminal mode",
-    keys = { "t", "C-w" },
+    -- was "C-w" (no angle brackets) — bound the literal keys C,-,w instead of Ctrl-W
+    keys = { "t", "<C-w>" },
     cmd = function()
       vim.api.nvim_feedkeys(vim.api.nvim_replace_termcodes("<C-\\><C-n><C-w>w", true, true, true), "n", true)
     end,
@@ -123,13 +124,9 @@ commander.add({
     cmd = "<cmd>Telescope toggleterm_manager<cr>",
   },
 
-  {
-    desc = "Alpha",
-    cmd = function()
-      require("alpha").start()
-    end,
-    keys = { { "n", "i" }, "<C-H>" },
-  },
+  -- (removed: Alpha on <C-H> — alpha-nvim isn't installed (commented out in
+  --  utils.lua) so it errored, and <C-H> IS <C-h> in a terminal, colliding
+  --  with window-nav-left)
 
   { desc = "The end of the line", keys = { { "i" }, "<C-e>" }, cmd = "<esc>A" },
   { desc = "The beg of the line", keys = { { "i" }, "<C-a>" }, cmd = "<esc>I" },

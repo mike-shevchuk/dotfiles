@@ -1,0 +1,4 @@
+interface:
+  display_name: "pr recap"
+  short_description: "Run the pr recap workflow"
+  default_prompt: "Use $pr-recap for this task."
