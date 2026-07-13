@@ -18,6 +18,7 @@ tmux:
         tpm=tmux-plugins/tpm
         tmux-yank=tmux-plugins/tmux-yank
         tmux-sidebar=tmux-plugins/tmux-sidebar
+        tubular-tmux=dabstractor/tubular-tmux
     "
     # Disabled plugins (uncomment in .tmux.conf.local to re-enable):
     #   tmux-resurrect=tmux-plugins/tmux-resurrect  — session save/restore across reboots

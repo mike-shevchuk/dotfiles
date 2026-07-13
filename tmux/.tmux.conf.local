@@ -78,6 +78,16 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 set -g @plugin 'Morantron/tmux-fingers'
 set -g @fingers-key 'u'
 
+# tubular-tmux — mode-reactive theme: repaints the WHOLE status bar and pane
+# borders with the current mode's color (prefix held / copy mode / pane zoomed
+# / resting). @tubular_prefix_key MUST match the real prefix (C-b here — C-a is
+# only prefix2) and MUST be set before tpm loads at the bottom of this file.
+# NOTE: tubular takes over status-left/right/tabs — because tpm runs AFTER all
+# the custom catppuccin status-* lines below, tubular wins and those custom
+# segments (cpu/ram/claude/git/PR from ~/.tmux-status.sh) no longer render.
+set -g @tubular_prefix_key 'C-b'
+set -g @plugin 'dabstractor/tubular-tmux'
+
 # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
 # To re-enable, uncomment below:
 # set -g @plugin 'tmux-plugins/tmux-resurrect'
