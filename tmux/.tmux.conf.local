@@ -221,8 +221,11 @@ bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read 
 # prefix + T → tmux project switcher (ts — create/attach session from project dirs)
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
 
-# prefix + C-t → mode-color theme picker (fzf: presets or HTML custom picker;
-# applies live and persists into this file — see scripts/theme-picker.sh)
+# prefix + t → mode-color theme picker (fzf: presets or HTML custom picker;
+# applies live and persists into this file — see scripts/theme-picker.sh).
+# Overrides the default clock-mode on t; C-t kept as an alias so a held
+# Ctrl through the whole chord (C-b C-t) also works.
+bind t   display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
 bind C-t display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
 
 # prefix + j → session switcher (fzf list + live preview: windows/panes/git/claude)
