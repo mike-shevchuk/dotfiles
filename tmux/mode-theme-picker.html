@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tmux mode-color picker</title>
+<style>
+  :root {
+    --base: #1e1e2e; --mantle: #181825; --crust: #11111b;
+    --text: #cdd6f4; --subtext: #a6adc8; --overlay: #6c7086; --surface: #313244;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body {
+    background: var(--crust); color: var(--text);
+    font: 14px/1.5 "JetBrains Mono", "SF Mono", Menlo, monospace;
+    display: flex; flex-direction: column; align-items: center;
+    gap: 24px; padding: 32px 16px; min-height: 100vh;
+  }
+  h1 { font-size: 18px; font-weight: 600; }
+  h1 small { color: var(--overlay); font-weight: 400; font-size: 12px; display: block; }
+
+  /* mode switcher */
+  .modes { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+  .modes button {
+    background: var(--surface); color: var(--text); border: 1px solid transparent;
+    border-radius: 8px; padding: 6px 14px; font: inherit; cursor: pointer;
+  }
+  .modes button.active { border-color: var(--text); background: var(--base); }
+  .modes button kbd { color: var(--overlay); font-size: 11px; }
+
+  /* fake terminal */
+  .term {
+    width: min(860px, 95vw); background: var(--base); border-radius: 10px;
+    overflow: hidden; box-shadow: 0 12px 40px rgba(0,0,0,.5);
+  }
+  .titlebar { background: var(--mantle); padding: 8px 12px; display: flex; gap: 6px; }
+  .titlebar span { width: 12px; height: 12px; border-radius: 50%; background: var(--surface); }
+  .panes { display: flex; height: 240px; padding: 6px; gap: 6px; }
+  .pane {
+    flex: 1; border: 2px solid var(--surface); border-radius: 4px;
+    padding: 10px; color: var(--subtext); font-size: 12px; overflow: hidden;
+  }
+  .pane.activepane { border-color: #89b4fa; }
+  .pane .dim { color: var(--overlay); }
+  .copyhint { display: none; background: var(--surface); color: #f9e2af; padding: 1px 6px; border-radius: 3px; }
+  .zoomhint { display: none; }
+  .statusbar { font-size: 12px; background: var(--base); padding: 0 0 6px; }
+  .row { display: flex; align-items: center; padding: 2px 8px; gap: 8px; white-space: nowrap; overflow: hidden; }
+  .badge { background: #89b4fa; color: var(--base); font-weight: 700; padding: 1px 8px; border-radius: 2px; }
+  .seg { color: var(--overlay); }
+  .tab-active { color: #89b4fa; font-weight: 700; text-decoration: underline; }
+  .right { margin-left: auto; display: flex; gap: 10px; }
+
+  /* pickers */
+  .pickers { display: flex; gap: 14px; flex-wrap: wrap; justify-content: center; }
+  .picker { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .picker label { font-size: 12px; color: var(--subtext); }
+  .picker input[type=color] {
+    width: 64px; height: 40px; border: 1px solid var(--surface);
+    border-radius: 8px; background: var(--base); cursor: pointer; padding: 2px;
+  }
+  .picker code { font-size: 11px; color: var(--overlay); }
+  .swatches { display: flex; gap: 4px; }
+  .swatches i { width: 14px; height: 14px; border-radius: 3px; cursor: pointer; display: inline-block; }
+
+  /* output */
+  .out { width: min(860px, 95vw); background: var(--mantle); border-radius: 10px; padding: 16px; }
+  .out header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+  .out header span { color: var(--overlay); font-size: 12px; }
+  .out button {
+    background: var(--surface); color: var(--text); border: 0; border-radius: 6px;
+    padding: 5px 12px; font: inherit; font-size: 12px; cursor: pointer;
+  }
+  pre { font-size: 12px; overflow-x: auto; color: var(--text); }
+  .c1 { color: #f38ba8; } .c2 { color: #f9e2af; } .c3 { color: #fab387; }
+  .c4 { color: #cba6f7; } .c5 { color: #89b4fa; }
+</style>
+</head>
+<body>
+  <h1>tmux mode-color picker
+    <small>tune → copy → paste over the 5 <code>@mode_color_*</code> lines in <code>tmux/.tmux.conf.local</code> → <code>tmux source-file ~/.tmux.conf</code></small>
+  </h1>
+
+  <div class="modes" id="modes">
+    <button data-mode="rest" class="active">resting</button>
+    <button data-mode="prefix">prefix <kbd>C-b</kbd></button>
+    <button data-mode="copy">copy-mode <kbd>C-b [</kbd></button>
+    <button data-mode="zoom">zoomed <kbd>C-b z</kbd></button>
+    <button data-mode="claude">claude pane</button>
+  </div>
+
+  <div class="term">
+    <div class="titlebar"><span></span><span></span><span></span></div>
+    <div class="panes">
+      <div class="pane activepane" id="activePane">
+        <div><span class="dim">~/dotfiles</span> ❯ <span id="paneCmd">nvim .</span> <span class="copyhint" id="copyHint">[copy] 12/48</span></div>
+        <div class="dim">-- active pane · border reacts to mode --</div>
+        <div class="zoomhint dim" id="zoomHint">⤢ zoomed — second pane hidden</div>
+      </div>
+      <div class="pane" id="otherPane">
+        <div><span class="dim">~/b2b</span> ❯ just test</div>
+        <div class="dim">inactive pane · border stays #313244</div>
+      </div>
+    </div>
+    <div class="statusbar">
+      <div class="row">
+        <span class="badge" id="badge">main</span>
+        <span class="seg"> 3</span>
+        <span class="tab-active" id="tab">1:nvim</span><span class="seg">│ 2:zsh</span>
+        <span class="right">
+          <span style="color:#cba6f7">󰚩 2</span><span style="color:#94e2d5"> 12%</span>
+          <span style="color:#74c7ec"> 18G</span><span>12:45</span>
+          <span class="badge" style="background:#89b4fa">13-Jul</span>
+        </span>
+      </div>
+      <div class="row"><span style="color:#a6e3a1">🌿 master</span><span style="color:#fab387">#38</span><span style="color:#89b4fa">~/dotfiles</span></div>
+    </div>
+  </div>
+
+  <div class="pickers" id="pickers"></div>
+
+  <div class="out">
+    <header><span># paste into tmux/.tmux.conf.local</span><button id="copyBtn">copy</button></header>
+    <pre id="outPre"></pre>
+  </div>
+
+<script>
+  const CATPPUCCIN = ["#f38ba8","#fab387","#f9e2af","#a6e3a1","#94e2d5","#89dceb","#74c7ec","#89b4fa","#b4befe","#cba6f7","#f5c2e7","#eba0ac"];
+  const defs = [
+    ["prefix", "#f38ba8"], ["copy", "#f9e2af"], ["zoom", "#fab387"],
+    ["claude", "#cba6f7"], ["rest", "#89b4fa"],
+  ];
+  const colors = Object.fromEntries(defs);
+  let mode = "rest";
+
+  const $ = (id) => document.getElementById(id);
+
+  // build pickers
+  for (const [name, def] of defs) {
+    const div = document.createElement("div");
+    div.className = "picker";
+    div.innerHTML = `<label>@mode_color_${name}</label>
+      <input type="color" value="${def}" data-name="${name}">
+      <div class="swatches">${CATPPUCCIN.map(c => `<i style="background:${c}" data-c="${c}" data-name="${name}" title="${c}"></i>`).join("")}</div>
+      <code id="hex-${name}">${def}</code>`;
+    $("pickers").appendChild(div);
+  }
+  document.querySelectorAll("input[type=color]").forEach(inp =>
+    inp.addEventListener("input", () => setColor(inp.dataset.name, inp.value)));
+  document.querySelectorAll(".swatches i").forEach(sw =>
+    sw.addEventListener("click", () => {
+      document.querySelector(`input[data-name=${sw.dataset.name}]`).value = sw.dataset.c;
+      setColor(sw.dataset.name, sw.dataset.c);
+    }));
+  $("modes").addEventListener("click", (e) => {
+    const b = e.target.closest("button"); if (!b) return;
+    mode = b.dataset.mode;
+    document.querySelectorAll(".modes button").forEach(x => x.classList.toggle("active", x === b));
+    render();
+  });
+  $("copyBtn").addEventListener("click", async () => {
+    await navigator.clipboard.writeText(configText());
+    $("copyBtn").textContent = "copied ✓";
+    setTimeout(() => $("copyBtn").textContent = "copy", 1200);
+  });
+
+  function setColor(name, val) {
+    colors[name] = val;
+    $(`hex-${name}`).textContent = val;
+    render();
+  }
+  // same priority as the tmux conditional: prefix > copy > zoom > claude > rest
+  function activeColor() {
+    if (mode === "prefix") return colors.prefix;
+    if (mode === "copy")   return colors.copy;
+    if (mode === "zoom")   return colors.zoom;
+    if (mode === "claude") return colors.claude;
+    return colors.rest;
+  }
+  // badge ignores the claude condition (it tracks client modes only)
+  function badgeColor() {
+    if (mode === "prefix") return colors.prefix;
+    if (mode === "copy")   return colors.copy;
+    if (mode === "zoom")   return colors.zoom;
+    return colors.rest;
+  }
+  function configText() {
+    return defs.map(([n]) => `set -g @mode_color_${n} '${colors[n]}'`.padEnd(38) ).join("\n");
+  }
+  function render() {
+    $("activePane").style.borderColor = activeColor();
+    $("badge").style.background = badgeColor();
+    $("paneCmd").textContent = mode === "claude" ? "claude" : "nvim .";
+    $("copyHint").style.display = mode === "copy" ? "inline" : "none";
+    $("zoomHint").style.display = mode === "zoom" ? "block" : "none";
+    $("otherPane").style.display = mode === "zoom" ? "none" : "block";
+    $("outPre").innerHTML = defs.map(([n], i) =>
+      `<span class="c${i+1}">set -g @mode_color_${n.padEnd(6)} '${colors[n]}'</span>`).join("\n");
+  }
+  render();
+</script>
+</body>
+</html>
