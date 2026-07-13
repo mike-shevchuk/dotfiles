@@ -7,7 +7,7 @@
 # BSD sed doesn't replace the link with a plain file).
 #
 # Usage:
-#   theme-picker.sh            interactive fzf picker (bind: prefix + t, alias C-t)
+#   theme-picker.sh            interactive fzf picker (bind: prefix + S)
 #   theme-picker.sh preview N  render the fzf preview pane for theme N (internal)
 #
 # bash 3.2 compatible (macOS /bin/bash) — no assoc arrays, no ${var^^}.

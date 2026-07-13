@@ -133,7 +133,7 @@ set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!import
 # which took over status-left/right/tabs and killed the custom segments).
 # Only two things change color by mode: the active-pane border and the
 # status-left session badge. Everything else stays catppuccin.
-# Switch palettes: prefix + C-t (fzf presets, applies live + rewrites the 5
+# Switch palettes: prefix + S (fzf presets, applies live + rewrites the 5
 # lines below) or `open ~/dotfiles/tmux/mode-theme-picker.html` for fully
 # custom colors (tweak → copy the generated lines over the 5 below).
 set -g @mode_color_prefix '#f38ba8'
@@ -221,12 +221,10 @@ bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read 
 # prefix + T → tmux project switcher (ts — create/attach session from project dirs)
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
 
-# prefix + t → mode-color theme picker (fzf: presets or HTML custom picker;
+# prefix + S → mode-color theme picker (fzf: presets or HTML custom picker;
 # applies live and persists into this file — see scripts/theme-picker.sh).
-# Overrides the default clock-mode on t; C-t kept as an alias so a held
-# Ctrl through the whole chord (C-b C-t) also works.
-bind t   display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
-bind C-t display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
+# S = Style: verified unused by tmux defaults, the gpakosz base AND this file.
+bind S display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
 
 # prefix + j → session switcher (fzf list + live preview: windows/panes/git/claude)
 bind j display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/session-switch.sh"
