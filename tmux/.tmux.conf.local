@@ -78,16 +78,6 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 set -g @plugin 'Morantron/tmux-fingers'
 set -g @fingers-key 'u'
 
-# tubular-tmux — mode-reactive theme: repaints the WHOLE status bar and pane
-# borders with the current mode's color (prefix held / copy mode / pane zoomed
-# / resting). @tubular_prefix_key MUST match the real prefix (C-b here — C-a is
-# only prefix2) and MUST be set before tpm loads at the bottom of this file.
-# NOTE: tubular takes over status-left/right/tabs — because tpm runs AFTER all
-# the custom catppuccin status-* lines below, tubular wins and those custom
-# segments (cpu/ram/claude/git/PR from ~/.tmux-status.sh) no longer render.
-set -g @tubular_prefix_key 'C-b'
-set -g @plugin 'dabstractor/tubular-tmux'
-
 # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
 # To re-enable, uncomment below:
 # set -g @plugin 'tmux-plugins/tmux-resurrect'
@@ -114,10 +104,10 @@ set -g status-justify left #!important
 set -g status-interval 5 #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 
-# Left (row 0): prefix indicator + session name + session count.
+# Left (row 0): mode badge (recolors by prefix/copy/zoom) + session name + count.
 # The trailing #() runs refresh-global once per interval (empty output).
 set -g status-left-length 50 #!important
-set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
+set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
 
 # Right (row 0): python | claude | cpu | ram | AWS | kubectl | time | date.
 # All segments read cached user-options (no subprocess).
@@ -138,12 +128,22 @@ set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6
 set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
 set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
-# Pane borders — color reflects claude state
-#   amber (#f9e2af) = claude thinking/working
-#   green (#a6e3a1) = claude waiting for input
-#   blue  (#89b4fa) = no claude / default
+# -- Mode colors (native formats, no plugin) -----------------------------------
+# Mode-reactive frame WITHOUT repainting the theme (replaces tubular-tmux,
+# which took over status-left/right/tabs and killed the custom segments).
+# Only two things change color by mode: the active-pane border and the
+# status-left session badge. Everything else stays catppuccin.
+# Pick your own palette visually: `open ~/dotfiles/tmux/mode-theme-picker.html`
+# → tweak → copy the generated lines over the 5 below.
+set -g @mode_color_prefix '#f38ba8'
+set -g @mode_color_copy   '#f9e2af'
+set -g @mode_color_zoom   '#fab387'
+set -g @mode_color_claude '#cba6f7'
+set -g @mode_color_rest   '#89b4fa'
+
+# Pane borders — active border priority: prefix > copy > zoom > claude > rest
 set -g pane-border-style 'fg=#313244' #!important
-set -g pane-active-border-style '#{?#{==:#{pane_current_command},claude},fg=#cba6f7,fg=#89b4fa}' #!important
+set -g pane-active-border-style '#{?client_prefix,fg=#{@mode_color_prefix},#{?pane_in_mode,fg=#{@mode_color_copy},#{?window_zoomed_flag,fg=#{@mode_color_zoom},#{?#{==:#{pane_current_command},claude},fg=#{@mode_color_claude},fg=#{@mode_color_rest}}}}}' #!important
 # Light ASCII border (-|+) instead of solid box-drawing (─│┌┐) so the
 # active pane reads as a non-solid underline rather than a heavy frame.
 set -g pane-border-lines simple #!important
