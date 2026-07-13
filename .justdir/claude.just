@@ -65,7 +65,68 @@
 #   just cost-sessions     list hourly session summary markdown files
 #   just hooks-status      show hook files, sounds, and registered events
 #   just article-new       create a new EN+UK article pair from template
+#   just claude-drift      detect ~/.claude files not managed by the repo
+#   just claude-orphans    kill orphaned Claude plugin daemons eating CPU
 # =============================================================================
+
+# Detect drift: custom files in ~/.claude that are NOT symlinks into dotfiles.
+# New commands/hooks created directly in ~/.claude land as real files and
+# never reach the repo — this recipe finds them so you can move them into
+# claude/.claude/ and restow. GSD-managed files (gsd-*) are expected drift
+# for hooks (installer-owned) and are labelled, not flagged.
+claude-drift:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    green='\033[32m'; yellow='\033[33m'; dim='\033[2m'; cyan='\033[36m'; reset='\033[0m'
+    echo "→ scanning ~/.claude for files not managed by dotfiles..." >&2
+    drift=0
+    check_dir() {
+        local dir="$1" label="$2"
+        [ -d "$HOME/.claude/$dir" ] || return 0
+        for f in "$HOME/.claude/$dir"/*; do
+            [ -f "$f" ] || continue
+            local base="${f##*/}"
+            case "$base" in *.bak*|.DS_Store) continue ;; esac
+            if [ -L "$f" ]; then continue; fi
+            case "$base" in
+                gsd-*) printf "  ${dim}%-12s %s  (GSD-managed, ok)${reset}\n" "$label" "$base" ;;
+                *)     printf "  ${yellow}%-12s %s  ← real file, not in repo${reset}\n" "$label" "$base"; drift=1 ;;
+            esac
+        done
+    }
+    check_dir commands commands/
+    check_dir hooks hooks/
+    check_dir sounds sounds/
+    # root-level custom scripts
+    for f in "$HOME/.claude"/*.sh "$HOME/.claude"/*.py; do
+        [ -f "$f" ] && [ ! -L "$f" ] && printf "  ${yellow}%-12s %s  ← real file, not in repo${reset}\n" "root/" "${f##*/}" && drift=1
+    done
+    if [ "$drift" -eq 0 ]; then
+        printf "  ${green}OK — everything custom is symlinked into dotfiles${reset}\n"
+    else
+        printf "\n  ${cyan}To fix:${reset} mv the file into ~/dotfiles/claude/.claude/<same-path>,\n"
+        printf "  then: cd ~/dotfiles && stow -R claude\n"
+    fi
+
+# Kill orphaned Claude plugin daemons (parent = launchd) that spin at ~30% CPU
+# after their Claude Code session exits. Known offender: telegram plugin
+# bun server.ts (v0.0.6). Never touches daemons whose session is still alive.
+claude-orphans:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ looking for orphaned plugin daemons (PPID 1)..." >&2
+    pids=$(ps -axo pid,ppid,command | awk '$2==1 && (/claude-plugins-official/ || /\.bun\/bin\/bun server\.ts/) {print $1}')
+    if [ -z "$pids" ]; then
+        echo "  OK — no orphans found" >&2; exit 0
+    fi
+    for pid in $pids; do
+        cmd=$(ps -p "$pid" -o command= | head -c 80)
+        echo "  killing $pid  $cmd" >&2
+        kill -9 "$pid" 2>/dev/null || true
+    done
+    sleep 1
+    left=$(ps -axo pid,ppid,command | awk '$2==1 && (/claude-plugins-official/ || /\.bun\/bin\/bun server\.ts/)' | wc -l | tr -d ' ')
+    echo "  done — $left orphan(s) remaining" >&2
 
 # Print 5h and 7d token counts — reads cache if fresh, scans live if stale
 tokens:

@@ -88,5 +88,6 @@
     }
   },
   "effortLevel": "high",
+  "theme": "dark",
   "voiceEnabled": true
 }

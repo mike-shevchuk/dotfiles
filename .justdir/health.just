@@ -64,6 +64,15 @@ status:
     [ "$missing" -gt 0 ] && printf "  ${dim}$missing missing${reset}"
     printf "\n\n"
 
+    # Claude package is stowed file-by-file (commands/hooks), so a green
+    # "stowed" above only proves settings.json is linked. Surface any custom
+    # ~/.claude file that never made it into the repo.
+    drift=$(just --justfile "$dotfiles_dir/justfile" claude-drift 2>/dev/null \
+            | grep -c 'not in repo' || true)
+    if [ "${drift:-0}" -gt 0 ]; then
+        printf "  ${yellow}⚠ $drift unmanaged ~/.claude file(s) — run 'just claude-drift'${reset}\n\n"
+    fi
+
 # Check all dependencies are installed
 health:
     #!/usr/bin/env bash
