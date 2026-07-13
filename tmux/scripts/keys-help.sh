@@ -39,6 +39,7 @@ render() {
     row "prefix o"   "yazi file manager (opens in a window)"
     row "prefix B"   "btop system monitor"
     row "prefix s"   "dotfiles stow status"
+    row "prefix S"   "Mode-color theme picker (Style) — fzf presets or HTML custom"
 
     grp "Diff / compare (fzf branch picker, Enter = default branch)"
     row "prefix v"   "DiffView vs branch — Enter=base, Tab=pick head, C-t exact (2-dot), C-o uncommitted"
