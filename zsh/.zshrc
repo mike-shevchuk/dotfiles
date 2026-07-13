@@ -207,6 +207,7 @@ fi
 alias szsh='source ~/.zshrc'
 alias cl='clear'
 alias cc='claude'
+alias cx='codex'
 
 # File operations
 alias l='ls'
@@ -257,6 +258,45 @@ alias 'jq-'='just --quiet'
 export JM_JUSTFILE="$HOME/audit-followup.just"
 alias jm='just -f "$JM_JUSTFILE"'
 alias jml='just -f "$JM_JUSTFILE" --list'
+
+# jb2b — shortcut for the per-repo local justfile.v2 (never committed; see each
+# repo's .gitignore). Unlike jm's fixed JM_JUSTFILE, this resolves the CURRENT
+# git repo's root every call, so it's worktree-safe: `jb2b <recipe>` from any
+# worktree of any b2b repo runs `just --justfile <that-worktree-root>/justfile.v2
+# <recipe>` — no path to remember or retarget per checkout.
+jb2b() {
+    local root jf
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "jb2b: not inside a git repo" >&2; return 1; }
+    if [ -f "$root/justfile.v2" ]; then
+        jf="$root/justfile.v2"
+    else
+        # Not all b2b repos keep justfile.v2 at the root (rescue-serverless nests
+        # it under backend/src/lambdas/api/fast/). Find the shallowest one under
+        # the repo, cached per-repo in $JB2B_CACHE so we scan only once.
+        local cache="${JB2B_CACHE:-$HOME/.cache/jb2b}"; mkdir -p "$cache"
+        local key="$cache/$(echo "$root" | sed 's#/#_#g')"
+        if [ -f "$key" ] && [ -f "$(cat "$key")" ]; then
+            jf=$(cat "$key")
+        else
+            if command -v fd >/dev/null; then
+                jf=$(fd -HI -t f '^justfile\.v2$' "$root" -E '.git' -E 'node_modules' \
+                     -E '.claude/worktrees' 2>/dev/null | awk '{print gsub(/\//,"/"), $0}' \
+                     | sort -n | head -1 | cut -d' ' -f2-)
+            else
+                jf=$(find "$root" -name justfile.v2 -not -path '*/.git/*' \
+                     -not -path '*/node_modules/*' -not -path '*/.claude/worktrees/*' 2>/dev/null \
+                     | awk '{print gsub(/\//,"/"), $0}' | sort -n | head -1 | cut -d' ' -f2-)
+            fi
+            [ -n "$jf" ] && echo "$jf" > "$key"
+        fi
+        if [ -z "$jf" ]; then
+            echo "jb2b: no justfile.v2 found under $root" >&2
+            return 1
+        fi
+    fi
+    just --justfile "$jf" "$@"
+}
+jb2bl() { jb2b --list "$@" }
 
 # Git
 alias gs='git status'
@@ -789,3 +829,6 @@ if [ -d "$HOME/.bun" ]; then
   export PATH="$BUN_INSTALL/bin:$PATH"
   [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
 fi
+
+# Added by Antigravity IDE
+export PATH="/Users/mikeshevchuk/.antigravity-ide/antigravity-ide/bin:$PATH"
