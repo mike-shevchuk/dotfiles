@@ -180,8 +180,26 @@ case "$TOOL" in
         [[ -z "$BASE_REF" ]] && { echo "no base branch picked — aborted" >&2; exit 0; }
 
         if [[ "$HEAD_REF" == "$cur" ]]; then
-            spec=$(git merge-base "$BASE_REF" HEAD 2>/dev/null || echo "$BASE_REF")
+            # Current branch as HEAD. A dirty working tree can DROWN the real
+            # branch diff in unrelated uncommitted noise (e.g. a stray yarn.lock),
+            # so when dirty, ask which scope to show — Enter = clean committed
+            # PR view (what GitHub shows), "working" = include uncommitted edits.
+            scope="committed"
+            if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+                scope=$(printf '%s\n' \
+                    "committed — only commits on the branch (clean PR view, like GitHub)" \
+                    "working   — include uncommitted working-tree edits" \
+                    | fzf --prompt='diff scope (Enter=committed): ' --height 40% --border \
+                    | awk '{print $1}')
+                [[ -z "$scope" ]] && { echo "no scope picked — aborted" >&2; exit 0; }
+            fi
+            if [[ "$scope" == "working" ]]; then
+                spec=$(git merge-base "$BASE_REF" HEAD 2>/dev/null || echo "$BASE_REF")
+            else
+                spec="$BASE_REF...HEAD"
+            fi
         else
+            scope="committed"
             spec="$BASE_REF...$HEAD_REF"
         fi
 
@@ -194,9 +212,12 @@ case "$TOOL" in
             read -n1 -rs _ 2>/dev/null || true
             exit 0
         fi
-        echo "→ PR diff: $BASE_REF → $HEAD_REF" >&2
+        echo "→ PR diff: $BASE_REF → $HEAD_REF [$scope]" >&2
+        # Banner INSIDE the paged stream — so it's visible at the top of the
+        # pager and you always see WHAT is being compared (stderr scrolls away).
+        banner=$(printf '━━━ PR: %s → %s   [scope: %s] ━━━' "$BASE_REF" "$HEAD_REF" "$scope")
         if command -v delta >/dev/null 2>&1; then
-            git diff "$spec" \
+            { echo "$banner"; echo; git diff "$spec"; } \
                 | delta --line-numbers \
                         --file-style="bold yellow ul" \
                         --hunk-header-style="omit" \
@@ -205,7 +226,7 @@ case "$TOOL" in
             echo "⚠️  delta not installed — falling back to git diff + less" >&2
             echo "    install: brew install git-delta" >&2
             sleep 1
-            git diff --color=always "$spec" | less -R
+            { echo "$banner"; echo; git diff --color=always "$spec"; } | less -R
         fi
         ;;
 
@@ -270,6 +291,15 @@ case "$TOOL" in
         dv_key=$(printf '%s\n' "$dv_out" | sed -n 1p)
         dv_base=$(printf '%s\n' "$dv_out" | sed -n 2p)
 
+        # Picking your CURRENT branch means "review MY branch" — a branch vs
+        # itself is always empty and used to fall back to a confusing
+        # working-tree-only diff. Remap it to: default base → current branch.
+        # (Not for Tab/Ctrl-T — there the pick is a base for a 2nd-branch flow.)
+        if [[ -n "$dv_base" && "$dv_base" == "$cur" && "$dv_key" != "tab" && "$dv_key" != "ctrl-t" ]]; then
+            echo "→ '$cur' is the current branch — comparing $base_def → $cur instead" >&2
+            dv_base="$base_def"
+        fi
+
         # Open DiffView and announce the compared refs inside nvim (a notify toast
         # + the panel's own "Showing changes for:" line), so it's always clear what
         # is being compared.  $1 = DiffviewOpen args, $2 = human label.
@@ -322,7 +352,7 @@ PY
                 if git diff --quiet "$dv_base...HEAD" 2>/dev/null; then
                     dv_open_lgtm "$dv_base" "working tree → $dv_base + findings"
                 else
-                    dv_open_lgtm "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD} + findings"
+                    dv_open_lgtm "$dv_base...${cur:-HEAD}" "3-dot  $dv_base...${cur:-HEAD} + findings"
                 fi
                 ;;
             tab|ctrl-t)
@@ -342,7 +372,7 @@ PY
                     # empty DiffView.
                     dv_open "$dv_base" "working tree → $dv_base  (no committed diff)"
                 else
-                    dv_open "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
+                    dv_open "$dv_base...${cur:-HEAD}" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
                 fi
                 ;;
         esac

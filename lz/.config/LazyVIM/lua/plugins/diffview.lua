@@ -13,7 +13,10 @@ return {
       -- Combined with nvim's default statusline, you get left=base@rev, right=HEAD@rev.
       view = {
         default = {
-          winbar_info = true,
+          -- winbar_info=false: diffview's own "sha:path" winbar re-sets itself on
+          -- every file switch and clobbers custom labels — we fully own the winbar
+          -- via the diff_buf_win_enter hook below (branch names, not bare SHAs).
+          winbar_info = false,
           layout = "diff2_horizontal", -- left | right (true side-by-side)
         },
         merge_tool = {
@@ -59,22 +62,42 @@ return {
             pcall(vim.treesitter.start, bufnr, lang)
           end
         end,
-        view_opened = function(view)
-          -- Set winbar on each diff pane: "[role] branch@commit  /  file_path"
+        -- Winbar per diff window: "[role] BRANCH @ commit  /  file_path".
+        -- SHAs alone don't tell you WHAT is being compared, so resolve each
+        -- commit to a ref name (origin/main, my-branch, main~2 …) via name-rev.
+        -- Fired on EVERY diff-buffer↔window bind (each file switch), so the
+        -- label persists — unlike a one-shot view_opened hook.
+        diff_buf_win_enter = function(_, winid, _)
+          local ok, lib = pcall(require, "diffview.lib")
+          if not ok then return end
+          local view = lib.get_current_view()
+          if not (view and view.cur_layout) then return end
+          local function ref_name(sha)
+            local out = vim.fn.systemlist({ "git", "name-rev", "--name-only", "--exclude", "tags/*", sha })
+            local name = (vim.v.shell_error == 0 and out[1]) or ""
+            if name == "" or name == "undefined" then return nil end
+            return (name:gsub("^remotes/", "")) -- remotes/origin/main → origin/main
+          end
           for _, win in ipairs(view.cur_layout.windows or {}) do
-            local rev = win.file and win.file.rev or nil
-            if rev then
-              local label = ""
-              if rev.type == 1 then -- LOCAL (working tree)
-                label = "● WORKING TREE"
-              elseif rev.type == 2 then -- COMMIT
-                label = string.format("◀ %s", rev.commit and rev.commit:sub(1, 8) or "?")
-              elseif rev.type == 3 then -- STAGE (index)
-                label = "◆ STAGED"
-              elseif rev.type == 4 then -- CUSTOM
-                label = "◇ CUSTOM"
+            if win.id == winid then
+              local rev = win.file and win.file.rev or nil
+              if rev then
+                local label = ""
+                if rev.type == 1 then -- LOCAL (working tree)
+                  local cur_branch = vim.fn.systemlist({ "git", "branch", "--show-current" })[1] or ""
+                  label = "● WORKING TREE" .. (cur_branch ~= "" and (" · " .. cur_branch) or "")
+                elseif rev.type == 2 then -- COMMIT
+                  local sha8 = rev.commit and rev.commit:sub(1, 8) or "?"
+                  local name = rev.commit and ref_name(rev.commit) or nil
+                  label = "◀ " .. (name and (name .. " @ " .. sha8) or sha8)
+                elseif rev.type == 3 then -- STAGE (index)
+                  label = "◆ STAGED"
+                elseif rev.type == 4 then -- CUSTOM
+                  label = "◇ CUSTOM"
+                end
+                label = label:gsub("%%", "%%%%") -- '%' is special in 'winbar'
+                vim.api.nvim_set_option_value("winbar", label .. "  %f", { win = winid })
               end
-              vim.api.nvim_set_option_value("winbar", label .. "  %f", { win = win.id })
             end
           end
         end,
