@@ -15,22 +15,37 @@ vim.g.mapleader = " "
 -- vim.g.markdown_folding = 1,
 -- vim.opt.swapfile = false
 
--- Clipboard over SSH: the remote Mac always has pbcopy, so nvim's OSC 52
--- auto-detection never activates and yanks land in the REMOTE Mac's
--- pasteboard — invisible on the local machine. Force OSC 52 when SSHed in;
--- tmux passes it through (set-clipboard on in .tmux.conf.local).
-if vim.env.SSH_TTY then
+-- Clipboard: OSC 52 + pbcopy, UNCONDITIONALLY.
+-- Why not gate on $SSH_TTY: tmux does not propagate SSH_TTY into panes (it's
+-- not in update-environment), and the tmux server usually starts locally — so
+-- nvim inside tmux can never tell an SSH attach from a local one. The old
+-- guard silently fell back to pbcopy and yanks landed in the REMOTE Mac's
+-- pasteboard, invisible on the SSH client.
+-- Copy  → OSC 52 (tmux `set-clipboard on` forwards it to WHOEVER is attached:
+--         local kitty or the SSH client's terminal) + pbcopy so the Mac's own
+--         pasteboard stays in sync for local apps.
+-- Paste → pbpaste (perfect locally; over SSH paste arrives via the terminal's
+--         bracketed paste anyway — OSC 52 paste QUERIES hang on most terminals).
+do
   local osc52 = require("vim.ui.clipboard.osc52")
-  local function paste_fallback()
+  local has_pb = vim.fn.executable("pbcopy") == 1
+  local function copy_everywhere(reg)
+    local osc_copy = osc52.copy(reg)
+    return function(lines, regtype)
+      osc_copy(lines, regtype)
+      if has_pb then
+        vim.fn.system({ "pbcopy" }, table.concat(lines, "\n"))
+      end
+    end
+  end
+  local function reg_paste() -- Linux fallback: paste from the unnamed register
     return { vim.split(vim.fn.getreg('"'), "\n"), vim.fn.getregtype('"') }
   end
   vim.g.clipboard = {
-    name = "OSC 52",
-    copy = { ["+"] = osc52.copy("+"), ["*"] = osc52.copy("*") },
-    -- OSC 52 paste QUERIES hang on terminals that don't answer them (most).
-    -- Paste from the unnamed register instead — remote-side yanks still work,
-    -- and local-clipboard paste arrives via terminal paste (Cmd/Ctrl-V) anyway.
-    paste = { ["+"] = paste_fallback, ["*"] = paste_fallback },
+    name = "OSC 52 + pbcopy",
+    copy = { ["+"] = copy_everywhere("+"), ["*"] = copy_everywhere("*") },
+    paste = has_pb and { ["+"] = { "pbpaste" }, ["*"] = { "pbpaste" } }
+      or { ["+"] = reg_paste, ["*"] = reg_paste },
   }
 end
 
