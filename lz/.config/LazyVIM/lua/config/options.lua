@@ -29,12 +29,21 @@ vim.g.mapleader = " "
 do
   local osc52 = require("vim.ui.clipboard.osc52")
   local has_pb = vim.fn.executable("pbcopy") == 1
+  local in_tmux = vim.env.TMUX ~= nil
   local function copy_everywhere(reg)
     local osc_copy = osc52.copy(reg)
     return function(lines, regtype)
       osc_copy(lines, regtype)
+      local text = table.concat(lines, "\n")
       if has_pb then
-        vim.fn.system({ "pbcopy" }, table.concat(lines, "\n"))
+        vim.fn.system({ "pbcopy" }, text)
+      end
+      -- tmux display-popup SWALLOWS raw OSC 52 from the app inside it, so the
+      -- prefix-v/V diff popups never reached the client clipboard. Going through
+      -- the tmux SERVER instead (`load-buffer -w` → CLI → server socket) forwards
+      -- to every attached client's terminal from anywhere, popups included.
+      if in_tmux then
+        vim.fn.system({ "tmux", "load-buffer", "-w", "-" }, text)
       end
     end
   end
