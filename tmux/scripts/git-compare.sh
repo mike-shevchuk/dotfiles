@@ -291,6 +291,15 @@ case "$TOOL" in
         dv_key=$(printf '%s\n' "$dv_out" | sed -n 1p)
         dv_base=$(printf '%s\n' "$dv_out" | sed -n 2p)
 
+        # Picking your CURRENT branch means "review MY branch" — a branch vs
+        # itself is always empty and used to fall back to a confusing
+        # working-tree-only diff. Remap it to: default base → current branch.
+        # (Not for Tab/Ctrl-T — there the pick is a base for a 2nd-branch flow.)
+        if [[ -n "$dv_base" && "$dv_base" == "$cur" && "$dv_key" != "tab" && "$dv_key" != "ctrl-t" ]]; then
+            echo "→ '$cur' is the current branch — comparing $base_def → $cur instead" >&2
+            dv_base="$base_def"
+        fi
+
         # Open DiffView and announce the compared refs inside nvim (a notify toast
         # + the panel's own "Showing changes for:" line), so it's always clear what
         # is being compared.  $1 = DiffviewOpen args, $2 = human label.
