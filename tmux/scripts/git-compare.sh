@@ -352,7 +352,7 @@ PY
                 if git diff --quiet "$dv_base...HEAD" 2>/dev/null; then
                     dv_open_lgtm "$dv_base" "working tree → $dv_base + findings"
                 else
-                    dv_open_lgtm "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD} + findings"
+                    dv_open_lgtm "$dv_base...${cur:-HEAD}" "3-dot  $dv_base...${cur:-HEAD} + findings"
                 fi
                 ;;
             tab|ctrl-t)
@@ -372,7 +372,7 @@ PY
                     # empty DiffView.
                     dv_open "$dv_base" "working tree → $dv_base  (no committed diff)"
                 else
-                    dv_open "$dv_base...HEAD" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
+                    dv_open "$dv_base...${cur:-HEAD}" "3-dot  $dv_base...${cur:-HEAD}  (committed / PR)"
                 fi
                 ;;
         esac
