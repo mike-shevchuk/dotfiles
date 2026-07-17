@@ -1,0 +1,16 @@
+# Telegram notes bot
+
+# Run the bot (polling)
+run:
+    @echo "→ starting notesbot..." >&2
+    uv run python -m notesbot
+
+# Run the test suite
+test:
+    @echo "→ running tests..." >&2
+    uv run pytest -v
+
+# Generate last week's recap without starting the bot
+recap:
+    @echo "→ generating manual recap..." >&2
+    uv run python -m notesbot.manual_recap
