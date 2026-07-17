@@ -251,6 +251,12 @@ alias jd='just --dry-run'
 alias jv='just --verbose'
 alias 'jq-'='just --quiet'
 
+# cheat — fuzzy-browse every cheatsheet on the machine (README + zettelkasten).
+#   cheat            → fzf over all sheets, bat preview, Enter opens full
+#   cheat tmux       → pre-filter the query to "tmux"
+alias cheat='just -g cheat'
+alias cheats='just -g cheat-list'   # plain scriptable list, no fzf
+
 # jm — shorthand for a scratch/temp justfile at ~/audit-followup.just, so
 # one-off `just -f ~/some-temp.just <recipe>` sessions don't need -f typed
 # every time. Point JM_JUSTFILE elsewhere (or edit the alias) to retarget it

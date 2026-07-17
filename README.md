@@ -241,6 +241,28 @@ Claude Code CLI with custom hooks, statusline, and sound notifications.
 - Voice: enabled
 - Plugins (reinstall via `/plugin`, not backed up): context7, code-review, code-simplifier, playwright, superpowers, huggingface-skills, claude-md-management, ralph-loop, telegram, linear, frontend-design, claude-code-kanban, ui-ux-pro-max, stop-slop, ralph-skills
 
+### Cheatsheets — one fuzzy entry point
+
+Every hotkey/command cheatsheet on the machine is reachable from anywhere with
+`cheat` (alias for `just -g cheat`). It indexes three sources with **no data
+migration** — the files stay where they are:
+
+| Source | What |
+|--------|------|
+| `README.md` | every `##` section (Tmux, Neovim, Kitty, Yazi, Hyprland, Mise, Claude Code, …), split into `~/.cache/cheat/readme/` and refreshed when README changes |
+| `~/zettelkasten/**/cheatsheet/*.md` | any note inside a `cheatsheet/` folder (nvim, tmux, python, …) |
+| `~/zettelkasten/**/*cheatsheet*.md` | any note whose name contains "cheatsheet" (claude_code, uv, …) |
+
+```bash
+cheat            # fzf over everything, bat preview, Enter opens full sheet
+cheat tmux       # jump straight to tmux-related sheets
+cheats           # plain scriptable list (just -g cheat-list)
+```
+
+To add a sheet: drop any `*.md` into a `cheatsheet/` folder under
+`~/zettelkasten`, or add a `## …` section to this README — it appears
+automatically, no re-index step.
+
 ### Migrating to a new machine
 
 Full checklist: [`docs/claude-migration.md`](docs/claude-migration.md) — what the
