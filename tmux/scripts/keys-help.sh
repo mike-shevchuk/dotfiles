@@ -54,7 +54,8 @@ render() {
     grp "Scroll a pane (no prefix, no mouse)"
     row "S-PageUp"   "scroll one screen up — enters copy-mode automatically"
     row "S-PageDown" "scroll one screen down"
-    row "M-Up/M-Down" "scroll 3 lines (Alt+arrows); exits at the bottom on its own"
+    row "S-Up/S-Down" "scroll 3 lines (Shift+arrows); exits at the bottom on its own"
+    row "M-Up/M-Down" "same, Alt+arrows (only on terminals that send them)"
     printf "  ${C_DIM}in copy-mode${C_OFF} j/k · C-u/C-d · g/G · /search · q quit  (mouse wheel also works)\n"
 
     grp "Status bar"

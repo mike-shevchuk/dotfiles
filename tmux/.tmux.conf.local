@@ -292,10 +292,17 @@ bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 # back to the shell automatically once you reach the bottom. The mouse wheel
 # already does this (WheelUpPane → copy-mode -e); these are its keyboard twin.
 #   Shift-PageUp / Shift-PageDown → one screen
-#   Alt-Up       / Alt-Down       → three lines
+#   Shift-Up     / Shift-Down     → three lines
+#   Alt-Up       / Alt-Down       → three lines (same; kept as an alias)
 # Inside copy-mode the usual keys keep working: j/k, C-u/C-d, g/G, /search, q.
+#
+# Shift+arrows are the PRIMARY line-scroll keys: macOS/SSH terminals often don't
+# emit M-Up/M-Down at all (Option is eaten or sent as a composed char), while
+# Shift+arrow is transmitted by everything that already sends Shift-PageUp.
 bind -n S-PageUp   copy-mode -eu
 bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }
+bind -n S-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
+bind -n S-Down     if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { }
 bind -n M-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
 bind -n M-Down     if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { }
 
