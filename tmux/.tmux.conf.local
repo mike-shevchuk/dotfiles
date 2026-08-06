@@ -306,16 +306,23 @@ bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 # (alternate screen) or an already-open copy-mode the key is passed straight
 # through to the program, so their own paging keeps working. Only at the shell
 # prompt does it mean "scroll my scrollback".
-# THREE lines per press — a page (or even half a page) overshoots what you were
-# reading; 3 lines keeps your place, and the key auto-repeats while held, so
-# holding it scrolls continuously like a wheel instead of jumping.
+# ONE line per press — the key auto-repeats while held, so holding it scrolls
+# smoothly like a wheel instead of jumping.
+#
+# The guard is on `alternate_on` ONLY (a real full-screen app: nvim, less, fzf →
+# the key belongs to them). It must NOT include `pane_in_mode`: passing the key
+# through while copy-mode is already open handed it to copy-mode's own PageUp,
+# which pages a whole screen — that was the "first press small, then it jumps"
+# behaviour. Inside copy-mode we keep doing our own one-line scroll.
+#
 # tmux cannot show scrollback outside copy-mode, but `-e` leaves it the moment
 # you reach the bottom again, so it never feels like a mode you're stuck in.
-# Want a different step? change both `-N 3` values.
-bind -n PPage if -F '#{||:#{pane_in_mode},#{alternate_on}}' \
-    { send-keys PPage } { copy-mode -e ; send-keys -X -N 3 scroll-up }
-bind -n NPage if -F '#{pane_in_mode}' \
-    { send-keys -X -N 3 scroll-down } { send-keys NPage }
+# Want a bigger step? change both `-N 1` values.
+bind -n PPage if -F '#{alternate_on}' \
+    { send-keys PPage } { copy-mode -e ; send-keys -X -N 1 scroll-up }
+bind -n NPage if -F '#{alternate_on}' \
+    { send-keys NPage } \
+    { if -F '#{pane_in_mode}' { send-keys -X -N 1 scroll-down } { send-keys NPage } }
 
 bind -n S-PageUp   copy-mode -eu
 bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }
