@@ -299,6 +299,18 @@ bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 # Shift+arrows are the PRIMARY line-scroll keys: macOS/SSH terminals often don't
 # emit M-Up/M-Down at all (Option is eaten or sent as a composed char), while
 # Shift+arrow is transmitted by everything that already sends Shift-PageUp.
+# PLAIN PageUp / PageDown — no modifier at all, because some terminals (and SSH
+# clients) never transmit modified arrows/pages: S-Up, M-Up and even S-PageUp
+# can be swallowed before tmux ever sees them. A bare key always arrives.
+# Guarded so it stays invisible to full-screen apps: inside nvim/less/fzf
+# (alternate screen) or an already-open copy-mode the key is passed straight
+# through to the program, so their own paging keeps working. Only at the shell
+# prompt does it mean "scroll my scrollback".
+bind -n PPage if -F '#{||:#{pane_in_mode},#{alternate_on}}' \
+    { send-keys PPage } { copy-mode -eu }
+bind -n NPage if -F '#{pane_in_mode}' \
+    { send-keys -X page-down } { send-keys NPage }
+
 bind -n S-PageUp   copy-mode -eu
 bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }
 bind -n S-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
