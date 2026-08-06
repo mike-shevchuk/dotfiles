@@ -306,16 +306,16 @@ bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 # (alternate screen) or an already-open copy-mode the key is passed straight
 # through to the program, so their own paging keeps working. Only at the shell
 # prompt does it mean "scroll my scrollback".
-# HALF a screen per press, not a whole one: a full page overshoots what you were
-# reading, a half page keeps context and — since the key auto-repeats while held
-# — scrolls faster in practice than one big jump you have to correct.
+# THREE lines per press — a page (or even half a page) overshoots what you were
+# reading; 3 lines keeps your place, and the key auto-repeats while held, so
+# holding it scrolls continuously like a wheel instead of jumping.
 # tmux cannot show scrollback outside copy-mode, but `-e` leaves it the moment
 # you reach the bottom again, so it never feels like a mode you're stuck in.
-# Want an even smaller step? swap halfpage-up/down for `-N 3 scroll-up/down`.
+# Want a different step? change both `-N 3` values.
 bind -n PPage if -F '#{||:#{pane_in_mode},#{alternate_on}}' \
-    { send-keys PPage } { copy-mode -e ; send-keys -X halfpage-up }
+    { send-keys PPage } { copy-mode -e ; send-keys -X -N 3 scroll-up }
 bind -n NPage if -F '#{pane_in_mode}' \
-    { send-keys -X halfpage-down } { send-keys NPage }
+    { send-keys -X -N 3 scroll-down } { send-keys NPage }
 
 bind -n S-PageUp   copy-mode -eu
 bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }

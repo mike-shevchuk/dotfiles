@@ -52,8 +52,8 @@ render() {
     printf "  ${C_DIM}           ${C_OFF} from the file list C-j/C-k scroll the diff · zR all folds · zo expand one\n"
 
     grp "Scroll a pane (no prefix, no mouse)"
-    row "PageUp"     "scroll HALF a screen up (plain key) — auto copy-mode, auto-exit"
-    row "PageDown"   "scroll half a screen down; inside nvim/less the key passes through"
+    row "PageUp"     "scroll 3 lines up (plain key) — auto copy-mode, auto-exit at bottom"
+    row "PageDown"   "scroll 3 lines down; inside nvim/less the key passes through"
     row "prefix PgUp" "same, always works even if the terminal eats plain keys"
     row "S-PageUp"   "scroll one screen up — enters copy-mode automatically"
     row "S-PageDown" "scroll one screen down"
