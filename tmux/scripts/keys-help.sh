@@ -51,6 +51,12 @@ render() {
     printf "  ${C_DIM}in DiffView${C_OFF} C-j/C-k scroll · C-d/C-u half page · ]c/[c next/prev hunk · C-h/C-l panes\n"
     printf "  ${C_DIM}           ${C_OFF} from the file list C-j/C-k scroll the diff · zR all folds · zo expand one\n"
 
+    grp "Scroll a pane (no prefix, no mouse)"
+    row "S-PageUp"   "scroll one screen up — enters copy-mode automatically"
+    row "S-PageDown" "scroll one screen down"
+    row "M-Up/M-Down" "scroll 3 lines (Alt+arrows); exits at the bottom on its own"
+    printf "  ${C_DIM}in copy-mode${C_OFF} j/k · C-u/C-d · g/G · /search · q quit  (mouse wheel also works)\n"
+
     grp "Status bar"
     printf "  ${C_DIM}row 0${C_OFF} session · tabs · 🐍 python · 󰚩 claude · cpu · ram · clock\n"
     printf "  ${C_DIM}row 1${C_OFF} active pane: 🌿 branch · 🔀 PR#n · path · 🐍 python\n"

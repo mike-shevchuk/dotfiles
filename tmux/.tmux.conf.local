@@ -287,6 +287,18 @@ bind R display-popup -E -w 80% -h 70% -d "#{pane_current_path}" "~/dotfiles/tmux
 bind '?' display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 
+# -- Scroll the PANE without the mouse -----------------------------------------
+# No prefix needed: these enter copy-mode for you, scroll, and (with `-e`) drop
+# back to the shell automatically once you reach the bottom. The mouse wheel
+# already does this (WheelUpPane → copy-mode -e); these are its keyboard twin.
+#   Shift-PageUp / Shift-PageDown → one screen
+#   Alt-Up       / Alt-Down       → three lines
+# Inside copy-mode the usual keys keep working: j/k, C-u/C-d, g/G, /search, q.
+bind -n S-PageUp   copy-mode -eu
+bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }
+bind -n M-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
+bind -n M-Down     if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { }
+
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
