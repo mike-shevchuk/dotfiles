@@ -38,12 +38,32 @@ return {
       -- works (tmux `mouse on` + nvim mouse=a), and native <C-w>> / <C-w>< too —
       -- these add discoverable arrow-key bindings that work while focus is in the
       -- panel. The resize sticks for the session (DiffView won't snap it back).
+      -- Keyboard scrolling (the mouse keeps working — 'mouse' is untouched).
+      -- Both diff panes are scroll-bound, so scrolling either moves both.
+      --   <C-j>/<C-k>  nudge 3 lines           <C-d>/<C-u>  half page (native)
+      --   <C-f>/<C-b>  full page (native)      ]c / [c      next/prev hunk (native)
+      -- From the FILE PANEL the same <C-j>/<C-k> scroll the diff itself via
+      -- diffview's scroll_view action, so you can read a file's diff without
+      -- leaving the list. Referenced as <Cmd>lua require(...)<CR> because the
+      -- plugin isn't loaded yet when this spec table is evaluated.
       keymaps = {
+        -- NOTE: the diff panes get <C-j>/<C-k> from the diff_buf_win_enter hook
+        -- below, not from a `view = {...}` block here — the old/blob side is a
+        -- plain git buffer that diffview's `view` keymap context doesn't cover.
         file_panel = {
           { "n", "<C-Right>", "<Cmd>vertical resize +5<CR>", { desc = "Diffview: widen file panel" } },
           { "n", "<C-Left>", "<Cmd>vertical resize -5<CR>", { desc = "Diffview: narrow file panel" } },
           { "n", "<C-Up>", "<Cmd>vertical resize 60<CR>", { desc = "Diffview: file panel wide" } },
           { "n", "<C-Down>", "<Cmd>vertical resize 35<CR>", { desc = "Diffview: file panel reset (35)" } },
+          -- scroll the DIFF while focus stays in the file list
+          { "n", "<C-j>", '<Cmd>lua require("diffview.actions").scroll_view(0.25)()<CR>', { desc = "Diffview: scroll diff down" } },
+          { "n", "<C-k>", '<Cmd>lua require("diffview.actions").scroll_view(-0.25)()<CR>', { desc = "Diffview: scroll diff up" } },
+          { "n", "<C-f>", '<Cmd>lua require("diffview.actions").scroll_view(1)()<CR>', { desc = "Diffview: scroll diff page down" } },
+          { "n", "<C-b>", '<Cmd>lua require("diffview.actions").scroll_view(-1)()<CR>', { desc = "Diffview: scroll diff page up" } },
+        },
+        file_history_panel = {
+          { "n", "<C-j>", '<Cmd>lua require("diffview.actions").scroll_view(0.25)()<CR>', { desc = "Diffview: scroll diff down" } },
+          { "n", "<C-k>", '<Cmd>lua require("diffview.actions").scroll_view(-0.25)()<CR>', { desc = "Diffview: scroll diff up" } },
         },
       },
       -- Hooks: customize winbar string per window for clearer "branch @ commit" labels
@@ -67,7 +87,17 @@ return {
         -- commit to a ref name (origin/main, my-branch, main~2 …) via name-rev.
         -- Fired on EVERY diff-buffer↔window bind (each file switch), so the
         -- label persists — unlike a one-shot view_opened hook.
-        diff_buf_win_enter = function(_, winid, _)
+        diff_buf_win_enter = function(bufnr, winid, _)
+          -- Keyboard scrolling in the diff panes (the mouse keeps working).
+          -- Both panes are scroll-bound, so either one moves both:
+          --   <C-j>/<C-k> nudge 3 lines · <C-d>/<C-u> half page · ]c/[c hunks
+          -- Set here (not via a `view` keymap block) because the old/blob side
+          -- isn't covered by diffview's view keymap context.
+          pcall(vim.keymap.set, "n", "<C-j>", "3<C-e>",
+            { buffer = bufnr, desc = "Diffview: scroll down 3 lines" })
+          pcall(vim.keymap.set, "n", "<C-k>", "3<C-y>",
+            { buffer = bufnr, desc = "Diffview: scroll up 3 lines" })
+
           local ok, lib = pcall(require, "diffview.lib")
           if not ok then return end
           local view = lib.get_current_view()
