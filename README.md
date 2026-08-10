@@ -421,6 +421,53 @@ All hotkeys use **Alt+Shift** (`hyper`).
 | `hyper + A` | Screenshot + annotate |
 | `hyper + R` | Reload config |
 
+### Displays
+
+| Key | Action |
+|-----|--------|
+| `hyper + I` | Pick which display is main |
+| `hyper + N` | Toggle mirror ⇄ extended |
+| `hyper + O` | Mirror this screen onto the iPad, and back |
+| `hyper + U` | Pick any offered Screen Mirroring device |
+
+---
+
+## Screen Mirroring (iPad / Sidecar)
+
+Duplicate the Mac onto an iPad — or use it as an extra display — from the
+terminal. Sidecar is wireless, so **the iPad can be in another room**: nothing
+is plugged in and the iPad is never touched.
+
+```bash
+just -g mirror              # duplicate this screen onto the iPad
+just -g mirror-extend       # use the iPad as an extra display instead
+just -g mirror-off          # disconnect
+just -g mirror-toggle       # connect ⇄ disconnect  (same as hyper + O)
+just -g mirror-status       # is it attached, and which displays exist
+just -g mirror-list         # devices Screen Mirroring is offering
+just -g mirror-pick         # fzf over those devices
+```
+
+Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —
+defaulting to `iPad`.
+
+**How it works.** macOS exposes no API for this, so
+`hammerspoon/.hammerspoon/modules/mirror.lua` drives the real Control Center →
+Screen Mirroring pane through the accessibility API and reads the result back
+from it. The recipes only ask Hammerspoon to run it and wait for the answer in
+`~/.cache/hs/mirror.txt`.
+
+**Requirements**
+
+- Hammerspoon running, with Accessibility permission and the `hs` CLI
+  (`hs.ipc.cliInstall()` once, from the Hammerspoon console)
+- iPad awake, on the same Wi-Fi, signed into the same Apple Account, within
+  Sidecar range (~10 m, walls included)
+
+**When it will not connect**, `mirror` says so instead of hanging — check the
+iPad is awake first; `just -g mirror-list` shows whether macOS is offering it
+at all.
+
 ---
 
 ## ZSH

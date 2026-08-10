@@ -777,6 +777,109 @@ til-help:
     @echo ""
     @echo "  Файли: ~/zettelkasten/claude_code/wiki/til-YYYY-MM-DD-<slug>.md"
 
+# --- Screen mirroring (iPad / Sidecar) --------------------------------------
+#
+# Drives Control Center → Screen Mirroring through Hammerspoon's accessibility
+# API (hammerspoon/.hammerspoon/modules/mirror.lua). Sidecar is wireless, so the
+# iPad can sit in the next room — nothing is plugged in and the iPad is never
+# touched. It does need to be awake, on the same Wi-Fi and the same Apple
+# Account, and Hammerspoon needs Accessibility permission.
+#
+#   just -g mirror          # duplicate this Mac's screen onto the iPad
+#   just -g mirror-extend   # use the iPad as an extra display instead
+#   just -g mirror-off      # disconnect
+#   just -g mirror-toggle   # connect ⇄ disconnect
+#   just -g mirror-status   # what is attached right now
+#   just -g mirror-list     # devices Screen Mirroring is offering
+#   just -g mirror-pick     # fzf over those devices
+#
+# Every recipe takes the device name as its argument; it defaults to "iPad".
+
+# Duplicate this Mac's screen onto the iPad (wireless Sidecar)
+[group('mirror')]
+mirror device="iPad":
+    @just -f "{{justfile()}}" _mirror connect "{{device}}" mirror
+
+# Use the iPad as an extra display rather than a duplicate
+[group('mirror')]
+mirror-extend device="iPad":
+    @just -f "{{justfile()}}" _mirror connect "{{device}}" extend
+
+# Disconnect the iPad
+[group('mirror')]
+mirror-off device="iPad":
+    @just -f "{{justfile()}}" _mirror disconnect "{{device}}"
+
+# Connect if disconnected, disconnect if connected
+[group('mirror')]
+mirror-toggle device="iPad" mode="mirror":
+    @just -f "{{justfile()}}" _mirror toggle "{{device}}" "{{mode}}"
+
+# Whether the device is attached, and which displays macOS currently has
+[group('mirror')]
+mirror-status device="iPad":
+    @just -f "{{justfile()}}" _mirror status "{{device}}"
+
+# Devices Screen Mirroring is offering right now — name / kind / on|off
+[group('mirror')]
+mirror-list:
+    @just -f "{{justfile()}}" _mirror list
+
+# fzf over the offered devices, then connect the chosen one
+[group('mirror')]
+mirror-pick mode="mirror":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    devs=$(just -f "{{justfile()}}" _mirror list) || exit 1
+    [ -n "$devs" ] || { echo "  FAIL — no devices offered" >&2; exit 1; }
+    dev=$(printf '%s\n' "$devs" \
+        | fzf --delimiter='\t' --with-nth=1,2,3 --prompt='mirror to > ' --height=40% --reverse \
+        | cut -f1)
+    [ -n "$dev" ] || { echo "  cancelled" >&2; exit 0; }
+    just -f "{{justfile()}}" _mirror connect "$dev" "{{mode}}"
+
+# Ask Hammerspoon to drive the Screen Mirroring pane, then wait for its answer
+[group('mirror')]
+[private]
+_mirror cmd device="iPad" mode="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    lua="${MIRROR_LUA:-}"
+    if [ -z "$lua" ]; then
+        for candidate in "$HOME/.hammerspoon/modules/mirror.lua" \
+                         "$HOME/dotfiles/hammerspoon/.hammerspoon/modules/mirror.lua"; do
+            [ -f "$candidate" ] && { lua="$candidate"; break; }
+        done
+    fi
+    [ -n "$lua" ] || { echo "  FAIL — mirror.lua not found in ~/.hammerspoon/modules or ~/dotfiles (set MIRROR_LUA to override)" >&2; exit 1; }
+    command -v hs >/dev/null 2>&1 || { echo "  FAIL — no 'hs' CLI; run hs.ipc.cliInstall() inside Hammerspoon" >&2; exit 1; }
+    pgrep -x Hammerspoon >/dev/null 2>&1 || { echo "  FAIL — Hammerspoon is not running" >&2; exit 1; }
+
+    res="$HOME/.cache/hs/mirror.txt"
+    mkdir -p "$(dirname "$res")"
+    rm -f "$res"
+    echo "→ screen mirroring: {{cmd}} {{device}} {{mode}} ..." >&2
+
+    # `hs -c` keeps streaming the Hammerspoon console back over its socket, so a
+    # slow call would hang here on unrelated log chatter. Fire it and forget it:
+    # mirror.lua answers into $res, and its watchdog guarantees an answer lands.
+    timeout 5 hs -c "dofile([[$lua]]).cli([[{{cmd}}]],[[{{device}}]],[[{{mode}}]])" >/dev/null 2>&1 || true
+
+    for _ in $(seq 1 90); do
+        [ -f "$res" ] && break
+        sleep 1
+    done
+    [ -f "$res" ] || { echo "  FAIL — Hammerspoon gave no answer in 90s" >&2; exit 1; }
+
+    verdict=$(head -1 "$res")
+    case "$verdict" in
+        OK*) echo "  OK ${verdict#OK }" >&2 ;;
+        *)   echo "  FAIL ${verdict#FAIL }" >&2 ;;
+    esac
+    tail -n +2 "$res"
+    [ "${verdict%% *}" = "OK" ]
+
 # --- Self-help --------------------------------------------------------------
 
 # List all global recipes
