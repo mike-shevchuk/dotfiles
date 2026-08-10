@@ -451,6 +451,21 @@ just -g mirror-pick         # fzf over those devices
 Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —
 defaulting to `iPad`.
 
+### Menubar widget
+
+Hammerspoon puts a Screen Mirroring item in the menu bar:
+
+| Icon | Meaning |
+|------|---------|
+| `📱` | iPad not connected |
+| `🪞` | attached (tooltip says mirror or extend) |
+| `⏳` | connecting — Sidecar takes a few seconds |
+
+Click it for *Mirror this screen* / *Use as extended display* / *Disconnect*
+(shown only when attached) / *Pick device…*, plus the current display list. It
+never opens Control Center just to refresh itself — the icon follows the display
+list, and `hs.screen.watcher` updates it the moment a display comes or goes.
+
 **How it works.** macOS exposes no API for this, so
 `hammerspoon/.hammerspoon/modules/mirror.lua` drives the real Control Center →
 Screen Mirroring pane through the accessibility API and reads the result back

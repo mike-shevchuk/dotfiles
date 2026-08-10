@@ -459,6 +459,95 @@ function M.toggleDefault(mode)
   end)
 end
 
+-- ─── Menubar widget ─────────────────────────────────────────────
+--
+-- Asking the Screen Mirroring pane for the current state means opening Control
+-- Center, which would flash the panel open on every refresh. The widget instead
+-- reads the display list: an attached Sidecar session always shows up there as
+-- "Sidecar Display (AirPlay)", and an AirPlay screen under the device's name.
+-- The exact mode (mirror vs extend) is only known after an action, so it is
+-- remembered rather than guessed.
+
+local SIDECAR_SCREEN = "Sidecar"
+
+M._menubar   = nil
+M._lastMode  = nil
+local screenWatcher, widgetTimer
+local busy = false
+
+local function attachedScreen()
+  local want = M.config.device:lower()
+  for _, s in ipairs(hs.screen.allScreens()) do
+    local n = s:name() or ""
+    if n:find(SIDECAR_SCREEN, 1, true) or n:lower():find(want, 1, true) then return n end
+  end
+end
+
+local function refreshTitle()
+  if not M._menubar then return end
+  local on = attachedScreen()
+  M._menubar:setTitle(busy and "⏳" or (on and "🪞" or "📱"))
+  M._menubar:setTooltip(busy and ("Screen Mirroring: working on " .. M.config.device)
+    or (on and (M.config.device .. " attached" .. (M._lastMode and (" (" .. M._lastMode .. ")") or ""))
+        or (M.config.device .. " not connected")))
+end
+
+-- Run one of the public calls with the widget showing that it is in flight.
+local function widgetAction(fn, mode)
+  if busy then return hs.alert.show("Mirror: already working on it", 2) end
+  busy = true
+  refreshTitle()
+  fn(function(ok, msg)
+    busy = false
+    if ok and mode then M._lastMode = mode elseif ok then M._lastMode = nil end
+    refreshTitle()
+    if M.config.notify then hs.alert.show("Mirror: " .. tostring(msg), 4) end
+  end)
+end
+
+-- The menu section, also usable from another menubar (see pomodoro/sysmonitor).
+function M.getMenuItems()
+  local dev, on = M.config.device, attachedScreen()
+  local items = {
+    { title = ("%s — %s"):format(dev, on and ("attached as " .. on) or "not connected"), disabled = true },
+    { title = "-" },
+    { title = "🪞 Mirror this screen",
+      fn = function() widgetAction(function(cb) M.connect(dev, { mode = "mirror" }, cb) end, "mirror") end },
+    { title = "🖥  Use as extended display",
+      fn = function() widgetAction(function(cb) M.connect(dev, { mode = "extend" }, cb) end, "extend") end },
+  }
+  if on then
+    items[#items + 1] = { title = "✕  Disconnect",
+      fn = function() widgetAction(function(cb) M.disconnect(dev, cb) end) end }
+  end
+  items[#items + 1] = { title = "-" }
+  items[#items + 1] = { title = "Pick device…", fn = M.showChooser }
+  items[#items + 1] = { title = "-" }
+  items[#items + 1] = { title = "Displays: " .. table.concat(screenNames(), ", "), disabled = true }
+  return items
+end
+
+function M.startWidget()
+  if M._menubar then return M._menubar end
+  M._menubar = hs.menubar.new()
+  -- Passing a function rebuilds the menu on every click, so it is always current
+  -- without polling anything.
+  M._menubar:setMenu(M.getMenuItems)
+  refreshTitle()
+
+  -- Attaching or dropping a display fires this, which is exactly when the title
+  -- changes; the slow timer only covers states nothing announced.
+  screenWatcher = hs.screen.watcher.new(function() later(1.5, refreshTitle) end):start()
+  widgetTimer = hs.timer.doEvery(30, refreshTitle)
+  return M._menubar
+end
+
+function M.stopWidget()
+  if screenWatcher then screenWatcher:stop() screenWatcher = nil end
+  if widgetTimer then widgetTimer:stop() widgetTimer = nil end
+  if M._menubar then M._menubar:delete() M._menubar = nil end
+end
+
 -- ─── CLI bridge (used by `just -g mirror*`) ─────────────────────
 --
 -- `hs -c` keeps streaming the Hammerspoon console back over the ipc socket, so
