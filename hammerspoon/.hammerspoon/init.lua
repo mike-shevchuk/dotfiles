@@ -78,11 +78,12 @@ guard.bind(hyper, "P", system.togglePinchZoom)
 guard.bind(hyper, "I", sidecar.showDisplayChooser)
 guard.bind(hyper, "N", sidecar.toggleMirror)
 
--- O = mirror this screen onto the iPad and back (wireless Sidecar, so the iPad
---     can be in another room); U = pick any offered device instead
+-- hyper2 (ctrl+alt+shift), because every hyper letter is already spoken for:
+--   M = mirror this screen onto the iPad and back (wireless Sidecar, so the
+--       iPad can be in another room); P = pick any offered device instead
 -- Menubar: 📱 idle / 🪞 attached / ⏳ connecting, click for mirror/extend/disconnect
-guard.bind(hyper, "O", function() mirror.toggleDefault("mirror") end)
-guard.bind(hyper, "U", mirror.showChooser)
+guard.bind(hyper2, "M", function() mirror.toggleDefault("mirror") end)
+guard.bind(hyper2, "P", mirror.showChooser)
 mirror.startWidget()
 
 -- ─── Mouse Finder ───────────────────────────────────────────────

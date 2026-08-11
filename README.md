@@ -427,8 +427,10 @@ All hotkeys use **Alt+Shift** (`hyper`).
 |-----|--------|
 | `hyper + I` | Pick which display is main |
 | `hyper + N` | Toggle mirror ⇄ extended |
-| `hyper + O` | Mirror this screen onto the iPad, and back |
-| `hyper + U` | Pick any offered Screen Mirroring device |
+| `hyper2 + M` | Mirror this screen onto the iPad, and back |
+| `hyper2 + P` | Pick any offered Screen Mirroring device |
+
+(`hyper2` = Ctrl+Alt+Shift — every `hyper` letter is already taken.)
 
 ---
 
