@@ -446,6 +446,7 @@ just -g mirror-toggle       # connect ⇄ disconnect  (same as hyper + O)
 just -g mirror-status       # is it attached, and which displays exist
 just -g mirror-list         # devices Screen Mirroring is offering
 just -g mirror-pick         # fzf over those devices
+just -g mirror-help         # the whole cheatsheet, in the terminal
 ```
 
 Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —

@@ -838,6 +838,64 @@ mirror-pick mode="mirror":
     [ -n "$dev" ] || { echo "  cancelled" >&2; exit 0; }
     just -f "{{justfile()}}" _mirror connect "$dev" "{{mode}}"
 
+# Screen mirroring cheatsheet
+[group('mirror')]
+mirror-help:
+    #!/usr/bin/env bash
+    cat >&2 <<'EOF'
+    mirror-*  —  кинути екран на iPad (Sidecar, бездротово)
+
+    iPad може лежати в сусідній кімнаті: нічого не втикаємо, iPad не чіпаємо.
+    Треба щоб він не спав, був у тій же Wi-Fi і тому ж Apple Account.
+
+    ЩОДЕННЕ
+      mirror              дублювати цей екран на iPad
+      mirror-extend       iPad як ДОДАТКОВИЙ екран (для роботи зручніше)
+      mirror-off          від'єднати
+      mirror-toggle       туди-сюди
+      mirror-status       підключено? які дисплеї зараз
+      mirror-list         що взагалі пропонує macOS
+      mirror-pick         fzf по пристроях
+
+      Ім'я пристрою — перший аргумент, дефолт "iPad":
+        just -g mirror "iPad Мішка"
+
+    БЕЗ ТЕРМІНАЛУ
+      Менюбар:  📱 не підключено · 🪞 підключено · ⏳ підключається
+                клік → mirror / extend / disconnect / вибір пристрою
+
+    MIRROR ЧИ EXTEND
+      mirror  дублює екран — і роздільність падає до iPad (~1180x795).
+              Так працює Sidecar, це не баг. Показати щось комусь — ок.
+      extend  лишає монітор як є, додає iPad збоку. Для роботи — це.
+      Режим міняється на льоту, від'єднуватись не треба.
+
+    ЩО ПОБАЧИШ ПІД ЧАС РОБОТИ (це механіка, не збої)
+      • на секунду відкриється й закриється панель Control Center
+      • смикнеться курсор і повернеться на місце
+      • підключення триває 5-15 с
+
+    КОЛИ НЕ ПРАЦЮЄ
+      "is not offered ... (available: none)"   iPad спить / далеко / інший Apple Account
+      "did not come up in 25s"                 те саме — розбуди iPad і повтори
+      "Hammerspoon is not running"             запусти Hammerspoon
+      "no 'hs' CLI"                            у консолі Hammerspoon: hs.ipc.cliInstall()
+
+      Діагностика завжди починається з `mirror-list`: якщо iPad там не видно —
+      проблема не в скрипті, а в тому, що macOS його не бачить.
+      Зависнути мовчки не може: у модулі є watchdog, відповідь прийде завжди.
+
+    ЯК ЦЕ ВЛАШТОВАНО
+      У macOS немає API "підключи цей iPad". Тому модуль
+      hammerspoon/.hammerspoon/modules/mirror.lua керує справжньою панеллю
+      Control Center → Screen Mirroring через accessibility API і звідти ж
+      читає стан. Рецепти лише просять Hammerspoon це виконати й чекають
+      на відповідь у ~/.cache/hs/mirror.txt
+
+    НАЛАШТУВАННЯ — блок M.config у mirror.lua
+      device / mode / connect_timeout / notify
+    EOF
+
 # Ask Hammerspoon to drive the Screen Mirroring pane, then wait for its answer
 [group('mirror')]
 [private]
