@@ -862,8 +862,9 @@ mirror-help:
 
     БЕЗ ТЕРМІНАЛУ
       Менюбар:  📱 не підключено · 🪞 підключено · ⏳ підключається
-    Хоткеї:   ctrl+alt+shift+M — тогл · ctrl+alt+shift+P — вибір пристрою
                 клік → mirror / extend / disconnect / вибір пристрою
+      Хоткеї:   ctrl+alt+shift+M — тогл
+                ctrl+alt+shift+P — вибір пристрою
 
     MIRROR ЧИ EXTEND
       mirror  дублює екран — і роздільність падає до iPad (~1180x795).
