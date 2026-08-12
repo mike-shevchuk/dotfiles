@@ -487,7 +487,10 @@ end
 local function present(ch, rows, placeholder)
   M._rows = rows
   if placeholder then ch:placeholderText(placeholder) end
-  ch:choices(matching(rows, ch:query()))
+  -- Keep what is actually on screen: the arrow navigation needs to know how
+  -- far the list goes, and that is the filtered set, not the full one.
+  M._shown = matching(rows, ch:query())
+  ch:choices(M._shown)
 end
 
 -- An icon per row, matched on the category name first and falling back to what
@@ -779,6 +782,21 @@ local function startTap()
       return true
     end
 
+    -- Up and down are driven here rather than left to the chooser. They were
+    -- not moving the selection at all — measured, with the tap stopped, so it
+    -- was never this tap eating them — and a list you cannot walk is not a
+    -- list. Doing it ourselves also means it behaves the same whatever the
+    -- keyboard is, which matters when the keys arrive over Sidecar.
+    if key == "down" or key == "up" then
+      local total = #(M._shown or {})
+      if total == 0 then return false end
+      local row = M._chooser:selectedRow() or 1
+      row = row + (key == "down" and 1 or -1)
+      if row < 1 then row = total elseif row > total then row = 1 end
+      M._chooser:selectedRow(row)
+      return true
+    end
+
     if key ~= "left" and key ~= "right" then return false end
 
     local row = M._chooser and M._chooser:selectedRowContents()
@@ -855,7 +873,8 @@ local function chooser()
     local sigil, rest = q:match("^([%*!%?#/%+%->])(.*)$")
     if not sigil then
       -- Plain typing: filter the current view's rows ourselves.
-      M._chooser:choices(matching(M._rows, q))
+      M._shown = matching(M._rows, q)
+      M._chooser:choices(M._shown)
       return
     end
 
@@ -953,7 +972,7 @@ function M.show()
   table.insert(rows, 1, tabRow())
 
   if #favs > 0 then
-    table.insert(rows, 1, { text = M.FAVOURITE, goTo = M.FAVOURITE,
+    table.insert(rows, 2, { text = M.FAVOURITE, goTo = M.FAVOURITE,
       subText = styled(("%d starred"):format(#favs), BLUE, "the ones you pinned with ⌘⇧F") })
   end
 
