@@ -503,12 +503,202 @@ ports:
     echo "→ lsof -iTCP -sTCP:LISTEN -P -n" >&2
     lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR==1 || /LISTEN/'
 
-# Disk usage of $HOME top-level dirs (top 15, human-readable)
-[group('system')]
+# --- Disk usage / cleanup (macOS) -------------------------------------------
+#
+# WHAT THIS IS — one console for "why is my disk full and how do I fix it".
+# CHECK recipes are read-only. CLEAN recipes are DRY-RUN by default and only
+# delete when you pass apply=1 (or, for snapshots/docker, run the named recipe).
+#
+#   just -g disk                  overview: free space + snapshots + top ~ dirs
+#   just -g disk-top DIR n        top-N biggest entries under DIR   (default: ~ , 15)
+#   just -g disk-hogs             ranked "usual suspects" (Docker.raw, caches, Xcode, node_modules, Trash)
+#   just -g disk-snapshots        list APFS local snapshots — the invisible eater
+#   just -g disk-clean [1]        SAFE cleanup — dry-run; add `1` to actually delete
+#   just -g disk-clean-snapshots  thin APFS local snapshots (reclaims "purgeable" GB, needs sudo)
+#   just -g disk-clean-docker     docker system prune -a --volumes (confirms first)
+
+# Cheat-sheet of the disk-* recipes
+[group('disk')]
+disk-help:
+    #!/usr/bin/env bash
+    cat >&2 <<'EOF'
+    disk-*  —  macOS disk check & cleanup
+
+    CHECK (read-only):
+      disk                overview: free space, snapshot count, top 15 dirs in ~
+      disk-top DIR n      top-N biggest entries under DIR (default ~ , 15)
+                          e.g.  just -g disk-top ~/Library 20
+      disk-hogs           ranked usual suspects (Docker.raw, caches, Xcode, node_modules…)
+      disk-snapshots      list APFS local Time Machine snapshots
+
+    CLEAN (dry-run unless told otherwise):
+      disk-clean          show what SAFE cleanup would free (Trash, caches, tmp)
+      disk-clean 1        actually delete those safe targets
+      disk-clean-snapshots   thin APFS snapshots — biggest single win, needs sudo
+      disk-clean-docker      docker system prune -a --volumes (asks first)
+
+    Typical fix when disk is 100%:
+      just -g disk-clean-snapshots   # frees the invisible "purgeable" GB
+      just -g disk-hogs              # find the real hog
+      just -g disk-clean 1           # wipe safe caches/Trash/tmp
+    EOF
+
+# Overview: free space + APFS snapshot count + top 15 dirs in $HOME
+[group('disk')]
 disk:
     #!/usr/bin/env bash
-    echo "→ du -sh ~/* (top 15 by size)" >&2
-    du -sh "$HOME"/* 2>/dev/null | sort -rh | head -15
+    set -uo pipefail
+    echo "→ disk overview" >&2
+    echo "── free space (Data volume) ──"
+    df -H /System/Volumes/Data
+    n=$(tmutil listlocalsnapshots / 2>/dev/null | grep -c 'com.apple') || n=0
+    echo ""
+    echo "── APFS local snapshots: ${n:-0}  (list: just -g disk-snapshots · reclaim: just -g disk-clean-snapshots) ──"
+    echo ""
+    echo "── top 15 dirs in \$HOME (incl. hidden dotdirs like ~/.docker) ──"
+    du -sh "$HOME"/* "$HOME"/.[!.]* 2>/dev/null | sort -rh | head -15 || true
+
+# Top-N biggest entries under a dir (params over variants). dir default ~, n default 15
+[group('disk')]
+disk-top dir="" n="15":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    d="{{dir}}"; [ -z "$d" ] && d="$HOME"
+    d="${d/#\~/$HOME}"                       # expand a leading ~
+    echo "→ du -sh top {{n}} under $d (incl. dotfiles)" >&2
+    du -sh "$d"/* "$d"/.[!.]* 2>/dev/null | sort -rh | head -{{n}} || true
+
+# Ranked scan of the usual macOS/dev disk hogs (Docker.raw, caches, Xcode, node_modules, Trash)
+[group('disk')]
+disk-hogs:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ scanning usual disk hogs (du can take ~30s)..." >&2
+    tmp=$(mktemp)
+    add() { [ -e "$2" ] && du -sh "$2" 2>/dev/null | awk -v l="$1" -F'\t' '{print $1"\t"l}' >> "$tmp"; }
+    add "Docker.raw"          "$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
+    for f in "$HOME/Library/Containers/com.docker.docker/Data/"*.raw; do add "Docker.raw" "$f"; done
+    add "Library/Caches"      "$HOME/Library/Caches"
+    add "Homebrew cache"      "$HOME/Library/Caches/Homebrew"
+    add "Xcode DerivedData"   "$HOME/Library/Developer/Xcode/DerivedData"
+    add "iOS Simulators"      "$HOME/Library/Developer/CoreSimulator/Devices"
+    add "iOS DeviceSupport"   "$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+    add "Trash"               "$HOME/.Trash"
+    add "npm cache"           "$HOME/.npm"
+    add "pip/uv cache"        "$HOME/.cache"
+    add "App Support"         "$HOME/Library/Application Support"
+    # node_modules across ~/code (summed) — often GBs spread over many repos
+    if [ -d "$HOME/code" ]; then
+        echo "  …summing node_modules under ~/code" >&2
+        nm=$(find "$HOME/code" -name node_modules -type d -prune 2>/dev/null \
+             | xargs -I{} du -sk {} 2>/dev/null | awk '{s+=$1} END{printf "%.1fG", s/1024/1024}')
+        [ -n "$nm" ] && printf '%s\t%s\n' "$nm" "node_modules (~/code, summed)" >> "$tmp"
+    fi
+    echo "" >&2
+    echo "── biggest hogs (top → bottom) ──"
+    sort -rh "$tmp" | awk -F'\t' '{printf "  %-8s  %s\n", $1, $2}'
+    rm -f "$tmp"
+    echo "" >&2
+    echo "  fix Docker.raw:  docker system prune -a --volumes   (or just -g disk-clean-docker)" >&2
+    echo "  fix caches/Trash: just -g disk-clean 1" >&2
+
+# List APFS local Time Machine snapshots (the space that du can't see)
+[group('disk')]
+disk-snapshots:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ tmutil listlocalsnapshots /" >&2
+    out=$(tmutil listlocalsnapshots / 2>/dev/null | grep 'com.apple' || true)
+    if [ -z "$out" ]; then
+        echo "  none — no local snapshots holding space" >&2
+    else
+        echo "$out"
+        echo "" >&2
+        echo "  reclaim all: just -g disk-clean-snapshots" >&2
+    fi
+
+# SAFE cleanup — Trash, user caches, Homebrew cache, npm, Claude tmp.
+# Always previews sizes first. apply=0 → dry-run (default); apply=1 → preview then gum-confirm then delete.
+[group('disk')]
+disk-clean apply="0":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    A="{{apply}}"
+    targets=(
+        "$HOME/.Trash"
+        "$HOME/Library/Caches"
+        "$HOME/Library/Caches/Homebrew"
+        "$HOME/.npm/_cacache"
+        "/private/tmp/claude-501"
+    )
+    # ── 1. preview: measure every present target + total ──
+    echo "→ disk-clean — the following would be deleted:" >&2
+    present=(); total_kb=0
+    for t in "${targets[@]}"; do
+        [ -e "$t" ] || { echo "  · skip (absent): $t" >&2; continue; }
+        sz=$(du -sh  "$t" 2>/dev/null | cut -f1); [ -z "$sz" ] && sz="0B"
+        kb=$(du -sk  "$t" 2>/dev/null | cut -f1); [ -z "$kb" ] && kb=0
+        printf "  ✗ %-7s  %s\n" "$sz" "$t/*" >&2
+        present+=("$t"); total_kb=$((total_kb + kb))
+    done
+    total_h=$(awk -v k="$total_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
+    echo "  ── total to reclaim: ~$total_h ──" >&2
+
+    # ── 2. dry-run stops here ──
+    if [ "$A" != "1" ]; then
+        echo "  (dry-run — nothing deleted. Run 'just -g disk-clean 1' to delete with confirmation.)" >&2
+        exit 0
+    fi
+
+    # ── 3. confirm (gum preferred, y/N fallback) ──
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Delete the ${#present[@]} targets above (~$total_h)?" || { echo "  aborted — nothing deleted." >&2; exit 0; }
+    else
+        printf "  Delete the %d targets above (~%s)? [y/N] " "${#present[@]}" "$total_h" >&2; read -r ans
+        [ "$ans" = "y" ] || { echo "  aborted — nothing deleted." >&2; exit 0; }
+    fi
+
+    # ── 4. delete ──
+    before=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    i=0; N=${#present[@]}
+    for t in "${present[@]}"; do
+        i=$((i+1))
+        echo "  [$i/$N] wiping $t ..." >&2
+        rm -rf "$t"/* 2>/dev/null && echo "      OK" >&2 || echo "      FAIL (in use / perms)" >&2
+    done
+    after=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    freed=$(( (after - before) / 1024 ))
+    echo "" >&2
+    echo "disk-clean: done — freed ~${freed} MiB · free now: $(df -H /System/Volumes/Data | awk 'END{print $4}')" >&2
+
+# Thin APFS local snapshots — reclaims "purgeable" space (needs sudo). Biggest single win
+[group('disk')]
+disk-clean-snapshots:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ thinning APFS local snapshots (needs sudo)" >&2
+    echo "  before: $(df -H /System/Volumes/Data | awk 'END{print $4}') free" >&2
+    sudo tmutil thinlocalsnapshots / 999999999999 4 || { echo "  FAIL" >&2; exit 1; }
+    echo "  after:  $(df -H /System/Volumes/Data | awk 'END{print $4}') free" >&2
+    echo "  OK" >&2
+
+# Reclaim Docker disk (prune unused images/containers/volumes/build cache). Asks first
+[group('disk')]
+disk-clean-docker:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v docker >/dev/null 2>&1 || { echo "  docker not installed — nothing to do" >&2; exit 0; }
+    echo "→ docker system df (current usage)" >&2
+    docker system df 2>/dev/null || { echo "  docker daemon not running — start Docker Desktop" >&2; exit 1; }
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Run docker system prune -a --volumes ?" || { echo "  aborted" >&2; exit 0; }
+    else
+        printf "  Run docker system prune -a --volumes ? [y/N] " >&2; read -r ans
+        [ "$ans" = "y" ] || { echo "  aborted" >&2; exit 0; }
+    fi
+    echo "→ docker system prune -a --volumes -f" >&2
+    docker system prune -a --volumes -f
+    echo "  OK — note: Docker.raw only shrinks after Docker Desktop → Troubleshoot → Clean/Purge" >&2
 
 # --- Todoist / Claude quick refs --------------------------------------------
 

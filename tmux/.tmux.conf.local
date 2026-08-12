@@ -281,8 +281,11 @@ bind W display-popup -E -w 80% -h 60% -d "#{pane_current_path}" "~/dotfiles/tmux
 #              doc-comment preview; Enter runs it in the popup.
 bind R display-popup -E -w 80% -h 70% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/just-menu.sh"
 
-# prefix + ? → keybinding cheat-sheet for these custom bindings.
+# prefix + ? (or F1) → keybinding cheat-sheet for these custom bindings.
+# Runs through `less -R`, so it scrolls with j/k · C-d/C-u · g/G · /search · q.
+# F1 is the discoverable alias — '?' is easy to forget and needs Shift.
 bind '?' display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
+bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------

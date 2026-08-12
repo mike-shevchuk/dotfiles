@@ -31,7 +31,7 @@ render() {
     row "prefix W"   "Worktree → session — open a git worktree as a session"
     row "prefix R"   "Just menu — run a justfile recipe (global + project)"
     row "prefix T"   "Project switcher (ts) — create/attach from project dirs"
-    row "prefix ?"   "This cheat-sheet"
+    row "prefix ?"   "This cheat-sheet (alias: prefix F1) — j/k scroll · /search · q quit"
 
     grp "Tools"
     row "prefix g"   "lazygit"
@@ -48,6 +48,8 @@ render() {
     row "prefix M"   "delta side-by-side pager vs branch"
     row "prefix N"   "difftastic semantic diff vs branch"
     row "prefix O"   "pick branch → changed files → DiffView"
+    printf "  ${C_DIM}in DiffView${C_OFF} C-j/C-k scroll · C-d/C-u half page · ]c/[c next/prev hunk · C-h/C-l panes\n"
+    printf "  ${C_DIM}           ${C_OFF} from the file list C-j/C-k scroll the diff · zR all folds · zo expand one\n"
 
     grp "Status bar"
     printf "  ${C_DIM}row 0${C_OFF} session · tabs · 🐍 python · 󰚩 claude · cpu · ram · clock\n"
