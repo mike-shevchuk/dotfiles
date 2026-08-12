@@ -119,29 +119,62 @@ end
 
 -- ─── Control Center panes ───────────────────────────────────────
 
+-- "Control Center has a window" is not the same as "the panel is open": the
+-- process keeps a window around whose children are an AXApplication and an
+-- AXMenuBar, which answers to nothing. Counting windows therefore reports the
+-- panel open when it is not, and the button is then hunted for in an empty
+-- shell forever. Judge by content instead — a real panel carries controls whose
+-- identifiers start with controlcenter- or screen-mirroring-.
+local function panelIsOpen(a)
+  return findInWindows(a, function(e)
+    local id = e:attributeValue("AXIdentifier")
+    return id ~= nil and (id:find("^controlcenter%-") ~= nil or id:find("^screen%-mirroring") ~= nil)
+  end) ~= nil
+end
+
 local function openPanel(cb)
   local app = hs.application.get(CC_BUNDLE)
   if not app then return cb(nil, "Control Center is not running") end
   local a = ax.applicationElement(app)
-  if #windowsOf(a) > 0 then return cb(a) end
+  if panelIsOpen(a) then return cb(a) end
 
   local extras = a:attributeValue("AXExtrasMenuBar")
   local item = extras and findAll(extras, byId(CC_MENU_ITEM), 1)[1]
   if not item then return cb(nil, "Control Center menu bar item not found") end
   item:performAction("AXPress")
 
-  waitUntil(function() return #windowsOf(a) > 0 or nil end, M.config.ui_timeout, function(ok)
-    if ok then cb(a) else cb(nil, "Control Center panel did not open") end
+  -- AXPress on that menu bar item stops working sometimes — it reports success
+  -- and nothing opens. A synthesised click on the same spot always does, so it
+  -- is the fallback, exactly as for the Screen Mirroring button below.
+  waitUntil(function() return panelIsOpen(a) or nil end, 1.5, function(opened)
+    if opened then return cb(a) end
+    click(item)
+    waitUntil(function() return panelIsOpen(a) or nil end, M.config.ui_timeout, function(ok)
+      if ok then cb(a) else cb(nil, "Control Center panel did not open") end
+    end)
   end)
 end
 
-local function openMirroring(cb)
+-- Control Center sometimes leaves a window behind that answers to nothing: it
+-- holds neither the pane nor the button, and Escape will not close it. Anything
+-- that trusts "a window exists, so the panel is open" then fails forever. So an
+-- unrecognisable window is torn down by toggling the menu bar item, and the
+-- whole thing is tried once more from scratch.
+local function openMirroring(cb, retried)
   openPanel(function(a, err)
     if not a then return cb(nil, err) end
     if findInWindows(a, byId(DEVICE_LIST)) then return cb(a) end
 
     local btn = findInWindows(a, byId(MIRROR_BUTTON))
-    if not btn then return cb(nil, "Screen Mirroring button not found in Control Center") end
+    if not btn then
+      if retried then
+        return cb(nil, "Screen Mirroring button not found in Control Center")
+      end
+      local extras = a:attributeValue("AXExtrasMenuBar")
+      local item = extras and findAll(extras, byId(CC_MENU_ITEM), 1)[1]
+      if item then item:performAction("AXPress") end   -- close the stale panel
+      return later(0.8, function() openMirroring(cb, true) end)
+    end
     click(btn)
 
     waitUntil(function() return findInWindows(a, byId(DEVICE_LIST)) end, M.config.ui_timeout, function(ok)
