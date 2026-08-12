@@ -458,8 +458,13 @@ just -g mirror-help         # the whole cheatsheet, in the terminal
 ### Making things fit, and going iPad-only
 
 Mirroring squeezes both screens to a shared resolution — 1180x820 by default,
-which is why nothing fits. `mirror-res` lists what the iPad can take (usually up
-to 2360x1640) and sets it.
+which is why nothing fits. `mirror-res` lists what the iPad can take and sets
+it; `mirror-res max` jumps straight to the widest mode.
+
+This matters most under a tiling WM. Measured here with PaperWM holding 23
+windows: 1180x820 shows 3 columns, 2360x1640 shows 5. The rest are not gone —
+PaperWM parks them past the edge with a 1px sliver showing, so scrolling brings
+them back.
 
 `mirror-solo` turns the monitor's backlight off over DDC (`m1ddc`) and mirrors,
 so the picture exists only on the iPad. Order is forced by macOS: while a

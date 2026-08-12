@@ -873,11 +873,23 @@ mirror-res res="":
         exit 0
     fi
 
-    echo "→ setting mirrored resolution to {{res}} ..." >&2
-    if "$dp" "$group res:{{res}} hz:60 color_depth:4 enabled:true origin:(0,0) degree:0" >/dev/null 2>&1; then
-        echo "  OK — {{res}}" >&2
+    want="{{res}}"
+    if [ "$want" = "max" ]; then
+        # Widest mode wins: PaperWM fits one more column per ~600px of width.
+        want=$("$dp" list | awk -v id="$sidecar" '
+            $0 ~ "^Persistent screen id: " id {f=1; next}
+            /^Persistent screen id:/ {f=0}
+            f && /^  mode .*hz:60/ { match($0, /res:[0-9]+x[0-9]+/); print substr($0, RSTART+4, RLENGTH-4) }
+        ' | sort -t x -k1,1n -k2,2n | tail -1)
+        [ -n "$want" ] || { echo "  FAIL — could not read the mode list" >&2; exit 1; }
+        echo "→ largest mode offered: $want" >&2
+    fi
+
+    echo "→ setting mirrored resolution to $want ..." >&2
+    if "$dp" "$group res:$want hz:60 color_depth:4 enabled:true origin:(0,0) degree:0" >/dev/null 2>&1; then
+        echo "  OK — $want" >&2
     else
-        echo "  FAIL — {{res}} is not one of the offered modes (see: just -g mirror-res)" >&2
+        echo "  FAIL — $want is not one of the offered modes (see: just -g mirror-res)" >&2
         exit 1
     fi
 
@@ -967,10 +979,15 @@ mirror-help:
 
     ЩОБ ВСЕ ПОМІЩАЛОСЬ
       mirror-res          показати доступні роздільності дзеркала
-      mirror-res 1600x1112   поставити (максимум зазвичай 2360x1640)
+      mirror-res 1600x1112   поставити конкретну
+      mirror-res max      одразу найбільшу, яку вміє iPad
 
       У дзеркалі macOS тисне обидва екрани до спільної роздільності —
       за замовчуванням 1180x820, тому "нічого не влазить". Піднімаєш — влазить.
+
+      Заміряно на PaperWM (23 вікна): 1180x820 -> видно 3 колонки,
+      2360x1640 -> видно 5. Решта вікон не зникає, PaperWM паркує їх
+      за краєм смужкою в 1px — прокрути, і вони повернуться.
 
     ТІЛЬКИ НА iPad, МОНІТОР ГАСНЕ
       mirror-solo             погасити монітор (DDC) + дзеркало на iPad
