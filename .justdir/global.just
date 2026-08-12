@@ -796,9 +796,16 @@ til-help:
 # Every recipe takes the device name as its argument; it defaults to "iPad".
 
 # Duplicate this Mac's screen onto the iPad (wireless Sidecar)
+#
+# The resolution step is not optional decoration: left alone, macOS mirrors at
+# 1180x820 and a tiling WM fits about three columns in it. `res` takes a mode,
+# `max` (the default), or `keep` to leave whatever macOS chose.
 [group('mirror')]
-mirror device="iPad":
-    @just -f "{{justfile()}}" _mirror connect "{{device}}" mirror
+mirror device="iPad" res="max":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just -f "{{justfile()}}" _mirror connect "{{device}}" mirror || exit 1
+    [ "{{res}}" = "keep" ] || just -f "{{justfile()}}" mirror-res "{{res}}"
 
 # Use the iPad as an extra display rather than a duplicate
 [group('mirror')]
@@ -900,7 +907,7 @@ mirror-res res="":
 
 # Everything on the iPad, this monitor dark — backlight to 0, then mirror
 [group('mirror')]
-mirror-solo device="iPad" res="":
+mirror-solo device="iPad" res="max":
     #!/usr/bin/env bash
     set -uo pipefail
     m1ddc=$(command -v m1ddc || echo /opt/homebrew/bin/m1ddc)
@@ -934,7 +941,7 @@ mirror-solo device="iPad" res="":
         echo "  FAIL — could not attach {{device}}; monitor backlight restored to $cur" >&2
         exit 1
     fi
-    [ -n "{{res}}" ] && just -f "{{justfile()}}" mirror-res "{{res}}"
+    [ "{{res}}" = "keep" ] || just -f "{{justfile()}}" mirror-res "{{res}}"
     echo "  OK — the picture lives on the iPad now; bring the monitor back with: just -g mirror-wake" >&2
 
 # Leave solo mode: drop Sidecar, then bring the monitor backlight back
@@ -969,7 +976,8 @@ mirror-help:
     Треба щоб він не спав, був у тій же Wi-Fi і тому ж Apple Account.
 
     ЩОДЕННЕ
-      mirror              дублювати цей екран на iPad
+      mirror              дублювати цей екран на iPad (одразу максимальна
+                          роздільність; `mirror iPad keep` — не чіпати)
       mirror-extend       iPad як ДОДАТКОВИЙ екран (для роботи зручніше)
       mirror-off          від'єднати
       mirror-toggle       туди-сюди
