@@ -244,13 +244,26 @@ local function parseJust(entries)
     end
     if not private then
       local doc = r.doc
+
+      -- Recipes take arguments, and half of these do. Keep the names and
+      -- defaults so the palette can ask for them instead of silently running
+      -- with whatever the justfile falls back to.
+      local params, sig = {}, {}
+      for _, p in ipairs(r.parameters or {}) do
+        local required = (p.default == nil)
+        params[#params + 1] = { name = p.name, default = p.default, required = required }
+        sig[#sig + 1] = required and p.name:upper()
+                        or ("[" .. p.name .. "=" .. tostring(p.default) .. "]")
+      end
+
       entries[#entries + 1] = {
         kind     = "just",
         title    = (doc and doc ~= "" and doc) or name,
         category = "just · " .. (group or "misc"),
         source   = "just -g " .. name,
-        detail   = "just -g " .. name,
+        detail   = "just -g " .. name .. (#sig > 0 and (" " .. table.concat(sig, " ")) or ""),
         recipe   = name,
+        params   = #params > 0 and params or nil,
       }
     end
   end
@@ -434,23 +447,67 @@ end
 
 -- ─── Running a command ──────────────────────────────────────────
 
+-- A new tmux window, because half these recipes want a real terminal: fzf and
+-- gum need a TTY, and the output is worth reading afterwards. The window waits
+-- on a keypress so a fast recipe does not vanish before it can be read.
+function M.runRecipe(e, args)
+  args = (args and args ~= "") and (" " .. args) or ""
+  local inner = ("just -g %s%s; printf \"\\n── done ── press enter\\n\"; read x")
+    :format(e.recipe, args)
+  local cmd = ("tmux new-window -n 'just %s' '%s' 2>&1"):format(e.recipe, inner)
+  local _, ok = hs.execute(cmd, true)
+  if not ok then
+    hs.alert.show("Palette: no tmux session — running in the background", 2)
+    hs.task.new("/bin/zsh", function(_, so, se)
+      hs.alert.show((so ~= "" and so or se or ""):sub(1, 400), 6)
+    end, { "-lc", "just -g " .. e.recipe .. args }):start()
+  end
+end
+
+-- Ask for the recipe's arguments with the query field itself: a text prompt
+-- would block the whole of Hammerspoon until answered, which is the wrong shape
+-- for a setup meant to run on the keyboard. Type, Enter, done — and an empty
+-- answer is still valid, since every optional parameter keeps its default.
+M._argChooser = nil
+
+function M.askArgs(e)
+  local hint = {}
+  for _, p in ipairs(e.params) do
+    hint[#hint + 1] = p.required and (p.name:upper() .. " (required)")
+                      or ("[" .. p.name .. "=" .. tostring(p.default) .. "]")
+  end
+  local signature = table.concat(hint, "  ")
+
+  local function row(args)
+    return { {
+      text    = "just -g " .. e.recipe .. (args ~= "" and (" " .. args) or ""),
+      subText = styled(args ~= "" and "Enter to run" or "Enter to run with defaults",
+                       BLUE, signature),
+      args    = args,
+    } }
+  end
+
+  M._argChooser = M._argChooser or hs.chooser.new(function(choice)
+    if not choice then return end
+    M.runRecipe(choice.entry or M._argEntry, choice.args or "")
+  end)
+  M._argEntry = e
+  M._argChooser:queryChangedCallback(function(q) M._argChooser:choices(row(q)) end)
+  M._argChooser:placeholderText("arguments for " .. e.recipe .. "   ·   " .. signature)
+  M._argChooser:bgDark(true)
+  M._argChooser:width(40)
+  M._argChooser:rows(3)
+  M._argChooser:query("")
+  M._argChooser:choices(row(""))
+  M._argChooser:show()
+end
+
 local function run(e)
   remember(e)
 
   if e.kind == "just" then
-    -- A new tmux window, because half these recipes want a real terminal: fzf
-    -- and gum need a TTY, and their output is worth reading afterwards. The
-    -- window waits on a keypress so a fast recipe does not vanish.
-    local inner = ("just -g %s; printf \"\\n── done ── press enter\\n\"; read x"):format(e.recipe)
-    local cmd = ("tmux new-window -n 'just %s' '%s' 2>&1"):format(e.recipe, inner)
-    local out, ok = hs.execute(cmd, true)
-    if not ok then
-      hs.alert.show("Palette: no tmux session — running in background", 2)
-      hs.task.new("/bin/zsh", function(_, so, se)
-        hs.alert.show((so ~= "" and so or se or ""):sub(1, 400), 6)
-      end, { "-lc", "just -g " .. e.recipe }):start()
-    end
-    return
+    if e.params then return M.askArgs(e) end
+    return M.runRecipe(e, "")
   end
 
   if e.kind == "key" then
