@@ -144,12 +144,30 @@ local CSS = [[
 ]]
 
 M._view = nil
-M._modal = nil
+
+-- Closing has to be handled by the page, not by a hotkey. A modal bound to esc
+-- swallows esc for every other app while the window is up — and one bound to a
+-- bare letter steals that letter from whatever you are typing into. A keydown
+-- listener inside the document only ever fires when this window has focus.
+local CLOSE_JS = [[
+  <script>
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' || e.key === 'q') {
+        webkit.messageHandlers.cheatsheet.postMessage('close');
+      }
+    });
+  </script>
+]]
+
+local userContent = hs.webview.usercontent.new("cheatsheet")
+userContent:setCallback(function(msg)
+  if msg and msg.body == "close" then M.close() end
+end)
 
 function M.render(title, origin, md)
   local html = ([[<html><head><meta charset="utf-8"><style>%s</style></head><body>
-    <div class="head">%s &nbsp;·&nbsp; %s &nbsp;·&nbsp; esc to close</div>%s</body></html>]])
-    :format(CSS, escape(title), escape(origin), toHTML(md))
+    <div class="head">%s &nbsp;·&nbsp; %s &nbsp;·&nbsp; esc or q to close</div>%s%s</body></html>]])
+    :format(CSS, escape(title), escape(origin), toHTML(md), CLOSE_JS)
 
   local screen = hs.screen.mainScreen():frame()
   local w = math.min(980, screen.w - 120)
@@ -157,25 +175,24 @@ function M.render(title, origin, md)
   local rect = { x = screen.x + (screen.w - w) / 2, y = screen.y + (screen.h - h) / 2, w = w, h = h }
 
   if M._view then M._view:delete() end
-  M._view = hs.webview.new(rect)
+  M._view = hs.webview.new(rect, {}, userContent)
     :windowStyle({ "titled", "closable", "resizable" })
     :windowTitle(title)
-    :allowTextEntry(true)
+    :allowTextEntry(true)   -- the page needs keys to hear esc at all
+    :deleteOnClose(true)
     :html(html)
     :bringToFront(true)
     :show()
 
-  -- A document window with no keyboard way out is a trap on a keyboard-only
-  -- setup, so esc closes it and the modal lives only as long as the window.
-  if M._modal then M._modal:exit() end
-  M._modal = hs.hotkey.modal.new()
-  M._modal:bind({}, "escape", function() M.close() end)
-  M._modal:bind({}, "q", function() M.close() end)
-  M._modal:enter()
+  -- Focus the window itself, or the keys go to whatever was in front and the
+  -- page never sees them.
+  hs.timer.doAfter(0.2, function()
+    local w = M._view and M._view:hswindow()
+    if w then w:focus() end
+  end)
 end
 
 function M.close()
-  if M._modal then M._modal:exit() M._modal = nil end
   if M._view then M._view:delete() M._view = nil end
 end
 
