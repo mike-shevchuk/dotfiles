@@ -621,6 +621,18 @@ function M.cli(cmd, device, mode)
     writeResult(cmd, ok, msg, devs)
   end
 
+  -- Sidecar lives in the graphical session: on the lock screen there is no
+  -- Control Center to open, and every accessibility action quietly does
+  -- nothing. Saying so beats letting the UI hunt fail with something vague —
+  -- that mistake cost an evening once.
+  local session = hs.caffeinate.sessionProperties() or {}
+  if session.CGSSessionScreenIsLocked then
+    writeResult(cmd, false,
+      "the Mac is locked — Sidecar needs an unlocked desktop. Unlock it at the machine, " ..
+      "or over Screen Sharing (vnc://" .. (hs.host.localizedName() or "this-mac") .. "), then retry")
+    return "locked"
+  end
+
   M._lastError = nil
   later(0, function()
     if cmd == "connect" then
