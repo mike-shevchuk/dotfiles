@@ -16,11 +16,11 @@
 #
 # Every recipe takes the device name as its argument; it defaults to "iPad".
 
-# Duplicate this Mac's screen onto the iPad (wireless Sidecar)
-#
 # The resolution step is not optional decoration: left alone, macOS mirrors at
 # 1180x820 and a tiling WM fits about three columns in it. `res` takes a mode,
 # `max` (the default), or `keep` to leave whatever macOS chose.
+
+# Duplicate this Mac's screen onto the iPad (wireless Sidecar)
 [group('mirror')]
 mirror device="iPad" res="max":
     #!/usr/bin/env bash
@@ -30,11 +30,11 @@ mirror device="iPad" res="max":
     [ "{{res}}" = "keep" ] || just -f "{{justfile()}}" mirror-res "{{res}}"
     just -f "{{justfile()}}" _mirror-refocus "$front"
 
-# Use the iPad as an extra display rather than a duplicate
-#
 # The gentlest of the three: this monitor keeps its own resolution, so a tiling
 # WM has no reason to re-lay the row and nothing gets pushed past the edge. The
 # focus is still restored afterwards, because attaching any display re-tiles.
+
+# Use the iPad as an extra display rather than a duplicate — nothing here moves
 [group('mirror')]
 mirror-extend device="iPad":
     #!/usr/bin/env bash
