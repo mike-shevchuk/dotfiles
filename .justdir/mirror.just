@@ -31,9 +31,17 @@ mirror device="iPad" res="max":
     just -f "{{justfile()}}" _mirror-refocus "$front"
 
 # Use the iPad as an extra display rather than a duplicate
+#
+# The gentlest of the three: this monitor keeps its own resolution, so a tiling
+# WM has no reason to re-lay the row and nothing gets pushed past the edge. The
+# focus is still restored afterwards, because attaching any display re-tiles.
 [group('mirror')]
 mirror-extend device="iPad":
-    @just -f "{{justfile()}}" _mirror connect "{{device}}" extend
+    #!/usr/bin/env bash
+    set -uo pipefail
+    front=$(just -f "{{justfile()}}" _mirror-front)
+    just -f "{{justfile()}}" _mirror connect "{{device}}" extend || exit 1
+    just -f "{{justfile()}}" _mirror-refocus "$front"
 
 # Disconnect the iPad (and bring the monitor backlight back if mirror-solo dimmed it)
 [group('mirror')]
