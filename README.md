@@ -448,8 +448,33 @@ just -g mirror-toggle       # connect ⇄ disconnect  (same as hyper + O)
 just -g mirror-status       # is it attached, and which displays exist
 just -g mirror-list         # devices Screen Mirroring is offering
 just -g mirror-pick         # fzf over those devices
+just -g mirror-res          # resolutions the mirrored set can take
+just -g mirror-res 1600x1112   # …and set one
+just -g mirror-solo         # iPad only: monitor backlight to 0, then mirror
+just -g mirror-wake         # leave solo — drop Sidecar, monitor back on
 just -g mirror-help         # the whole cheatsheet, in the terminal
 ```
+
+### Making things fit, and going iPad-only
+
+Mirroring squeezes both screens to a shared resolution — 1180x820 by default,
+which is why nothing fits. `mirror-res` lists what the iPad can take (usually up
+to 2360x1640) and sets it.
+
+`mirror-solo` turns the monitor's backlight off over DDC (`m1ddc`) and mirrors,
+so the picture exists only on the iPad. Order is forced by macOS: while a
+mirrored set is up the physical monitor is unreachable over DDC, so the
+backlight is dimmed *before* Sidecar attaches and restored *after* it detaches —
+`mirror-wake` therefore drops the session on its way out. If the iPad fails to
+attach, the brightness is put back immediately rather than leaving a dark
+monitor.
+
+### Input from the iPad side
+
+Sidecar forwards only a hardware **keyboard** and **Apple Pencil** to the Mac. A
+trackpad or mouse paired to the *iPad* does nothing — its pointer never leaves
+iPadOS. Pair the keyboard/trackpad to the **Mac** instead; the iPad is only a
+display.
 
 Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —
 defaulting to `iPad`.

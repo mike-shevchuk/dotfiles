@@ -805,10 +805,17 @@ mirror device="iPad":
 mirror-extend device="iPad":
     @just -f "{{justfile()}}" _mirror connect "{{device}}" extend
 
-# Disconnect the iPad
+# Disconnect the iPad (and bring the monitor backlight back if mirror-solo dimmed it)
 [group('mirror')]
 mirror-off device="iPad":
-    @just -f "{{justfile()}}" _mirror disconnect "{{device}}"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just -f "{{justfile()}}" _mirror disconnect "{{device}}"
+    # DDC only reaches the monitor once the mirrored set is gone.
+    if [ -f "$HOME/.cache/hs/monitor-luminance" ]; then
+        sleep 2
+        just -f "{{justfile()}}" _mirror-restore-brightness
+    fi
 
 # Connect if disconnected, disconnect if connected
 [group('mirror')]
@@ -838,6 +845,107 @@ mirror-pick mode="mirror":
     [ -n "$dev" ] || { echo "  cancelled" >&2; exit 0; }
     just -f "{{justfile()}}" _mirror connect "$dev" "{{mode}}"
 
+# Resolution of the mirrored set — no argument lists what the iPad offers
+[group('mirror')]
+mirror-res res="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    dp=/opt/homebrew/bin/displayplacer
+    [ -x "$dp" ] || { echo "  FAIL — displayplacer not installed (brew install displayplacer)" >&2; exit 1; }
+
+    # A mirrored pair is one "id:<a>+<b>" group in displayplacer's own output;
+    # <a> is the Sidecar display, and its mode list is what limits the pair.
+    group=$("$dp" list | tail -1 | grep -oE 'id:[0-9A-Fa-f-]+\+[0-9A-Fa-f-]+' | head -1)
+    [ -n "$group" ] || { echo "  FAIL — nothing is mirrored right now (run: just -g mirror)" >&2; exit 1; }
+    sidecar=${group#id:}; sidecar=${sidecar%%+*}
+
+    if [ -z "{{res}}" ]; then
+        echo "→ resolutions the mirrored display can take:" >&2
+        "$dp" list | awk -v id="$sidecar" '
+            $0 ~ "^Persistent screen id: " id {f=1; next}
+            /^Persistent screen id:/ {f=0}
+            f && /^  mode .*hz:60/ {
+                match($0, /res:[0-9]+x[0-9]+/); r=substr($0, RSTART+4, RLENGTH-4)
+                if (!(r in seen)) { seen[r]=1
+                                    printf "  %s%s\n", r, ($0 ~ /current mode/) ? "   <- current" : "" }
+            }' | sort -t x -k1,1n -k2,2n
+        echo "  set one with:  just -g mirror-res 1600x1112" >&2
+        exit 0
+    fi
+
+    echo "→ setting mirrored resolution to {{res}} ..." >&2
+    if "$dp" "$group res:{{res}} hz:60 color_depth:4 enabled:true origin:(0,0) degree:0" >/dev/null 2>&1; then
+        echo "  OK — {{res}}" >&2
+    else
+        echo "  FAIL — {{res}} is not one of the offered modes (see: just -g mirror-res)" >&2
+        exit 1
+    fi
+
+# ORDER MATTERS. While a mirrored set is up, macOS exposes only the Sidecar
+# display and the physical monitor is unreachable over DDC (m1ddc lists nothing
+# and returns a negative error code). So the backlight has to be dimmed BEFORE
+# Sidecar attaches, and can only be restored AFTER it detaches.
+
+# Everything on the iPad, this monitor dark — backlight to 0, then mirror
+[group('mirror')]
+mirror-solo device="iPad" res="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    m1ddc=$(command -v m1ddc || echo /opt/homebrew/bin/m1ddc)
+    [ -x "$m1ddc" ] || { echo "  FAIL — m1ddc not installed (brew install m1ddc)" >&2; exit 1; }
+
+    read_luminance() { "$m1ddc" get luminance 2>/dev/null | tr -dc '0-9-'; }
+
+    cur=$(read_luminance)
+    case "$cur" in
+        ''|-*)  # a mirror is already hiding the monitor — drop it so DDC answers
+            echo "→ monitor is behind an active mirror set; dropping Sidecar first ..." >&2
+            just -f "{{justfile()}}" _mirror disconnect "{{device}}" >/dev/null || true
+            sleep 2
+            cur=$(read_luminance)
+            ;;
+    esac
+    case "$cur" in
+        ''|-*) echo "  FAIL — the monitor does not answer over DDC" >&2; exit 1 ;;
+    esac
+
+    save="$HOME/.cache/hs/monitor-luminance"
+    mkdir -p "$(dirname "$save")"
+    printf '%s\n' "$cur" > "$save"
+    echo "→ monitor backlight $cur → 0 (saved)" >&2
+    "$m1ddc" set luminance 0 >/dev/null 2>&1
+
+    if ! just -f "{{justfile()}}" _mirror connect "{{device}}" mirror; then
+        # Never leave the user staring at a dark monitor with no iPad.
+        "$m1ddc" set luminance "$cur" >/dev/null 2>&1
+        rm -f "$save"
+        echo "  FAIL — could not attach {{device}}; monitor backlight restored to $cur" >&2
+        exit 1
+    fi
+    [ -n "{{res}}" ] && just -f "{{justfile()}}" mirror-res "{{res}}"
+    echo "  OK — the picture lives on the iPad now; bring the monitor back with: just -g mirror-wake" >&2
+
+# Leave solo mode: drop Sidecar, then bring the monitor backlight back
+[group('mirror')]
+mirror-wake device="iPad":
+    @just -f "{{justfile()}}" mirror-off "{{device}}"
+
+# Put the saved backlight back — only meaningful once Sidecar is already down
+[group('mirror')]
+[private]
+_mirror-restore-brightness:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    save="$HOME/.cache/hs/monitor-luminance"
+    [ -f "$save" ] || exit 0
+    m1ddc=$(command -v m1ddc || echo /opt/homebrew/bin/m1ddc)
+    prev=$(tr -dc '0-9' < "$save")
+    [ -n "$prev" ] || prev=100
+    echo "→ monitor backlight → $prev ..." >&2
+    "$m1ddc" set luminance "$prev" >/dev/null 2>&1
+    rm -f "$save"
+    echo "  OK — $prev" >&2
+
 # Screen mirroring cheatsheet
 [group('mirror')]
 mirror-help:
@@ -856,6 +964,28 @@ mirror-help:
       mirror-status       підключено? які дисплеї зараз
       mirror-list         що взагалі пропонує macOS
       mirror-pick         fzf по пристроях
+
+    ЩОБ ВСЕ ПОМІЩАЛОСЬ
+      mirror-res          показати доступні роздільності дзеркала
+      mirror-res 1600x1112   поставити (максимум зазвичай 2360x1640)
+
+      У дзеркалі macOS тисне обидва екрани до спільної роздільності —
+      за замовчуванням 1180x820, тому "нічого не влазить". Піднімаєш — влазить.
+
+    ТІЛЬКИ НА iPad, МОНІТОР ГАСНЕ
+      mirror-solo             погасити монітор (DDC) + дзеркало на iPad
+      mirror-solo iPad 1600x1112   те саме + одразу роздільність
+      mirror-wake             повернути монітор (від'єднує Sidecar)
+
+      Поки дзеркало активне, фізичний монітор через DDC недоступний —
+      macOS показує лише дзеркальний набір. Тому гасимо ДО підключення,
+      а вмикаємо ПІСЛЯ від'єднання. Якщо iPad не підключився — яскравість
+      повертається сама, у темряві не залишишся.
+
+    ВВІД З БОКУ iPad
+      Sidecar прокидає на Mac лише апаратну клавіатуру та Apple Pencil.
+      Трекпад/миша, підключені до iPad, НЕ працюють — це обмеження Sidecar.
+      Рішення: підключи клавіатуру з тачпадом до Mac, а не до iPad.
 
       Ім'я пристрою — перший аргумент, дефолт "iPad":
         just -g mirror "iPad Мішка"
