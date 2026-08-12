@@ -102,6 +102,11 @@ mirror.startWidget()
 --                        keeps its own chord instead of living in the palette)
 guard.bind(hyper2, "Space", palette.open)
 guard.bind(hyper2, "F", keyboard.clickHints)
+
+-- ctrl+alt+cmd+Space opens the palette too. It used to be the window jumper,
+-- which the Windows tab now covers — so the chord keeps meaning "show me a
+-- list", and there is one list instead of two.
+guard.bind({ "ctrl", "alt", "cmd" }, "Space", palette.open)
 -- ctrl+alt+shift+H     = open any cheatsheet — README sections, zettelkasten
 --                        sheets, and a generated one for the palette itself
 guard.bind(hyper2, "H", cheatsheets.show)

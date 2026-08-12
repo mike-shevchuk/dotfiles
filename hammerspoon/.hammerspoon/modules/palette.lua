@@ -549,7 +549,8 @@ M._moveChooser = nil
 
 function M.refresh()
   local v = M._view
-  if v.kind == "cat" then M.showCategory(v.name)
+  if v.kind == "windows" then M.showWindows()
+  elseif v.kind == "cat" then M.showCategory(v.name)
   elseif v.kind == "all" then M.showAll()
   else M.show() end
 end
@@ -586,10 +587,11 @@ local MODES = {
 M.TABS = {
   { key = "1", name = "Categories", sigil = nil, root = true },
   { key = "2", name = "All",        sigil = nil },
-  { key = "3", name = "★ Starred",  sigil = "*" },
-  { key = "4", name = "? Hotkeys",  sigil = "?" },
-  { key = "5", name = "justfile",   sigil = "!" },
-  { key = "6", name = "# Archive",  sigil = "#" },
+  { key = "3", name = "Windows",    windows = true },
+  { key = "4", name = "★ Starred",  sigil = "*" },
+  { key = "5", name = "? Hotkeys",  sigil = "?" },
+  { key = "6", name = "justfile",   sigil = "!" },
+  { key = "7", name = "# Archive",  sigil = "#" },
 }
 M._tab = 1
 
@@ -712,6 +714,11 @@ local function chooser()
       local name = choice.goTo
       return hs.timer.doAfter(0.05, function() M.showCategory(name) end)
     end
+    if choice.windowId then
+      local w = hs.window.get(choice.windowId)
+      if w then w:focus() else hs.alert.show("That window is gone", 2) end
+      return
+    end
     if choice.expose then return M.showAllWindows() end
     if choice.call then
       -- Pinned rows name their target rather than holding a reference, so the
@@ -782,14 +789,44 @@ function M.open()
   M.show()
 end
 
--- Switch to a tab: the categories, everything, or one of the filtered views.
+-- Switch to a tab: the categories, the windows, everything, or a filtered view.
 function M.showTab(i)
   local tab = M.TABS[i]
   if not tab then return end
   M._tab = i
   if tab.root then return M.show() end
+  if tab.windows then return M.showWindows() end
   M._filter = tab.sigil and SIGILS[tab.sigil] or nil
   M.showAll()
+end
+
+-- Every open window, front-to-back. Not a command list at all — it is built
+-- fresh each time from what is actually on screen, because a window list cached
+-- from a parse would be wrong within seconds.
+function M.showWindows()
+  M._view = { kind = "windows" }
+  local rows = { { text = "← Categories", goTo = "root",
+                   subText = styled("esc", GREY, "back to the category list") } }
+
+  for _, w in ipairs(hs.window.orderedWindows()) do
+    local app    = w:application() and w:application():name() or "?"
+    local title  = w:title()
+    local screen = w:screen() and w:screen():name() or "?"
+    -- The palette is itself a window; listing it as somewhere to jump to is
+    -- noise at best and a loop at worst.
+    if title and title ~= "" and app ~= "Hammerspoon" then
+      rows[#rows + 1] = {
+        text     = title,
+        subText  = styled(app, BLUE, screen .. (w:isMinimized() and "  ·  minimised" or "")),
+        windowId = w:id(),
+      }
+    end
+  end
+
+  local ch = chooser()
+  ch:placeholderText(tabBar() .. ("   ·   %d windows"):format(#rows - 1))
+  ch:choices(rows)
+  ch:show()
 end
 
 -- Root: the categories themselves.
