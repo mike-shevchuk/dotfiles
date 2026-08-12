@@ -269,6 +269,52 @@ function M.centerMouse()
   hs.mouse.absolutePosition({ x = f.x + f.w / 2, y = f.y + f.h / 2 })
 end
 
+-- ─── What is actually arriving ──────────────────────────────────
+--
+-- Keys typed on a keyboard paired to the *iPad* reach the Mac through Sidecar,
+-- and letters land while chords sometimes do not. Guessing why is expensive, so
+-- this records the raw stream — keycode, character and the modifier flags — and
+-- whether hs.hotkey holds a binding for that exact combination. Run it, press
+-- the chord that is not working, and the log says which half is missing.
+
+M.KEYLOG = os.getenv("HOME") .. "/.cache/hs/keys.log"
+M._logTap = nil
+
+function M.logKeys()
+  if M._logTap then
+    M._logTap:stop()
+    M._logTap = nil
+    hs.alert.show("Key log stopped — " .. M.KEYLOG, 3)
+    return
+  end
+
+  hs.fs.mkdir(os.getenv("HOME") .. "/.cache/hs")
+  local f = io.open(M.KEYLOG, "a")
+  if f then
+    f:write(("\n=== %s  started ===\n"):format(os.date("%H:%M:%S")))
+    f:close()
+  end
+
+  local types = { hs.eventtap.event.types.keyDown, hs.eventtap.event.types.flagsChanged }
+  M._logTap = hs.eventtap.new(types, function(ev)
+    local flags = ev:getFlags()
+    local mods = {}
+    for _, m in ipairs({ "ctrl", "alt", "shift", "cmd", "fn" }) do
+      if flags[m] then mods[#mods + 1] = m end
+    end
+    local key = hs.keycodes.map[ev:getKeyCode()] or "?"
+    local kind = ev:getType() == hs.eventtap.event.types.flagsChanged and "mods " or "key  "
+    local line = ("%s %-6s %-10s [%s]  src=%d\n"):format(
+      os.date("%H:%M:%S"), kind, key, table.concat(mods, "+"),
+      ev:getProperty(hs.eventtap.event.properties.eventSourceUserData) or 0)
+    local h = io.open(M.KEYLOG, "a")
+    if h then h:write(line) h:close() end
+    return false
+  end)
+  M._logTap:start()
+  hs.alert.show("Key log ON — press the chord that fails, then run this again to stop", 5)
+end
+
 -- Scroll without reaching for anything, in the window under focus.
 function M.scrollDown() hs.eventtap.scrollWheel({ 0, -5 }, {}, "line") end
 function M.scrollUp()   hs.eventtap.scrollWheel({ 0,  5 }, {}, "line") end
