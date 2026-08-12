@@ -13,6 +13,7 @@ local system      = require("modules.system")
 local sidecar     = require("modules.sidecar")
 local mirror      = require("modules.mirror")
 local palette     = require("modules.palette")
+local keyboard    = require("modules.keyboard")
 local mousefinder = require("modules.mousefinder")
 local scratchpad  = require("modules.scratchpad")
 local brightness  = require("modules.brightness")
@@ -88,15 +89,18 @@ guard.bind(hyper2, "P", mirror.showChooser)
 mirror.startWidget()
 
 -- ─── Command palette / cheatsheet ───────────────────────────────
--- Space, to join the other two pickers: alt+shift+Space is the app launcher and
--- ctrl+alt+cmd+Space jumps to a window, so the thumb stays put and the modifier
--- picks which list you want.
--- ctrl+alt+shift+Space = every command, by category — bound or not, searchable
---     by name, chord or module; descriptions are these very comments
--- ctrl+alt+shift+W = Exposé: every window as a thumbnail, whatever the tiler
---     did with the row
+--
+-- ONE key to remember. Everything else in this file is reachable through it —
+-- by category, or by typing a name, a chord or a module — so nothing has to be
+-- memorised twice. Space, to join the other two pickers: alt+shift+Space is the
+-- app launcher and ctrl+alt+cmd+Space jumps to a window, so the thumb stays put
+-- and only the modifier says which list you want.
+--
+-- ctrl+alt+shift+Space = every command there is, and the cheatsheet for them
+-- ctrl+alt+shift+F     = click anything by keyboard (needs to be instant, so it
+--                        keeps its own chord instead of living in the palette)
 guard.bind(hyper2, "Space", palette.show)
-guard.bind(hyper2, "W", palette.showAllWindows)
+guard.bind(hyper2, "F", keyboard.clickHints)
 
 -- ─── Mouse Finder ───────────────────────────────────────────────
 -- F = flash crosshair at mouse position

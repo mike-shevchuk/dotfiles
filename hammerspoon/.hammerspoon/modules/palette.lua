@@ -211,6 +211,51 @@ local function parseModule(path, name, out, sectionOfModule, bound)
   f:close()
 end
 
+-- ─── Source 3: just recipes ─────────────────────────────────────
+--
+-- The other half of this setup lives in ~/dotfiles/.justdir/global.just, and it
+-- is the half with the long tail — disk cleanup, git sweeps, cheatsheets, the
+-- mirror commands. `just --dump --dump-format json` hands over names, doc
+-- comments and groups exactly as written, so nothing has to be re-described.
+
+M.justfile = os.getenv("HOME") .. "/dotfiles/.justdir/global.just"
+
+local function parseJust(entries)
+  local probe = io.open(M.justfile, "r")
+  if not probe then return end
+  probe:close()
+
+  local out, ok = hs.execute(
+    ("just --justfile %s --dump --dump-format json 2>/dev/null"):format(M.justfile), true)
+  if not ok or not out or out == "" then return end
+  local decoded, data = pcall(hs.json.decode, out)
+  if not decoded or type(data) ~= "table" or type(data.recipes) ~= "table" then return end
+
+  local names = {}
+  for name in pairs(data.recipes) do names[#names + 1] = name end
+  table.sort(names)
+
+  for _, name in ipairs(names) do
+    local r = data.recipes[name]
+    local private, group = name:sub(1, 1) == "_", nil
+    for _, attr in ipairs(r.attributes or {}) do
+      if type(attr) == "table" and attr.group then group = attr.group
+      elseif attr == "private" then private = true end
+    end
+    if not private then
+      local doc = r.doc
+      entries[#entries + 1] = {
+        kind     = "just",
+        title    = (doc and doc ~= "" and doc) or name,
+        category = "just · " .. (group or "misc"),
+        source   = "just -g " .. name,
+        detail   = "just -g " .. name,
+        recipe   = name,
+      }
+    end
+  end
+end
+
 -- ─── Build ──────────────────────────────────────────────────────
 
 function M.parse()
@@ -229,8 +274,12 @@ function M.parse()
     parseModule(dir .. "/modules/" .. n .. ".lua", n, entries, sectionOfModule, bound)
   end
 
-  -- Categories keep the order they first appear in, so the bound commands from
-  -- init.lua lead and the module-only ones follow.
+  parseJust(entries)
+
+  -- Remember where each command started out, so equally-used ones keep the
+  -- order the files give them instead of shuffling on every parse.
+  for i, e in ipairs(entries) do e.order = i end
+
   local cats, index = {}, {}
   for _, e in ipairs(entries) do
     local c = index[e.category]
@@ -242,7 +291,52 @@ function M.parse()
   end
 
   M.entries, M.categories = entries, cats
+  M.sort()
   return entries
+end
+
+-- ─── Most-used first ────────────────────────────────────────────
+--
+-- Counted per command and kept in hs.settings, so the ranking survives reloads
+-- and restarts. Ties fall back to file order — without that, everything unused
+-- would reshuffle each time and the list would never feel familiar.
+
+local USES_KEY = "PaletteUses"
+M.uses = hs.settings.get(USES_KEY) or {}
+
+local function usesOf(e) return M.uses[e.source] or 0 end
+
+local function byUse(a, b)
+  local ua, ub = usesOf(a), usesOf(b)
+  if ua ~= ub then return ua > ub end
+  return (a.order or 0) < (b.order or 0)
+end
+
+function M.sort()
+  table.sort(M.entries, byUse)
+  for _, c in ipairs(M.categories) do
+    table.sort(c.items, byUse)
+    c.uses = 0
+    for _, e in ipairs(c.items) do c.uses = c.uses + usesOf(e) end
+  end
+  table.sort(M.categories, function(a, b)
+    if a.uses ~= b.uses then return a.uses > b.uses end
+    return (a.items[1] and a.items[1].order or 0) < (b.items[1] and b.items[1].order or 0)
+  end)
+end
+
+local function remember(e)
+  M.uses[e.source] = (M.uses[e.source] or 0) + 1
+  hs.settings.set(USES_KEY, M.uses)
+  M.sort()
+end
+
+-- Forget the ranking and go back to file order
+function M.resetUses()
+  M.uses = {}
+  hs.settings.set(USES_KEY, M.uses)
+  M.sort()
+  hs.alert.show("Palette: usage ranking cleared", 2)
 end
 
 -- ─── Presentation ───────────────────────────────────────────────
@@ -267,6 +361,24 @@ end
 -- ─── Running a command ──────────────────────────────────────────
 
 local function run(e)
+  remember(e)
+
+  if e.kind == "just" then
+    -- A new tmux window, because half these recipes want a real terminal: fzf
+    -- and gum need a TTY, and their output is worth reading afterwards. The
+    -- window waits on a keypress so a fast recipe does not vanish.
+    local inner = ("just -g %s; printf \"\\n── done ── press enter\\n\"; read x"):format(e.recipe)
+    local cmd = ("tmux new-window -n 'just %s' '%s' 2>&1"):format(e.recipe, inner)
+    local out, ok = hs.execute(cmd, true)
+    if not ok then
+      hs.alert.show("Palette: no tmux session — running in background", 2)
+      hs.task.new("/bin/zsh", function(_, so, se)
+        hs.alert.show((so ~= "" and so or se or ""):sub(1, 400), 6)
+      end, { "-lc", "just -g " .. e.recipe }):start()
+    end
+    return
+  end
+
   if e.kind == "key" then
     -- Replay the chord instead of calling the function, so guard and every
     -- other wrapper behaves exactly as when the keys are pressed.
@@ -301,6 +413,15 @@ local function chooser()
       return hs.timer.doAfter(0.05, function() M.showCategory(name) end)
     end
     if choice.expose then return M.showAllWindows() end
+    if choice.call then
+      -- Pinned rows name their target rather than holding a reference, so the
+      -- palette still loads if that module is not installed yet.
+      local ok, mod = pcall(require, "modules." .. choice.call[1])
+      if ok and type(mod) == "table" and type(mod[choice.call[2]]) == "function" then
+        return hs.timer.doAfter(0.05, mod[choice.call[2]])
+      end
+      return hs.alert.show("Palette: modules/" .. choice.call[1] .. ".lua is not installed", 3)
+    end
     if choice.entry then return run(choice.entry) end
   end)
   M._chooser:searchSubText(true)   -- so a chord or a module name finds it too
@@ -314,11 +435,19 @@ end
 function M.show()
   if #M.entries == 0 then M.parse() end
 
+  -- The things worth reaching for first, before the categories: someone who
+  -- remembers only this one chord should still find their way from here.
   local rows = {
-    { text = "All commands", goTo = "all",
-      subText = styled(("%d"):format(#M.entries), BLUE, "everything in one flat list") },
+    { text = "Cheatsheet — all commands and their keys", goTo = "all",
+      subText = styled(("%d"):format(#M.entries), BLUE, "one flat list; type a name, a chord or a module") },
+    { text = "Menu of this app", call = { "keyboard", "menuPalette" },
+      subText = styled("no mouse", BLUE, "every menu command of the front app, searchable") },
+    { text = "Click anything by keyboard", call = { "keyboard", "clickHints" },
+      subText = styled("⌃⌥⇧F", BLUE, "labels every button and link — type a label to press it") },
+    { text = "Move the cursor with keys", call = { "keyboard", "mouseKeys" },
+      subText = styled("no mouse", BLUE, "hjkl to move, space to click, esc to leave") },
     { text = "Show all windows", expose = true,
-      subText = styled("⌃⌥⇧W", BLUE, "Exposé — every window, any space, ignores tiling") },
+      subText = styled("Exposé", BLUE, "every window as a thumbnail, whatever the tiler did") },
   }
   for _, c in ipairs(M.categories) do
     -- A taste of what is inside, clipped hard: a long description here wraps
