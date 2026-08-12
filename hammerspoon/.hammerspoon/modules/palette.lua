@@ -436,6 +436,47 @@ local function styled(left, leftColor, right)
   return a .. hs.styledtext.new("    " .. right, { color = GREY, font = { size = 12 } })
 end
 
+-- ─── Matching ───────────────────────────────────────────────────
+--
+-- Setting a queryChangedCallback turns off the chooser's own filtering — it
+-- assumes anyone handling the query wants to build the list themselves. The
+-- sigils need that callback, so the matching has to be done here, and every
+-- view has to hand its full row set over rather than calling choices() itself.
+
+M._rows = {}
+
+local function haystack(r)
+  if r.search then return r.search end
+  local sub = r.subText
+  if type(sub) == "userdata" and sub.getString then sub = sub:getString() end
+  r.search = ((r.text or "") .. " " .. tostring(sub or "")):lower()
+  return r.search
+end
+
+-- Every word has to appear somewhere in the row, in any order: "trash empty"
+-- finds the same thing as "empty trash", and "⌥⇧T" finds it by its chord.
+local function matching(rows, q)
+  q = (q or ""):lower()
+  if q == "" then return rows end
+  local out = {}
+  for _, r in ipairs(rows) do
+    local hay, ok = haystack(r), true
+    for word in q:gmatch("%S+") do
+      if not hay:find(word, 1, true) then ok = false break end
+    end
+    if ok then out[#out + 1] = r end
+  end
+  return out
+end
+
+-- Hand the rows to the chooser through here, never directly, or the query in
+-- the box stops meaning anything.
+local function present(ch, rows, placeholder)
+  M._rows = rows
+  if placeholder then ch:placeholderText(placeholder) end
+  ch:choices(matching(rows, ch:query()))
+end
+
 local function rowFor(e)
   local tail = e.detail and (e.category .. "  ·  " .. e.detail) or (e.category .. "  ·  " .. e.source)
   return {
@@ -757,7 +798,11 @@ local function chooser()
 
   M._chooser:queryChangedCallback(function(q)
     local sigil, rest = q:match("^([%*!%?#/%+%->])(.*)$")
-    if not sigil then return end
+    if not sigil then
+      -- Plain typing: filter the current view's rows ourselves.
+      M._chooser:choices(matching(M._rows, q))
+      return
+    end
 
     if MODES[sigil] then
       M._mode = MODES[sigil]
@@ -771,8 +816,7 @@ local function chooser()
     local rows = { { text = "← Categories", goTo = "root",
                      subText = styled("esc", GREY, "clear the filter") } }
     for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
-    M._chooser:placeholderText(("%s — %d commands"):format(M._filter.name, #rows - 1))
-    M._chooser:choices(rows)
+    present(M._chooser, rows, ("%s — %d commands"):format(M._filter.name, #rows - 1))
     -- Dropping the sigil re-enters this callback with a plain query, which no
     -- longer matches here — so the filter stays and the typing filters within it.
     M._chooser:query(rest)
@@ -786,6 +830,9 @@ end
 -- anything that is not already on screen.
 function M.open()
   M._mode, M._filter, M._tab = nil, nil, 1
+  -- Start empty: last night's query still sitting in the box makes the palette
+  -- look broken before a key is pressed.
+  if M._chooser then M._chooser:query("") end
   M.show()
 end
 
@@ -824,8 +871,7 @@ function M.showWindows()
   end
 
   local ch = chooser()
-  ch:placeholderText(tabBar() .. ("   ·   %d windows"):format(#rows - 1))
-  ch:choices(rows)
+  present(ch, rows, tabBar() .. ("   ·   %d windows"):format(#rows - 1))
   ch:show()
 end
 
@@ -873,9 +919,7 @@ function M.show()
   end
 
   local ch = chooser()
-  ch:placeholderText(M._mode and M._mode.hint
-    or (tabBar() .. "   ·   ⌥1-6 / Tab"))
-  ch:choices(rows)
+  present(ch, rows, M._mode and M._mode.hint or (tabBar() .. "   ·   ⌥1-7 / Tab"))
   ch:show()
 end
 
@@ -896,9 +940,8 @@ function M.showCategory(name)
   end
 
   local ch = chooser()
-  ch:placeholderText(M._mode and M._mode.hint
+  present(ch, rows, M._mode and M._mode.hint
     or ("%s — %d   ·   → star   ← archive   ⇧→ move"):format(name, #rows - 1))
-  ch:choices(rows)
   ch:show()
 end
 
@@ -911,9 +954,8 @@ function M.showAll()
   for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
 
   local ch = chooser()
-  ch:placeholderText(M._mode and M._mode.hint
+  present(ch, rows, M._mode and M._mode.hint
     or (tabBar() .. ("   ·   %d   ·   → star  ← archive  ⇧→ move"):format(#rows - 1)))
-  ch:choices(rows)
   ch:show()
 end
 
