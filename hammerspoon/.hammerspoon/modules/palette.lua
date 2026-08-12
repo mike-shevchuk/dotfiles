@@ -627,10 +627,18 @@ local function chooser()
   return M._chooser
 end
 
+-- The hotkey's way in. Only a fresh open clears an arranging mode: walking into
+-- a category must not, or "+ then find the command" would be impossible for
+-- anything that is not already on screen.
+function M.open()
+  M._mode, M._filter = nil, nil
+  M.show()
+end
+
 -- Root: the categories themselves.
 function M.show()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._mode, M._view = nil, nil, { kind = "root" }
+  M._filter, M._view = nil, { kind = "root" }
   local favs = M.favourites_list()
 
   -- The things worth reaching for first, before the categories: someone who
@@ -671,14 +679,15 @@ function M.show()
   end
 
   local ch = chooser()
-  ch:placeholderText("type to search   ·   * starred  ! shell  ? hotkey   ·   + star  - archive  > move")
+  ch:placeholderText(M._mode and M._mode.hint
+    or "type to search   ·   * starred  ! shell  ? hotkey   ·   + star  - archive  > move")
   ch:choices(rows)
   ch:show()
 end
 
 function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
-  M._filter, M._mode, M._view = nil, nil, { kind = "cat", name = name }
+  M._filter, M._view = nil, { kind = "cat", name = name }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
@@ -693,21 +702,23 @@ function M.showCategory(name)
   end
 
   local ch = chooser()
-  ch:placeholderText(("%s — %d commands   ·   + star   - archive   > move"):format(name, #rows - 1))
+  ch:placeholderText(M._mode and M._mode.hint
+    or ("%s — %d commands   ·   + star   - archive   > move"):format(name, #rows - 1))
   ch:choices(rows)
   ch:show()
 end
 
 function M.showAll()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._mode, M._view = nil, nil, { kind = "all" }
+  M._filter, M._view = nil, { kind = "all" }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
   for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
 
   local ch = chooser()
-  ch:placeholderText(("all %d   ·   * starred  ! shell  ? hotkey  # archive   ·   + star  - archive  > move"):format(#rows - 1))
+  ch:placeholderText(M._mode and M._mode.hint
+    or ("all %d   ·   * starred  ! shell  ? hotkey  # archive   ·   + star  - archive  > move"):format(#rows - 1))
   ch:choices(rows)
   ch:show()
 end

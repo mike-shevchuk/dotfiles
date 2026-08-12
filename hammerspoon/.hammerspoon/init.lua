@@ -100,7 +100,7 @@ mirror.startWidget()
 -- ctrl+alt+shift+Space = every command there is, and the cheatsheet for them
 -- ctrl+alt+shift+F     = click anything by keyboard (needs to be instant, so it
 --                        keeps its own chord instead of living in the palette)
-guard.bind(hyper2, "Space", palette.show)
+guard.bind(hyper2, "Space", palette.open)
 guard.bind(hyper2, "F", keyboard.clickHints)
 -- ctrl+alt+shift+H     = open any cheatsheet — README sections, zettelkasten
 --                        sheets, and a generated one for the palette itself
