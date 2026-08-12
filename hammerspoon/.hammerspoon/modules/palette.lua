@@ -479,12 +479,15 @@ end
 
 -- ─── Arranging from inside the list ─────────────────────────────
 --
--- The chooser owns the keyboard while it is up, so the only way to act on the
--- highlighted row is to watch the key stream and swallow what we handle. ⌘⇧ is
--- free here: the chooser itself uses ⌘1-⌘9 for rows and plain typing to filter.
+-- An eventtap cannot help here: the chooser takes the keyboard in a way that
+-- keeps a separate tap from ever seeing the keys, so chords over the
+-- highlighted row simply never arrive. What does reach us is the query itself,
+-- so arranging is a mode typed into it — "+" then pick the command to star it.
+-- One keystroke more than a chord, and it announces itself in the placeholder
+-- instead of having to be remembered.
 
 M._view = { kind = "root" }
-M._tap  = nil
+M._mode = nil
 M._moveChooser = nil
 
 function M.refresh()
@@ -492,6 +495,40 @@ function M.refresh()
   if v.kind == "cat" then M.showCategory(v.name)
   elseif v.kind == "all" then M.showAll()
   else M.show() end
+end
+
+-- ─── Sigils: narrow the list, or act on the next pick ───────────
+--
+-- A leading character says what the rest of the typing means. The sigil is
+-- stripped from the query the moment it is recognised, so it never has to match
+-- a row's text; the reentry that strips it carries no sigil, so it settles.
+
+local SIGILS = {
+  ["*"] = { name = "starred",       test = function(e) return e.fav end },
+  ["!"] = { name = "shell recipes", test = function(e) return e.kind == "just" end },
+  ["?"] = { name = "has a hotkey",  test = function(e) return e.chord ~= nil end },
+  ["#"] = { name = "archive",       test = function(e) return e.category == M.ARCHIVE end },
+  ["/"] = { name = "hammerspoon",   test = function(e)
+              return e.kind == "fn" or e.kind == "key" end },
+}
+
+-- The same idea, but acting instead of narrowing: type the sigil, then pick a
+-- command, and the pick arranges that command rather than running it.
+local MODES = {
+  ["+"] = { name = "star",    hint = "★  pick a command — Enter stars it (again to unstar)" },
+  ["-"] = { name = "archive", hint = "🗄  pick a command — Enter archives it (again to restore)" },
+  [">"] = { name = "move",    hint = "→  pick a command — Enter moves it to another category" },
+}
+
+M._filter = nil
+
+local function filtered()
+  local out = {}
+  for _, e in ipairs(M.entries) do
+    local hidden = e.category == M.ARCHIVE and not (M._filter and M._filter.name == "archive")
+    if not hidden and (not M._filter or M._filter.test(e)) then out[#out + 1] = e end
+  end
+  return out
 end
 
 local function askCategory(e)
@@ -523,63 +560,6 @@ local function askCategory(e)
   M._moveChooser:show()
 end
 
-local function startTap()
-  if M._tap then M._tap:stop() end
-  M._tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(ev)
-    local f = ev:getFlags()
-    if not (f.cmd and f.shift) then return false end
-    local ch = hs.keycodes.map[ev:getKeyCode()]
-    if ch ~= "f" and ch ~= "a" and ch ~= "m" then return false end
-
-    local row = M._chooser and M._chooser:selectedRowContents()
-    local e = row and row.entry
-    if not e then
-      hs.alert.show("Pick a command row first", 1.5)
-      return true
-    end
-
-    if ch == "f" then
-      M.toggleFavourite(e)
-      M.sort()
-      hs.timer.doAfter(0.05, M.refresh)
-    elseif ch == "a" then
-      M.archive(e)
-      hs.timer.doAfter(0.05, M.refresh)
-    elseif ch == "m" then
-      M._chooser:hide()
-      hs.timer.doAfter(0.1, function() askCategory(e) end)
-    end
-    return true
-  end)
-  M._tap:start()
-end
-
--- ─── Sigil filters ──────────────────────────────────────────────
---
--- A leading character narrows the whole list before any typing matters, the way
--- an editor's palette does. The sigil is stripped from the query as soon as it
--- is recognised, so it filters without also having to match any row's text.
-
-local SIGILS = {
-  ["*"] = { name = "favourites", test = function(e) return e.fav end },
-  ["!"] = { name = "shell recipes", test = function(e) return e.kind == "just" end },
-  ["?"] = { name = "has a hotkey", test = function(e) return e.chord ~= nil end },
-  ["#"] = { name = "archive", test = function(e) return e.category == M.ARCHIVE end },
-  ["/"] = { name = "hammerspoon", test = function(e)
-              return e.kind == "fn" or e.kind == "key" end },
-}
-
-M._filter = nil
-
-local function filtered()
-  local out = {}
-  for _, e in ipairs(M.entries) do
-    local hidden = e.category == M.ARCHIVE and not (M._filter and M._filter.name == "archive")
-    if not hidden and (not M._filter or M._filter.test(e)) then out[#out + 1] = e end
-  end
-  return out
-end
-
 local function chooser()
   M._chooser = M._chooser or hs.chooser.new(function(choice)
     if not choice then return end
@@ -599,7 +579,22 @@ local function chooser()
       end
       return hs.alert.show("Palette: modules/" .. choice.call[1] .. ".lua is not installed", 3)
     end
-    if choice.entry then return run(choice.entry) end
+    if choice.entry then
+      local e, mode = choice.entry, M._mode
+      M._mode = nil
+      if mode then
+        if mode.name == "star" then
+          M.toggleFavourite(e)
+          M.sort()
+        elseif mode.name == "archive" then
+          M.archive(e)
+        elseif mode.name == "move" then
+          return hs.timer.doAfter(0.1, function() askCategory(e) end)
+        end
+        return hs.timer.doAfter(0.05, M.refresh)
+      end
+      return run(e)
+    end
   end)
   M._chooser:searchSubText(true)   -- so a chord or a module name finds it too
   M._chooser:bgDark(true)
@@ -607,8 +602,16 @@ local function chooser()
   M._chooser:rows(14)
 
   M._chooser:queryChangedCallback(function(q)
-    local sigil, rest = q:match("^([%*!%?#/])(.*)$")
+    local sigil, rest = q:match("^([%*!%?#/%+%->])(.*)$")
     if not sigil then return end
+
+    if MODES[sigil] then
+      M._mode = MODES[sigil]
+      M._chooser:placeholderText(M._mode.hint)
+      M._chooser:query(rest)
+      return
+    end
+
     M._filter = SIGILS[sigil]
     M._view = { kind = "all" }
     local rows = { { text = "← Categories", goTo = "root",
@@ -621,15 +624,13 @@ local function chooser()
     M._chooser:query(rest)
   end)
 
-  M._chooser:showCallback(startTap)
-  M._chooser:hideCallback(function() if M._tap then M._tap:stop() end end)
   return M._chooser
 end
 
 -- Root: the categories themselves.
 function M.show()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "root" }
+  M._filter, M._mode, M._view = nil, nil, { kind = "root" }
   local favs = M.favourites_list()
 
   -- The things worth reaching for first, before the categories: someone who
@@ -668,14 +669,14 @@ function M.show()
   end
 
   local ch = chooser()
-  ch:placeholderText("category, or type to search   ·   * ! ? # / filter   ·   ⌘⇧F star  ⌘⇧A archive  ⌘⇧M move")
+  ch:placeholderText("type to search   ·   * starred  ! shell  ? hotkey   ·   + star  - archive  > move")
   ch:choices(rows)
   ch:show()
 end
 
 function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "cat", name = name }
+  M._filter, M._mode, M._view = nil, nil, { kind = "cat", name = name }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
@@ -690,21 +691,21 @@ function M.showCategory(name)
   end
 
   local ch = chooser()
-  ch:placeholderText(("%s — %d commands   ·   ⌘⇧F star  ⌘⇧A archive  ⌘⇧M move"):format(name, #rows - 1))
+  ch:placeholderText(("%s — %d commands   ·   + star   - archive   > move"):format(name, #rows - 1))
   ch:choices(rows)
   ch:show()
 end
 
 function M.showAll()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "all" }
+  M._filter, M._mode, M._view = nil, nil, { kind = "all" }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
   for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
 
   local ch = chooser()
-  ch:placeholderText(("all %d — name, chord or module   ·   * fav  ! shell  ? hotkey  # archive"):format(#rows - 1))
+  ch:placeholderText(("all %d   ·   * starred  ! shell  ? hotkey  # archive   ·   + star  - archive  > move"):format(#rows - 1))
   ch:choices(rows)
   ch:show()
 end
