@@ -577,6 +577,30 @@ local MODES = {
   [">"] = { name = "move",    hint = "→  pick a command — Enter moves it to another category" },
 }
 
+-- ─── Tabs ───────────────────────────────────────────────────────
+--
+-- The filters are useful but a typed sigil is a thing to remember. The same
+-- views as tabs cost nothing to discover: the bar is always in the placeholder,
+-- ⌥1…⌥6 jump straight to one and Tab walks them in order.
+
+M.TABS = {
+  { key = "1", name = "Categories", sigil = nil, root = true },
+  { key = "2", name = "All",        sigil = nil },
+  { key = "3", name = "★ Starred",  sigil = "*" },
+  { key = "4", name = "? Hotkeys",  sigil = "?" },
+  { key = "5", name = "justfile",   sigil = "!" },
+  { key = "6", name = "# Archive",  sigil = "#" },
+}
+M._tab = 1
+
+local function tabBar()
+  local out = {}
+  for i, t in ipairs(M.TABS) do
+    out[#out + 1] = (i == M._tab) and ("[" .. t.name .. "]") or t.name
+  end
+  return table.concat(out, "  ")
+end
+
 M._filter = nil
 
 local function filtered()
@@ -646,7 +670,20 @@ end
 local function startTap()
   if M._tap then M._tap:stop() end
   M._tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(ev)
-    local key = hs.keycodes.map[ev:getKeyCode()]
+    local key   = hs.keycodes.map[ev:getKeyCode()]
+    local flags = ev:getFlags()
+
+    -- Tabs first: they change the whole view, whatever is highlighted.
+    if key == "tab" then
+      local step = flags.shift and -1 or 1
+      M.showTab(((M._tab - 1 + step) % #M.TABS) + 1)
+      return true
+    end
+    if flags.alt and key and key:match("^[1-6]$") then
+      M.showTab(tonumber(key))
+      return true
+    end
+
     if key ~= "left" and key ~= "right" then return false end
 
     local row = M._chooser and M._chooser:selectedRowContents()
@@ -741,14 +778,24 @@ end
 -- a category must not, or "+ then find the command" would be impossible for
 -- anything that is not already on screen.
 function M.open()
-  M._mode, M._filter = nil, nil
+  M._mode, M._filter, M._tab = nil, nil, 1
   M.show()
+end
+
+-- Switch to a tab: the categories, everything, or one of the filtered views.
+function M.showTab(i)
+  local tab = M.TABS[i]
+  if not tab then return end
+  M._tab = i
+  if tab.root then return M.show() end
+  M._filter = tab.sigil and SIGILS[tab.sigil] or nil
+  M.showAll()
 end
 
 -- Root: the categories themselves.
 function M.show()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "root" }
+  M._view = { kind = "root" }
   local favs = M.favourites_list()
 
   -- The things worth reaching for first, before the categories: someone who
@@ -790,14 +837,14 @@ function M.show()
 
   local ch = chooser()
   ch:placeholderText(M._mode and M._mode.hint
-    or "type to search   ·   → star   ← archive   ⇧→ move   ·   * ! ? # filters")
+    or (tabBar() .. "   ·   ⌥1-6 / Tab"))
   ch:choices(rows)
   ch:show()
 end
 
 function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "cat", name = name }
+  M._view = { kind = "cat", name = name }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
@@ -820,7 +867,7 @@ end
 
 function M.showAll()
   if #M.entries == 0 then M.parse() end
-  M._filter, M._view = nil, { kind = "all" }
+  M._view = { kind = "all" }
 
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
@@ -828,7 +875,7 @@ function M.showAll()
 
   local ch = chooser()
   ch:placeholderText(M._mode and M._mode.hint
-    or ("all %d   ·   → star   ← archive   ⇧→ move   ·   * ! ? # filters"):format(#rows - 1))
+    or (tabBar() .. ("   ·   %d   ·   → star  ← archive  ⇧→ move"):format(#rows - 1)))
   ch:choices(rows)
   ch:show()
 end
