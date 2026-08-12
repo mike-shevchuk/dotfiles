@@ -14,6 +14,7 @@ local sidecar     = require("modules.sidecar")
 local mirror      = require("modules.mirror")
 local palette     = require("modules.palette")
 local keyboard    = require("modules.keyboard")
+local cheatsheets = require("modules.cheatsheets")
 local mousefinder = require("modules.mousefinder")
 local scratchpad  = require("modules.scratchpad")
 local brightness  = require("modules.brightness")
@@ -101,6 +102,9 @@ mirror.startWidget()
 --                        keeps its own chord instead of living in the palette)
 guard.bind(hyper2, "Space", palette.show)
 guard.bind(hyper2, "F", keyboard.clickHints)
+-- ctrl+alt+shift+H     = open any cheatsheet — README sections, zettelkasten
+--                        sheets, and a generated one for the palette itself
+guard.bind(hyper2, "H", cheatsheets.show)
 
 -- ─── Mouse Finder ───────────────────────────────────────────────
 -- F = flash crosshair at mouse position

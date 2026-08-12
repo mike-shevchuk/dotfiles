@@ -638,6 +638,8 @@ function M.show()
   local rows = {
     { text = "Cheatsheet — all commands and their keys", goTo = "all",
       subText = styled(("%d"):format(#M.entries), BLUE, "one flat list; type a name, a chord or a module") },
+    { text = "Open a cheatsheet", call = { "cheatsheets", "show" },
+      subText = styled("⌃⌥⇧H", BLUE, "README sections, zettelkasten sheets, and this palette's own") },
     { text = "Menu of this app", call = { "keyboard", "menuPalette" },
       subText = styled("no mouse", BLUE, "every menu command of the front app, searchable") },
     { text = "Click anything by keyboard", call = { "keyboard", "clickHints" },
