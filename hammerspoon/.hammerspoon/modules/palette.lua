@@ -560,6 +560,55 @@ local function askCategory(e)
   M._moveChooser:show()
 end
 
+-- ─── Arranging with the arrows ──────────────────────────────────
+--
+-- An eventtap does see the keys while the chooser is up — an earlier attempt
+-- concluded otherwise, on a bad test. So the arrows can act on the highlighted
+-- row directly, which beats typing a mode first:
+--
+--   →  star it        ←  archive it        ⇧→  move it elsewhere
+--
+-- Up and down still walk the list, and on rows that are not commands the arrows
+-- fall through untouched, so navigation never feels trapped.
+
+M._tap = nil
+
+-- Acting rebuilds the list; without this the selection would jump back to the
+-- top and starring three things in a row would be a hunt each time.
+local function keepRow(fn)
+  local row = M._chooser and M._chooser:selectedRow()
+  fn()
+  hs.timer.doAfter(0.06, function()
+    M.refresh()
+    hs.timer.doAfter(0.06, function()
+      if M._chooser and row then M._chooser:selectedRow(row) end
+    end)
+  end)
+end
+
+local function startTap()
+  if M._tap then M._tap:stop() end
+  M._tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(ev)
+    local key = hs.keycodes.map[ev:getKeyCode()]
+    if key ~= "left" and key ~= "right" then return false end
+
+    local row = M._chooser and M._chooser:selectedRowContents()
+    local e = row and row.entry
+    if not e then return false end
+
+    if key == "right" and ev:getFlags().shift then
+      M._chooser:hide()
+      hs.timer.doAfter(0.1, function() askCategory(e) end)
+    elseif key == "right" then
+      keepRow(function() M.toggleFavourite(e) M.sort() end)
+    else
+      keepRow(function() M.archive(e) end)
+    end
+    return true
+  end)
+  M._tap:start()
+end
+
 local function chooser()
   M._chooser = M._chooser or hs.chooser.new(function(choice)
     if not choice then return end
@@ -600,6 +649,10 @@ local function chooser()
   M._chooser:bgDark(true)
   M._chooser:width(40)
   M._chooser:rows(14)
+  M._chooser:showCallback(startTap)
+  M._chooser:hideCallback(function()
+    if M._tap then M._tap:stop() M._tap = nil end
+  end)
 
   M._chooser:queryChangedCallback(function(q)
     local sigil, rest = q:match("^([%*!%?#/%+%->])(.*)$")
@@ -680,7 +733,7 @@ function M.show()
 
   local ch = chooser()
   ch:placeholderText(M._mode and M._mode.hint
-    or "type to search   ·   * starred  ! shell  ? hotkey   ·   + star  - archive  > move")
+    or "type to search   ·   → star   ← archive   ⇧→ move   ·   * ! ? # filters")
   ch:choices(rows)
   ch:show()
 end
@@ -703,7 +756,7 @@ function M.showCategory(name)
 
   local ch = chooser()
   ch:placeholderText(M._mode and M._mode.hint
-    or ("%s — %d commands   ·   + star   - archive   > move"):format(name, #rows - 1))
+    or ("%s — %d   ·   → star   ← archive   ⇧→ move"):format(name, #rows - 1))
   ch:choices(rows)
   ch:show()
 end
@@ -718,7 +771,7 @@ function M.showAll()
 
   local ch = chooser()
   ch:placeholderText(M._mode and M._mode.hint
-    or ("all %d   ·   * starred  ! shell  ? hotkey  # archive   ·   + star  - archive  > move"):format(#rows - 1))
+    or ("all %d   ·   → star   ← archive   ⇧→ move   ·   * ! ? # filters"):format(#rows - 1))
   ch:choices(rows)
   ch:show()
 end
