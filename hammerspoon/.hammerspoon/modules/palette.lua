@@ -278,7 +278,15 @@ function M.parse()
 
   -- Remember where each command started out, so equally-used ones keep the
   -- order the files give them instead of shuffling on every parse.
-  for i, e in ipairs(entries) do e.order = i end
+  for i, e in ipairs(entries) do
+    e.order = i
+    e.fav   = M.favourites[e.source] or false
+    if M.archived[e.source] then
+      e.category = M.ARCHIVE
+    elseif M.moved[e.source] then
+      e.category = M.moved[e.source]
+    end
+  end
 
   local cats, index = {}, {}
   for _, e in ipairs(entries) do
@@ -304,9 +312,25 @@ end
 local USES_KEY = "PaletteUses"
 M.uses = hs.settings.get(USES_KEY) or {}
 
+-- Hand-made arrangement, kept beside the automatic ranking: a star pins a
+-- command to the top, the archive hides one without deleting it, and a move
+-- puts it under whatever heading actually makes sense to you. All three are
+-- keyed by the command's source string, which is stable across reparses.
+local FAV_KEY, ARCHIVE_KEY, MOVED_KEY = "PaletteFavourites", "PaletteArchived", "PaletteMoved"
+M.favourites = hs.settings.get(FAV_KEY) or {}
+M.archived   = hs.settings.get(ARCHIVE_KEY) or {}
+M.moved      = hs.settings.get(MOVED_KEY) or {}
+
+M.ARCHIVE   = "Archive"
+M.FAVOURITE = "★ Favourites"
+
 local function usesOf(e) return M.uses[e.source] or 0 end
 
+-- Starred first, then whatever gets used most, and file order to break ties so
+-- the untouched majority stays where it was last time.
 local function byUse(a, b)
+  local fa, fb = a.fav and 1 or 0, b.fav and 1 or 0
+  if fa ~= fb then return fa > fb end
   local ua, ub = usesOf(a), usesOf(b)
   if ua ~= ub then return ua > ub end
   return (a.order or 0) < (b.order or 0)
@@ -320,9 +344,59 @@ function M.sort()
     for _, e in ipairs(c.items) do c.uses = c.uses + usesOf(e) end
   end
   table.sort(M.categories, function(a, b)
+    -- The archive is a drawer, not a destination: it always sits last however
+    -- much it is used.
+    if (a.name == M.ARCHIVE) ~= (b.name == M.ARCHIVE) then return b.name == M.ARCHIVE end
     if a.uses ~= b.uses then return a.uses > b.uses end
     return (a.items[1] and a.items[1].order or 0) < (b.items[1] and b.items[1].order or 0)
   end)
+end
+
+-- ─── Starring, archiving, moving ────────────────────────────────
+
+local function persist()
+  hs.settings.set(FAV_KEY, M.favourites)
+  hs.settings.set(ARCHIVE_KEY, M.archived)
+  hs.settings.set(MOVED_KEY, M.moved)
+end
+
+function M.toggleFavourite(e)
+  M.favourites[e.source] = (not M.favourites[e.source]) or nil
+  e.fav = M.favourites[e.source] or false
+  persist()
+  hs.alert.show((e.fav and "★ " or "☆ ") .. e.title, 1)
+end
+
+function M.archive(e)
+  if M.archived[e.source] then
+    M.archived[e.source] = nil
+    hs.alert.show("Out of the archive: " .. e.title, 1.5)
+  else
+    M.archived[e.source] = true
+    hs.alert.show("Archived: " .. e.title, 1.5)
+  end
+  persist()
+  M.parse()
+end
+
+function M.moveTo(e, category)
+  if category == nil or category == "" then
+    M.moved[e.source] = nil
+  else
+    M.moved[e.source] = category
+    M.archived[e.source] = nil
+  end
+  persist()
+  M.parse()
+  hs.alert.show(e.title .. "  →  " .. (category or "back where it came from"), 2)
+end
+
+function M.favourites_list()
+  local out = {}
+  for _, e in ipairs(M.entries) do
+    if e.fav then out[#out + 1] = e end
+  end
+  return out
 end
 
 local function remember(e)
@@ -352,7 +426,7 @@ end
 local function rowFor(e)
   local tail = e.detail and (e.category .. "  ·  " .. e.detail) or (e.category .. "  ·  " .. e.source)
   return {
-    text    = e.title,
+    text    = (e.fav and "★  " or "") .. e.title,
     subText = styled(e.chord or "no hotkey", e.chord and BLUE or GREY, tail),
     entry   = e,
   }
@@ -403,6 +477,109 @@ function M.showAllWindows()
   M._expose:toggleShow()
 end
 
+-- ─── Arranging from inside the list ─────────────────────────────
+--
+-- The chooser owns the keyboard while it is up, so the only way to act on the
+-- highlighted row is to watch the key stream and swallow what we handle. ⌘⇧ is
+-- free here: the chooser itself uses ⌘1-⌘9 for rows and plain typing to filter.
+
+M._view = { kind = "root" }
+M._tap  = nil
+M._moveChooser = nil
+
+function M.refresh()
+  local v = M._view
+  if v.kind == "cat" then M.showCategory(v.name)
+  elseif v.kind == "all" then M.showAll()
+  else M.show() end
+end
+
+local function askCategory(e)
+  local names, seen = {}, {}
+  for _, c in ipairs(M.categories) do
+    if not seen[c.name] then seen[c.name], names[#names + 1] = true, c.name end
+  end
+  table.sort(names)
+
+  local rows = {
+    { text = "Put it back", category = false,
+      subText = styled("undo", GREY, "return this command to where the files put it") },
+  }
+  for _, n in ipairs(names) do
+    rows[#rows + 1] = { text = n, category = n,
+                        subText = styled("move", BLUE, "move “" .. e.title .. "” here") }
+  end
+
+  M._moveChooser = M._moveChooser or hs.chooser.new(function(choice)
+    if not choice then return hs.timer.doAfter(0.05, M.refresh) end
+    M.moveTo(e, choice.category or nil)
+    hs.timer.doAfter(0.05, M.refresh)
+  end)
+  M._moveChooser:placeholderText("move “" .. e.title .. "” to…")
+  M._moveChooser:bgDark(true)
+  M._moveChooser:width(40)
+  M._moveChooser:rows(12)
+  M._moveChooser:choices(rows)
+  M._moveChooser:show()
+end
+
+local function startTap()
+  if M._tap then M._tap:stop() end
+  M._tap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(ev)
+    local f = ev:getFlags()
+    if not (f.cmd and f.shift) then return false end
+    local ch = hs.keycodes.map[ev:getKeyCode()]
+    if ch ~= "f" and ch ~= "a" and ch ~= "m" then return false end
+
+    local row = M._chooser and M._chooser:selectedRowContents()
+    local e = row and row.entry
+    if not e then
+      hs.alert.show("Pick a command row first", 1.5)
+      return true
+    end
+
+    if ch == "f" then
+      M.toggleFavourite(e)
+      M.sort()
+      hs.timer.doAfter(0.05, M.refresh)
+    elseif ch == "a" then
+      M.archive(e)
+      hs.timer.doAfter(0.05, M.refresh)
+    elseif ch == "m" then
+      M._chooser:hide()
+      hs.timer.doAfter(0.1, function() askCategory(e) end)
+    end
+    return true
+  end)
+  M._tap:start()
+end
+
+-- ─── Sigil filters ──────────────────────────────────────────────
+--
+-- A leading character narrows the whole list before any typing matters, the way
+-- an editor's palette does. The sigil is stripped from the query as soon as it
+-- is recognised, so it filters without also having to match any row's text.
+
+local SIGILS = {
+  ["*"] = { name = "favourites", test = function(e) return e.fav end },
+  ["!"] = { name = "shell recipes", test = function(e) return e.kind == "just" end },
+  ["?"] = { name = "has a hotkey", test = function(e) return e.chord ~= nil end },
+  ["#"] = { name = "archive", test = function(e) return e.category == M.ARCHIVE end },
+  ["/"] = { name = "hammerspoon", test = function(e)
+              return e.kind == "fn" or e.kind == "key" end },
+}
+
+M._filter = nil
+
+local function filtered()
+  local out = {}
+  for _, e in ipairs(M.entries) do
+    local hidden = e.category == M.ARCHIVE and not (M._filter and M._filter.name == "archive")
+    if not hidden and (not M._filter or M._filter.test(e)) then out[#out + 1] = e end
+  end
+  return out
+end
+
 local function chooser()
   M._chooser = M._chooser or hs.chooser.new(function(choice)
     if not choice then return end
@@ -428,12 +605,32 @@ local function chooser()
   M._chooser:bgDark(true)
   M._chooser:width(40)
   M._chooser:rows(14)
+
+  M._chooser:queryChangedCallback(function(q)
+    local sigil, rest = q:match("^([%*!%?#/])(.*)$")
+    if not sigil then return end
+    M._filter = SIGILS[sigil]
+    M._view = { kind = "all" }
+    local rows = { { text = "← Categories", goTo = "root",
+                     subText = styled("esc", GREY, "clear the filter") } }
+    for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
+    M._chooser:placeholderText(("%s — %d commands"):format(M._filter.name, #rows - 1))
+    M._chooser:choices(rows)
+    -- Dropping the sigil re-enters this callback with a plain query, which no
+    -- longer matches here — so the filter stays and the typing filters within it.
+    M._chooser:query(rest)
+  end)
+
+  M._chooser:showCallback(startTap)
+  M._chooser:hideCallback(function() if M._tap then M._tap:stop() end end)
   return M._chooser
 end
 
 -- Root: the categories themselves.
 function M.show()
   if #M.entries == 0 then M.parse() end
+  M._filter, M._view = nil, { kind = "root" }
+  local favs = M.favourites_list()
 
   -- The things worth reaching for first, before the categories: someone who
   -- remembers only this one chord should still find their way from here.
@@ -449,6 +646,11 @@ function M.show()
     { text = "Show all windows", expose = true,
       subText = styled("Exposé", BLUE, "every window as a thumbnail, whatever the tiler did") },
   }
+  if #favs > 0 then
+    table.insert(rows, 1, { text = M.FAVOURITE, goTo = M.FAVOURITE,
+      subText = styled(("%d starred"):format(#favs), BLUE, "the ones you pinned with ⌘⇧F") })
+  end
+
   for _, c in ipairs(M.categories) do
     -- A taste of what is inside, clipped hard: a long description here wraps
     -- the row onto a second line and the list stops being scannable.
@@ -466,35 +668,43 @@ function M.show()
   end
 
   local ch = chooser()
-  ch:placeholderText("category — or type to search across them")
+  ch:placeholderText("category, or type to search   ·   * ! ? # / filter   ·   ⌘⇧F star  ⌘⇧A archive  ⌘⇧M move")
   ch:choices(rows)
   ch:show()
 end
 
 function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
+  M._filter, M._view = nil, { kind = "cat", name = name }
+
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
-  for _, c in ipairs(M.categories) do
-    if c.name == name then
-      for _, e in ipairs(c.items) do rows[#rows + 1] = rowFor(e) end
+  if name == M.FAVOURITE then
+    for _, e in ipairs(M.favourites_list()) do rows[#rows + 1] = rowFor(e) end
+  else
+    for _, c in ipairs(M.categories) do
+      if c.name == name then
+        for _, e in ipairs(c.items) do rows[#rows + 1] = rowFor(e) end
+      end
     end
   end
 
   local ch = chooser()
-  ch:placeholderText(name .. " — " .. (#rows - 1) .. " commands")
+  ch:placeholderText(("%s — %d commands   ·   ⌘⇧F star  ⌘⇧A archive  ⌘⇧M move"):format(name, #rows - 1))
   ch:choices(rows)
   ch:show()
 end
 
 function M.showAll()
   if #M.entries == 0 then M.parse() end
+  M._filter, M._view = nil, { kind = "all" }
+
   local rows = { { text = "← Categories", goTo = "root",
                    subText = styled("esc", GREY, "back to the category list") } }
-  for _, e in ipairs(M.entries) do rows[#rows + 1] = rowFor(e) end
+  for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
 
   local ch = chooser()
-  ch:placeholderText(("all %d commands — type a name, a chord, or a module"):format(#M.entries))
+  ch:placeholderText(("all %d — name, chord or module   ·   * fav  ! shell  ? hotkey  # archive"):format(#rows - 1))
   ch:choices(rows)
   ch:show()
 end
