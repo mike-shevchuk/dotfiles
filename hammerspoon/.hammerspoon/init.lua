@@ -88,10 +88,14 @@ guard.bind(hyper2, "P", mirror.showChooser)
 mirror.startWidget()
 
 -- ─── Command palette / cheatsheet ───────────────────────────────
--- K = every hotkey in this file, searchable by description OR by chord;
---     descriptions are these very comments, so the list cannot go stale
--- W = Exposé: every window as a thumbnail, whatever the tiler did with the row
-guard.bind(hyper2, "K", palette.show)
+-- Space, to join the other two pickers: alt+shift+Space is the app launcher and
+-- ctrl+alt+cmd+Space jumps to a window, so the thumb stays put and the modifier
+-- picks which list you want.
+-- ctrl+alt+shift+Space = every command, by category — bound or not, searchable
+--     by name, chord or module; descriptions are these very comments
+-- ctrl+alt+shift+W = Exposé: every window as a thumbnail, whatever the tiler
+--     did with the row
+guard.bind(hyper2, "Space", palette.show)
 guard.bind(hyper2, "W", palette.showAllWindows)
 
 -- ─── Mouse Finder ───────────────────────────────────────────────
