@@ -218,15 +218,19 @@ end
 -- mirror commands. `just --dump --dump-format json` hands over names, doc
 -- comments and groups exactly as written, so nothing has to be re-described.
 
-M.justfile = os.getenv("HOME") .. "/dotfiles/.justdir/global.just"
+-- More than one justfile can be in play — a branch adds recipes the installed
+-- one does not have yet — so the list is a setting. First file to define a name
+-- wins, which keeps the installed global authoritative.
+M.justfiles = hs.settings.get("PaletteJustfiles")
+  or { os.getenv("HOME") .. "/dotfiles/.justdir/global.just" }
 
-local function parseJust(entries)
-  local probe = io.open(M.justfile, "r")
+local function parseJustfile(path, entries, seen)
+  local probe = io.open(path, "r")
   if not probe then return end
   probe:close()
 
   local out, ok = hs.execute(
-    ("just --justfile %s --dump --dump-format json 2>/dev/null"):format(M.justfile), true)
+    ("just --justfile %s --dump --dump-format json 2>/dev/null"):format(path), true)
   if not ok or not out or out == "" then return end
   local decoded, data = pcall(hs.json.decode, out)
   if not decoded or type(data) ~= "table" or type(data.recipes) ~= "table" then return end
@@ -236,6 +240,8 @@ local function parseJust(entries)
   table.sort(names)
 
   for _, name in ipairs(names) do
+   if not seen[name] then
+    seen[name] = true
     local r = data.recipes[name]
     local private, group = name:sub(1, 1) == "_", nil
     for _, attr in ipairs(r.attributes or {}) do
@@ -263,10 +269,17 @@ local function parseJust(entries)
         source   = "just -g " .. name,
         detail   = "just -g " .. name .. (#sig > 0 and (" " .. table.concat(sig, " ")) or ""),
         recipe   = name,
+        justfile = path,
         params   = #params > 0 and params or nil,
       }
     end
+   end
   end
+end
+
+local function parseJust(entries)
+  local seen = {}
+  for _, path in ipairs(M.justfiles) do parseJustfile(path, entries, seen) end
 end
 
 -- ─── Build ──────────────────────────────────────────────────────
@@ -477,12 +490,50 @@ local function present(ch, rows, placeholder)
   ch:choices(matching(rows, ch:query()))
 end
 
+-- An icon per row, matched on the category name first and falling back to what
+-- kind of thing it is. Purely for scanning: at 128 rows the eye needs a shape
+-- to land on before it starts reading.
+local CATEGORY_ICON = {
+  ["app launcher"] = "🚀", ["window"] = "🪟", ["paperwm"] = "▦",
+  ["clipboard"] = "📋", ["audio"] = "🔊", ["system"] = "⚙️", ["display"] = "🖥",
+  ["mouse"] = "🎯", ["scratchpad"] = "📝", ["brightness"] = "☀️",
+  ["notetaker"] = "📓", ["git"] = "🌿", ["bookmark"] = "🔖", ["pomodoro"] = "🍅",
+  ["screenshot"] = "📸", ["task"] = "✅", ["desktop"] = "🖥", ["console"] = "🔨",
+  ["mirror"] = "🪞", ["disk"] = "💾", ["cheat"] = "📄", ["til"] = "💡",
+  ["search"] = "🔍", ["night"] = "🌙", ["keyboard"] = "⌨️", ["archive"] = "🗄",
+  ["launcher"] = "🚀", ["sidecar"] = "🪞", ["todoist"] = "☑️", ["linear"] = "📊",
+}
+local KIND_ICON = { key = "⌨️", fn = "🔧", just = "▶️" }
+
+local function iconFor(e)
+  local name = (e.category or ""):lower()
+  for word, icon in pairs(CATEGORY_ICON) do
+    if name:find(word, 1, true) then return icon end
+  end
+  return KIND_ICON[e.kind] or "•"
+end
+
 local function rowFor(e)
   local tail = e.detail and (e.category .. "  ·  " .. e.detail) or (e.category .. "  ·  " .. e.source)
   return {
-    text    = (e.fav and "★  " or "") .. e.title,
+    text    = ("%s  %s%s"):format(iconFor(e), e.fav and "★ " or "", e.title),
     subText = styled(e.chord or "no hotkey", e.chord and BLUE or GREY, tail),
     entry   = e,
+  }
+end
+
+-- The tab strip, as a row rather than only a placeholder: it stays on screen
+-- while typing, and picking it walks to the next tab.
+local function tabRow()
+  local parts = {}
+  for i, t in ipairs(M.TABS) do
+    parts[#parts + 1] = (i == M._tab) and ("▸ " .. t.name) or t.name
+  end
+  return {
+    text    = table.concat(parts, "   "),
+    subText = styled("⌥1-" .. #M.TABS .. " / Tab", BLUE,
+                     "switch tab   ·   esc back   ·   → star   ← archive   ⇧→ move"),
+    nextTab = true,
   }
 end
 
@@ -493,8 +544,9 @@ end
 -- on a keypress so a fast recipe does not vanish before it can be read.
 function M.runRecipe(e, args)
   args = (args and args ~= "") and (" " .. args) or ""
-  local inner = ("just -g %s%s; printf \"\\n── done ── press enter\\n\"; read x")
-    :format(e.recipe, args)
+  local where = e.justfile and ("--justfile " .. e.justfile .. " ") or "-g "
+  local inner = ("just %s%s%s; printf \"\\n── done ── press enter\\n\"; read x")
+    :format(where, e.recipe, args)
   local cmd = ("tmux new-window -n 'just %s' '%s' 2>&1"):format(e.recipe, inner)
   local _, ok = hs.execute(cmd, true)
   if not ok then
@@ -755,6 +807,9 @@ local function chooser()
       local name = choice.goTo
       return hs.timer.doAfter(0.05, function() M.showCategory(name) end)
     end
+    if choice.nextTab then
+      return hs.timer.doAfter(0.05, function() M.showTab((M._tab % #M.TABS) + 1) end)
+    end
     if choice.windowId then
       local w = hs.window.get(choice.windowId)
       if w then w:focus() else hs.alert.show("That window is gone", 2) end
@@ -813,8 +868,7 @@ local function chooser()
 
     M._filter = SIGILS[sigil]
     M._view = { kind = "all" }
-    local rows = { { text = "← Categories", goTo = "root",
-                     subText = styled("esc", GREY, "clear the filter") } }
+    local rows = { tabRow() }
     for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
     present(M._chooser, rows, ("%s — %d commands"):format(M._filter.name, #rows - 1))
     -- Dropping the sigil re-enters this callback with a plain query, which no
@@ -852,8 +906,7 @@ end
 -- from a parse would be wrong within seconds.
 function M.showWindows()
   M._view = { kind = "windows" }
-  local rows = { { text = "← Categories", goTo = "root",
-                   subText = styled("esc", GREY, "back to the category list") } }
+  local rows = { tabRow() }
 
   for _, w in ipairs(hs.window.orderedWindows()) do
     local app    = w:application() and w:application():name() or "?"
@@ -897,6 +950,8 @@ function M.show()
     { text = "Show all windows", expose = true,
       subText = styled("Exposé", BLUE, "every window as a thumbnail, whatever the tiler did") },
   }
+  table.insert(rows, 1, tabRow())
+
   if #favs > 0 then
     table.insert(rows, 1, { text = M.FAVOURITE, goTo = M.FAVOURITE,
       subText = styled(("%d starred"):format(#favs), BLUE, "the ones you pinned with ⌘⇧F") })
@@ -927,8 +982,7 @@ function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
   M._view = { kind = "cat", name = name }
 
-  local rows = { { text = "← Categories", goTo = "root",
-                   subText = styled("esc", GREY, "back to the category list") } }
+  local rows = { tabRow() }
   if name == M.FAVOURITE then
     for _, e in ipairs(M.favourites_list()) do rows[#rows + 1] = rowFor(e) end
   else
@@ -949,8 +1003,7 @@ function M.showAll()
   if #M.entries == 0 then M.parse() end
   M._view = { kind = "all" }
 
-  local rows = { { text = "← Categories", goTo = "root",
-                   subText = styled("esc", GREY, "back to the category list") } }
+  local rows = { tabRow() }
   for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
 
   local ch = chooser()
