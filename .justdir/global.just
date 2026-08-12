@@ -804,8 +804,10 @@ til-help:
 mirror device="iPad" res="max":
     #!/usr/bin/env bash
     set -uo pipefail
+    front=$(just -f "{{justfile()}}" _mirror-front)
     just -f "{{justfile()}}" _mirror connect "{{device}}" mirror || exit 1
     [ "{{res}}" = "keep" ] || just -f "{{justfile()}}" mirror-res "{{res}}"
+    just -f "{{justfile()}}" _mirror-refocus "$front"
 
 # Use the iPad as an extra display rather than a duplicate
 [group('mirror')]
@@ -913,6 +915,7 @@ mirror-solo device="iPad" res="max":
     m1ddc=$(command -v m1ddc || echo /opt/homebrew/bin/m1ddc)
     [ -x "$m1ddc" ] || { echo "  FAIL — m1ddc not installed (brew install m1ddc)" >&2; exit 1; }
 
+    front=$(just -f "{{justfile()}}" _mirror-front)
     read_luminance() { "$m1ddc" get luminance 2>/dev/null | tr -dc '0-9-'; }
 
     cur=$(read_luminance)
@@ -942,6 +945,7 @@ mirror-solo device="iPad" res="max":
         exit 1
     fi
     [ "{{res}}" = "keep" ] || just -f "{{justfile()}}" mirror-res "{{res}}"
+    just -f "{{justfile()}}" _mirror-refocus "$front"
     echo "  OK — the picture lives on the iPad now; bring the monitor back with: just -g mirror-wake" >&2
 
 # Leave solo mode: drop Sidecar, then bring the monitor backlight back
@@ -1052,6 +1056,33 @@ mirror-help:
     НАЛАШТУВАННЯ — блок M.config у mirror.lua
       device / mode / connect_timeout / notify
     EOF
+
+# id of the window that is focused right now (empty if none) — printed on stdout
+[group('mirror')]
+[private]
+_mirror-front:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v hs >/dev/null 2>&1 || exit 0
+    timeout 8 hs -c 'local w = hs.window.frontmostWindow(); return w and tostring(w:id()) or ""' 2>/dev/null \
+        | tr -dc '0-9' || true
+
+# Put the focus back where it was, so a tiling WM scrolls that window into view
+#
+# Attaching a display re-tiles everything. Under PaperWM the row is longer than
+# the screen and the overflow is parked past the edge, so the window you were
+# typing in — the terminal you drove this from — can end up off-screen with no
+# way to reach it from the iPad. Re-focusing it makes PaperWM scroll it back.
+[group('mirror')]
+[private]
+_mirror-refocus id="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    [ -n "{{id}}" ] || exit 0
+    command -v hs >/dev/null 2>&1 || exit 0
+    sleep 1   # let the WM finish re-tiling for the new screen first
+    echo "→ bringing the window you were using back into view ..." >&2
+    timeout 8 hs -c 'local w = hs.window.get({{id}}); if w then w:focus() end; return "ok"' >/dev/null 2>&1 || true
 
 # Ask Hammerspoon to drive the Screen Mirroring pane, then wait for its answer
 [group('mirror')]

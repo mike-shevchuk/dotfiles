@@ -12,6 +12,7 @@ local clipboard   = require("modules.clipboard")
 local system      = require("modules.system")
 local sidecar     = require("modules.sidecar")
 local mirror      = require("modules.mirror")
+local palette     = require("modules.palette")
 local mousefinder = require("modules.mousefinder")
 local scratchpad  = require("modules.scratchpad")
 local brightness  = require("modules.brightness")
@@ -85,6 +86,13 @@ guard.bind(hyper, "N", sidecar.toggleMirror)
 guard.bind(hyper2, "M", function() mirror.toggleDefault("mirror") end)
 guard.bind(hyper2, "P", mirror.showChooser)
 mirror.startWidget()
+
+-- ─── Command palette / cheatsheet ───────────────────────────────
+-- K = every hotkey in this file, searchable by description OR by chord;
+--     descriptions are these very comments, so the list cannot go stale
+-- W = Exposé: every window as a thumbnail, whatever the tiler did with the row
+guard.bind(hyper2, "K", palette.show)
+guard.bind(hyper2, "W", palette.showAllWindows)
 
 -- ─── Mouse Finder ───────────────────────────────────────────────
 -- F = flash crosshair at mouse position
