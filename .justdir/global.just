@@ -169,6 +169,17 @@ git-status-all:
     done
     echo "  OK — $dirty_count repo(s) with uncommitted changes" >&2
 
+# --- Projects (projctl fleet launcher) --------------------------------------
+
+# projctl — start/stop/watch every tmux-based project from anywhere:
+#   just -g proj              → TUI dashboard
+#   just -g proj up|down|status|git|commits|list|tui
+#   just -g proj add <name> <dir> <session> [port] [extra] [run]
+# Delegates to ~/code/projctl (stowed) so its registry.conf + self-calls resolve.
+[group('projects')]
+proj *args:
+    @cd ~/code/projctl && just {{args}}
+
 # --- Reddit daily digest ----------------------------------------------------
 
 # Build today's Reddit digest (calls ~/code/reddit-digest/run.sh if present)
