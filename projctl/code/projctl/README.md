@@ -78,6 +78,8 @@ just down                  # зупинити всі
 just down immich           # зупинити лише вказані
 just restart alexa         # перезапустити
 just status                # таблиця: стан + порт по кожному
+just git                   # git по кожному проекту: UNPUSHED / UNPULLED / DIRTY
+FETCH=1 just git           # спершу git fetch (точний UNPULLED), потім таблиця
 just list                  # показати реєстр проектів
 just logs stt-host         # останній вивід із tmux-сесії
 just attach smartbj        # приєднатись до tmux-сесії (Ctrl-b d — відʼєднатись)

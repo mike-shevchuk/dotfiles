@@ -7,6 +7,8 @@
 #   just down [names…]      → stop
 #   just restart [names…]   → restart
 #   just status             → status table (state · auto · ports)
+#   just git                → per-project git: unpushed / unpulled / dirty
+#                             (FETCH=1 just git → git fetch first for accurate UNPULLED)
 #   just list               → show the registry
 #
 #   just add    <name> <dir> <session> [port] [extra]   → add, ENABLED at startup
@@ -48,14 +50,8 @@ tui:
       echo "TUI needs fzf and gum (brew install fzf gum). Falling back to status:" >&2
       exec just --justfile "$JF" status
     fi
-    list=""
-    while IFS='|' read -r name session port dir extra state enabled; do
-      [ -z "$name" ] && continue
-      if [ "$state" = up ]; then g="●"; else g="○"; fi
-      [ "$enabled" = 1 ] && m=" " || m="✗"
-      list+="$(printf '%s\t%s%s %-10s %s' "$name" "$m" "$g" "$name" "${port:+:$port}")"$'\n'
-    done < <(just --justfile "$JF" _rows)
-    [ -z "${list//[$'\n']/}" ] && { echo "registry empty — add a project: just add <name> <dir> <session> [port]" >&2; exit 0; }
+    list="$(just --justfile "$JF" _menu-lines)"
+    [ -z "$list" ] && { echo "registry empty — add a project: just add <name> <dir> <session> [port]" >&2; exit 0; }
     sel="$(printf '%s' "$list" | fzf --multi --delimiter='\t' --with-nth=2.. \
              --header='TAB select · ↵ action · ESC quit   (✗ = auto-start off)' \
              --height=95% --border --reverse --pointer='▶' --marker='✓' \
@@ -89,6 +85,7 @@ up *names:
       names="$(just --justfile "$JF" _pick START)"
       if [ -z "${names// /}" ]; then echo "→ nothing selected" >&2; exit 0; fi
     fi
+    set -f                                    # names are literals, never globs
     exec just --justfile "$JF" _do "start" $names
 
 # Start every ENABLED project without prompting (used by login/auto-start)
@@ -102,13 +99,7 @@ _pick verb:
     export PATH="{{_path}}:$PATH"
     JF="{{justfile()}}"
     command -v fzf >/dev/null || { echo "fzf not installed (brew install fzf)" >&2; exit 1; }
-    list=""
-    while IFS='|' read -r name session port dir extra state enabled; do
-      [ -z "$name" ] && continue
-      if [ "$state" = up ]; then g="●"; else g="○"; fi
-      [ "$enabled" = 1 ] && m=" " || m="✗"
-      list+="$(printf '%s\t%s%s %-10s %s' "$name" "$m" "$g" "$name" "${port:+:$port}")"$'\n'
-    done < <(just --justfile "$JF" _rows)
+    list="$(just --justfile "$JF" _menu-lines)"
     sel="$(printf '%s' "$list" | fzf --multi --delimiter='\t' --with-nth=2.. \
              --header="pick projects to {{verb}} · TAB select · ↵ confirm · ESC cancel" \
              --height=90% --border --reverse --pointer='▶' --marker='✓' \
@@ -129,24 +120,34 @@ restart *names: (_do "restart" names)
 _do action *names:
     #!/usr/bin/env bash
     set -uo pipefail
+    set -f                                    # names are literals, never globs
     export PATH="{{_path}}:$PATH"
     want="{{names}}"
     rc=0
     [ -f "{{_conf}}" ] || { echo "registry empty — add a project: just add <name> <dir> <session> [port]" >&2; exit 0; }
-    while IFS='|' read -r name dir session port extra enabled; do
+    seen=" "
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
       case "$name" in ''|\#*) continue ;; esac
       dir="${dir/#\~/$HOME}"
+      enabled="${enabled:-1}"
       if [ -n "$want" ]; then
-        grep -qw -- "$name" <<<"$want" || continue
+        hit=0; for w in $want; do [ "$w" = "$name" ] && { hit=1; break; }; done
+        [ "$hit" = 1 ] || continue
+        seen="$seen$name "
       elif [ "{{action}}" = start ] && [ "$enabled" != 1 ]; then
         continue
       fi
       echo "→ {{action}} $name" >&2
       if [ "${DRY:-0}" = 1 ]; then echo "   DRY: (cd $dir && just {{action}})" >&2; continue; fi
       if [ ! -d "$dir" ]; then echo "  FAIL (missing dir: $dir)" >&2; rc=1; continue; fi
-      if ( cd "$dir" && just {{action}} ); then echo "  OK ({{action}} $name)" >&2
+      if ( cd "$dir" && just {{action}} </dev/null ); then echo "  OK ({{action}} $name)" >&2
       else echo "  FAIL ({{action}} $name, exit $?)" >&2; rc=1; fi
     done < "{{_conf}}"
+    if [ -n "$want" ]; then
+      for w in $want; do
+        case "$seen" in *" $w "*) : ;; *) echo "  ? not in registry: $w" >&2 ;; esac
+      done
+    fi
     exit $rc
 
 # ─── registry editing ───────────────────────────────────────────────────────
@@ -157,17 +158,22 @@ add name dir session port="" extra="": (_add name dir session port extra "1")
 # Add a project but manual-only (not started by `up all`/login)
 add-off name dir session port="" extra="": (_add name dir session port extra "0")
 
+# args arrive as positional ($1..) — never textually interpolated, so a name with
+# odd characters can't corrupt the recipe or inject into awk/grep.
 [private]
 _add name dir session port extra enabled:
     #!/usr/bin/env bash
     set -uo pipefail
     conf="{{_conf}}"; touch "$conf"
-    if grep -q "^{{name}}|" "$conf"; then
-      echo "  FAIL ({{name}} already in list — use enable/disable/remove)" >&2; exit 1
+    name="$1"; dir="$2"; session="$3"; port="$4"; extra="$5"; enabled="$6"
+    case "$name" in ''|*['|"']*) echo "  FAIL (name must be non-empty, no | or \")" >&2; exit 1 ;; esac
+    case "$dir$session$port$extra" in *['|"']*) echo "  FAIL (fields must not contain | or \")" >&2; exit 1 ;; esac
+    if awk -F'|' -v n="$name" '!/^#/ && $1==n{f=1} END{exit f?0:1}' "$conf"; then
+      echo "  FAIL ($name already in list — use enable/disable/remove)" >&2; exit 1
     fi
-    printf '%s|%s|%s|%s|%s|%s\n' "{{name}}" "{{dir}}" "{{session}}" "{{port}}" "{{extra}}" "{{enabled}}" >> "$conf"
-    if [ "{{enabled}}" = 1 ]; then st="enabled — starts on 'up all'/login"; else st="manual-only (not auto-started)"; fi
-    echo "  OK (added {{name}}: $st)" >&2
+    printf '%s|%s|%s|%s|%s|%s\n' "$name" "$dir" "$session" "$port" "$extra" "$enabled" >> "$conf"
+    [ "$enabled" = 1 ] && st="enabled — starts on 'up all'/login" || st="manual-only (not auto-started)"
+    echo "  OK (added $name: $st)" >&2
 
 # Include a project in `up all` / login
 enable name: (_setflag name "1")
@@ -180,23 +186,26 @@ _setflag name flag:
     #!/usr/bin/env bash
     set -uo pipefail
     conf="{{_conf}}"
-    [ -f "$conf" ] && grep -q "^{{name}}|" "$conf" || { echo "  FAIL (not in list: {{name}})" >&2; exit 1; }
-    awk -F'|' -v OFS='|' -v n="{{name}}" -v f="{{flag}}" '
+    name="$1"; flag="$2"
+    awk -F'|' -v n="$name" '!/^#/ && $1==n{f=1} END{exit f?0:1}' "$conf" 2>/dev/null \
+      || { echo "  FAIL (not in list: $name)" >&2; exit 1; }
+    awk -F'|' -v OFS='|' -v n="$name" -v f="$flag" '
       /^#/ || NF<2 { print; next }
       $1==n { $6=f } { print }
     ' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
-    if [ "{{flag}}" = 1 ]; then echo "  OK (enabled {{name}} — starts on 'up all'/login)" >&2
-    else echo "  OK (disabled {{name}} — manual-only)" >&2; fi
+    [ "$flag" = 1 ] && echo "  OK (enabled $name — starts on 'up all'/login)" >&2 \
+                    || echo "  OK (disabled $name — manual-only)" >&2
 
 # Drop a project from the list entirely
 remove name:
     #!/usr/bin/env bash
     set -uo pipefail
     conf="{{_conf}}"
-    [ -f "$conf" ] && grep -q "^{{name}}|" "$conf" || { echo "  FAIL (not in list: {{name}})" >&2; exit 1; }
-    grep -v "^{{name}}|" "$conf" > "$conf.tmp" || true
-    mv "$conf.tmp" "$conf"
-    echo "  OK (removed {{name}})" >&2
+    name="$1"
+    awk -F'|' -v n="$name" '!/^#/ && $1==n{f=1} END{exit f?0:1}' "$conf" 2>/dev/null \
+      || { echo "  FAIL (not in list: $name)" >&2; exit 1; }
+    awk -F'|' -v n="$name" '/^#/ || $1!=n { print }' "$conf" > "$conf.tmp" && mv "$conf.tmp" "$conf"
+    echo "  OK (removed $name)" >&2
 
 # ─── status / list ──────────────────────────────────────────────────────────
 
@@ -220,6 +229,42 @@ list:
     [ -f "{{_conf}}" ] || { echo "  (registry empty — just add <name> <dir> <session> [port])"; exit 0; }
     awk -F'|' '!/^#/ && NF>1 {printf "  %-10s %-5s → %s\n", $1, ($6=="1"?"[on] ":"[off]"), $2}' "{{_conf}}"
 
+# Per-project git: unpushed (ahead) / unpulled (behind) / dirty. FETCH=1 to fetch first.
+git:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export PATH="{{_path}}:$PATH"
+    JF="{{justfile()}}"
+    [ -f "{{_conf}}" ] || { echo "  (registry empty)"; exit 0; }
+    printf '%-10s %-16s %-9s %-9s %s\n' NAME BRANCH UNPUSHED UNPULLED DIRTY
+    printf '%-10s %-16s %-9s %-9s %s\n' "──────────" "──────────────" "───────" "───────" "─────"
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
+      case "$name" in ''|\#*) continue ;; esac
+      dir="${dir/#\~/$HOME}"
+      IFS='|' read -r branch ahead behind dirty <<<"$(just --justfile "$JF" _git-one "$dir")"
+      printf '%-10s %-16s %-9s %-9s %s\n' "$name" "$branch" "$ahead" "$behind" "$dirty"
+    done < "{{_conf}}"
+    [ "${FETCH:-0}" = 1 ] || echo "tip: FETCH=1 just git → fetch first for accurate UNPULLED" >&2
+
+# emit: branch|ahead|behind|dirty for one repo dir ('-' fields when not a git repo / no upstream)
+[private]
+_git-one dir:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export PATH="{{_path}}:$PATH"
+    d="{{dir}}"
+    git -C "$d" rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "-|-|-|-"; exit 0; }
+    [ "${FETCH:-0}" = 1 ] && GIT_TERMINAL_PROMPT=0 git -C "$d" fetch -q --all 2>/dev/null || true
+    branch=$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')
+    if git -C "$d" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+      ahead=$(git -C "$d" rev-list --count '@{u}..HEAD' 2>/dev/null || echo 0)
+      behind=$(git -C "$d" rev-list --count 'HEAD..@{u}' 2>/dev/null || echo 0)
+    else
+      ahead="-"; behind="-"
+    fi
+    [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ] && dirty="yes" || dirty="no"
+    echo "$branch|$ahead|$behind|$dirty"
+
 # ─── passthrough to a single project (uniform interface) ────────────────────
 
 # Attach to a project's tmux session
@@ -233,7 +278,7 @@ _one action name:
     set -uo pipefail
     export PATH="{{_path}}:$PATH"
     [ -f "{{_conf}}" ] || { echo "registry empty" >&2; exit 1; }
-    while IFS='|' read -r name dir session port extra enabled; do
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
       case "$name" in ''|\#*) continue ;; esac
       [ "$name" = "{{name}}" ] || continue
       dir="${dir/#\~/$HOME}"
@@ -243,6 +288,22 @@ _one action name:
 
 # ─── internals used by the TUI ──────────────────────────────────────────────
 
+# Build the fzf picker lines shared by `tui` and `up`'s picker.
+# Each line: NAME<TAB>marker+glyph+name+port  (col 1 is the selectable NAME key,
+# cols 2.. are the visible label). Single source of truth for the picker format.
+[private]
+_menu-lines:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export PATH="{{_path}}:$PATH"
+    JF="{{justfile()}}"
+    while IFS='|' read -r name session port dir extra state enabled; do
+      [ -z "$name" ] && continue
+      if [ "$state" = up ]; then g="●"; else g="○"; fi
+      [ "$enabled" = 1 ] && m=" " || m="✗"
+      printf '%s\t%s%s %-10s %s\n' "$name" "$m" "$g" "$name" "${port:+:$port}"
+    done < <(just --justfile "$JF" _rows)
+
 # emit: name|session|port|dir|extra|state|enabled   (state = up|down)
 [private]
 _rows:
@@ -250,7 +311,7 @@ _rows:
     set -uo pipefail
     export PATH="{{_path}}:$PATH"
     [ -f "{{_conf}}" ] || exit 0
-    while IFS='|' read -r name dir session port extra enabled; do
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
       case "$name" in ''|\#*) continue ;; esac
       dir="${dir/#\~/$HOME}"
       if tmux has-session -t "$session" 2>/dev/null; then state=up; else state=down; fi
@@ -264,10 +325,11 @@ _status-one target:
     set -uo pipefail
     export PATH="{{_path}}:$PATH"
     [ -f "{{_conf}}" ] || { echo "registry empty"; exit 0; }
-    while IFS='|' read -r name dir session port extra enabled; do
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
       case "$name" in ''|\#*) continue ;; esac
       [ "$name" = "{{target}}" ] || continue
       dir="${dir/#\~/$HOME}"
+      enabled="${enabled:-1}"
       echo "▌ $name"
       echo "  dir:       $dir"
       echo "  session:   $session"
@@ -288,6 +350,11 @@ _status-one target:
       for e in $extra; do
         if tmux has-session -t "$e" 2>/dev/null; then echo "  extra:     $e ●"; else echo "  extra:     $e ○"; fi
       done
+      IFS='|' read -r gb ga gbh gd <<<"$(just --justfile "{{justfile()}}" _git-one "$dir")"
+      if [ "$gb" != "-" ]; then
+        [ "$gd" = yes ] && gds="dirty" || gds="clean"
+        echo "  git:       $gb  ↑$ga unpushed · ↓$gbh unpulled · $gds"
+      fi
       echo ""
       echo "  ── recent tmux output ──"
       tmux capture-pane -t "$session" -p -S -14 2>/dev/null | sed 's/^/  /' \
@@ -307,11 +374,27 @@ install:
     case "{{os()}}" in
       macos)
         plist="$HOME/Library/LaunchAgents/com.mike.projctl.plist"
+        justbin="$(command -v just)"
         echo "→ installing LaunchAgent (macOS)..." >&2
-        cp "$DIR/com.mike.projctl.plist" "$plist"
+        mkdir -p "$(dirname "$plist")"
+        {
+          echo '<?xml version="1.0" encoding="UTF-8"?>'
+          echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+          echo '<plist version="1.0"><dict>'
+          echo '  <key>Label</key><string>com.mike.projctl</string>'
+          echo '  <key>ProgramArguments</key><array>'
+          echo "    <string>$justbin</string><string>--justfile</string><string>$DIR/justfile</string><string>up</string><string>all</string>"
+          echo '  </array>'
+          echo "  <key>WorkingDirectory</key><string>$DIR</string>"
+          echo "  <key>EnvironmentVariables</key><dict><key>PATH</key><string>{{_path}}</string></dict>"
+          echo '  <key>RunAtLoad</key><true/>'
+          echo "  <key>StandardOutPath</key><string>$DIR/projctl.log</string>"
+          echo "  <key>StandardErrorPath</key><string>$DIR/projctl.log</string>"
+          echo '</dict></plist>'
+        } > "$plist"
         launchctl unload "$plist" 2>/dev/null || true
         launchctl load "$plist"
-        echo "  OK (loaded $plist — projects start on next login)" >&2
+        echo "  OK (generated + loaded $plist — starts on next login)" >&2
         ;;
       linux)
         unit="$HOME/.config/systemd/user/projctl.service"
