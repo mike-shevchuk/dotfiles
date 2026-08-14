@@ -6,13 +6,17 @@
 #   just up [names…]        → start the named projects (even if disabled)
 #   just down [names…]      → stop
 #   just restart [names…]   → restart
-#   just status             → status table (state · auto · ports)
-#   just git                → per-project git: unpushed / unpulled / dirty
-#                             (FETCH=1 just git → git fetch first for accurate UNPULLED)
+#   just status             → status table (state · auto · ports · git ↑ahead↓behind*dirty)
+#   just git                → per-project git: unpushed / unpulled / dirty (counts)
+#   just commits [names…]   → list the actual unpushed/unpulled commits
+#                             (FETCH=1 → git fetch first for accurate results)
 #   just list               → show the registry
 #
-#   just add    <name> <dir> <session> [port] [extra]   → add, ENABLED at startup
-#   just add-off <name> <dir> <session> [port] [extra]  → add, but manual-only
+#   just add    <name> <dir> <session> [port] [extra] [run]  → add, ENABLED at startup
+#   just add-off <name> <dir> <session> [port] [extra] [run] → add, but manual-only
+#     (on add: checks the project justfile for start/stop/restart/status/logs;
+#      if there is no justfile and [run] was given, scaffolds one from the template)
+#   just scaffold <dir> <session> <run> [port]          → write a standard justfile
 #   just enable  <name>     → include in `up all` / login
 #   just disable <name>     → keep in list, but don't auto-start
 #   just remove  <name>     → drop from the list entirely
@@ -152,11 +156,71 @@ _do action *names:
 
 # ─── registry editing ───────────────────────────────────────────────────────
 
-# Add a project, ENABLED at startup:  just add <name> <dir> <session> [port] [extra]
-add name dir session port="" extra="": (_add name dir session port extra "1")
+# After registering, checks the project's justfile for the standard recipes and,
+# if the dir has no justfile and a run-command was given, scaffolds one.
+# Add a project, ENABLED at startup:  args <name> <dir> <session> [port] [extra] [run]
+add name dir session port="" extra="" run="": (_add name dir session port extra "1")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just --justfile "{{justfile()}}" _ensure-recipes "$2" "$3" "$4" "$6"
 
 # Add a project but manual-only (not started by `up all`/login)
-add-off name dir session port="" extra="": (_add name dir session port extra "0")
+add-off name dir session port="" extra="" run="": (_add name dir session port extra "0")
+    #!/usr/bin/env bash
+    set -uo pipefail
+    just --justfile "{{justfile()}}" _ensure-recipes "$2" "$3" "$4" "$6"
+
+# Create a project justfile with the standard recipes:  just scaffold <dir> <session> <run> [port]
+scaffold dir session run port="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export PATH="{{_path}}:$PATH"
+    tmpl="{{justfile_directory()}}/service.template.just"
+    dir="$1"; session="$2"; run="$3"; port="$4"
+    dir="${dir/#\~/$HOME}"
+    target="$dir/justfile"
+    if [ -e "$target" ]; then
+      echo "  FAIL (justfile exists: $target — add recipes from service.template.just manually)" >&2; exit 1
+    fi
+    mkdir -p "$dir"
+    {
+      echo "# $(basename "$dir") — projctl-managed service (tmux session: $session)"
+      echo "set dotenv-load"
+      echo ""
+      printf 'session := "%s"\n' "$session"
+      printf 'port    := "%s"\n' "$port"
+      printf 'run     := "%s"\n' "$run"
+    } > "$target"
+    sed -n '/^# Start the service/,$p' "$tmpl" >> "$target"
+    echo "  OK (scaffolded $target — session=$session port=${port:-none})" >&2
+
+# check a project's justfile for the standard recipes; scaffold if absent + run given
+[private]
+_ensure-recipes dir session port run:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    export PATH="{{_path}}:$PATH"
+    JF="{{justfile()}}"
+    dir="$1"; session="$2"; port="$3"; run="$4"
+    adir="${dir/#\~/$HOME}"
+    jf="$adir/justfile"
+    if [ -f "$jf" ]; then
+      have="$(just --justfile "$jf" --summary 2>/dev/null || true)"
+      missing=""
+      for r in start stop restart status logs; do
+        case " $have " in *" $r "*) : ;; *) missing="$missing $r" ;; esac
+      done
+      if [ -z "${missing// /}" ]; then
+        echo "  ✓ standard recipes present ($jf)" >&2
+      else
+        echo "  ⚠ $jf is missing:$missing — add them from service.template.just" >&2
+      fi
+    elif [ -n "$run" ]; then
+      just --justfile "$JF" scaffold "$dir" "$session" "$run" "$port"
+    else
+      echo "  ⚠ no justfile at $adir — pass a run-command to auto-create it:" >&2
+      echo "     just add <name> $dir $session '$port' '' '<run-command>'" >&2
+    fi
 
 # args arrive as positional ($1..) — never textually interpolated, so a name with
 # odd characters can't corrupt the recipe or inject into awk/grep.
@@ -214,12 +278,15 @@ status:
     #!/usr/bin/env bash
     set -uo pipefail
     export PATH="{{_path}}:$PATH"
-    printf '%-10s %-8s %-6s %-8s %s\n' NAME STATE AUTO PORT DIR
-    printf '%-10s %-8s %-6s %-8s %s\n' "──────────" "──────" "────" "──────" "───"
-    just --justfile "{{justfile()}}" _rows | while IFS='|' read -r name session port dir extra state enabled; do
+    JF="{{justfile()}}"
+    printf '%-10s %-8s %-5s %-7s %-9s %s\n' NAME STATE AUTO PORT GIT DIR
+    printf '%-10s %-8s %-5s %-7s %-9s %s\n' "──────────" "──────" "────" "──────" "───────" "───"
+    just --justfile "$JF" _rows | while IFS='|' read -r name session port dir extra state enabled; do
       [ "$state" = up ] && s="● up" || s="○ down"
       [ "$enabled" = 1 ] && a="yes" || a="no"
-      printf '%-10s %-8s %-6s %-8s %s\n' "$name" "$s" "$a" "${port:+:$port}" "$dir"
+      IFS='|' read -r gb ga gbh gd <<<"$(just --justfile "$JF" _git-one "$dir")"
+      if [ "$gb" = "-" ]; then git="-"; else [ "$gd" = yes ] && m="*" || m=""; git="↑${ga}↓${gbh}${m}"; fi
+      printf '%-10s %-8s %-5s %-7s %-9s %s\n' "$name" "$s" "$a" "${port:+:$port}" "$git" "$dir"
     done
 
 # Show the registry (with on/off auto-start marker)
@@ -264,6 +331,36 @@ _git-one dir:
     fi
     [ -n "$(git -C "$d" status --porcelain 2>/dev/null)" ] && dirty="yes" || dirty="no"
     echo "$branch|$ahead|$behind|$dirty"
+
+# List the actual unpushed (↑) and unpulled (↓) commits per project (or named ones)
+commits *names:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    set -f
+    export PATH="{{_path}}:$PATH"
+    want="{{names}}"
+    [ -f "{{_conf}}" ] || { echo "registry empty" >&2; exit 0; }
+    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
+      case "$name" in ''|\#*) continue ;; esac
+      if [ -n "$want" ]; then
+        hit=0; for w in $want; do [ "$w" = "$name" ] && hit=1; done
+        [ "$hit" = 1 ] || continue
+      fi
+      dir="${dir/#\~/$HOME}"
+      git -C "$dir" rev-parse --is-inside-work-tree >/dev/null 2>&1 || continue
+      [ "${FETCH:-0}" = 1 ] && GIT_TERMINAL_PROMPT=0 git -C "$dir" fetch -q --all 2>/dev/null || true
+      branch=$(git -C "$dir" rev-parse --abbrev-ref HEAD 2>/dev/null)
+      echo "▌ $name ($branch)"
+      if git -C "$dir" rev-parse --abbrev-ref '@{u}' >/dev/null 2>&1; then
+        up=$(git -C "$dir" log --oneline '@{u}..HEAD' 2>/dev/null)
+        dn=$(git -C "$dir" log --oneline 'HEAD..@{u}' 2>/dev/null)
+        [ -n "$up" ] && echo "$up" | sed 's/^/  ↑ /' || echo "  ↑ (nothing unpushed)"
+        [ -n "$dn" ] && echo "$dn" | sed 's/^/  ↓ /' || echo "  ↓ (nothing unpulled)"
+      else
+        echo "  (no upstream tracking branch)"
+      fi
+      echo ""
+    done < "{{_conf}}"
 
 # ─── passthrough to a single project (uniform interface) ────────────────────
 
