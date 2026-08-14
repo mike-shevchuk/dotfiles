@@ -271,8 +271,18 @@ alias jml='just -f "$JM_JUSTFILE" --list'
 # worktree of any b2b repo runs `just --justfile <that-worktree-root>/justfile.v2
 # <recipe>` — no path to remember or retarget per checkout.
 jb2b() {
-    local root jf
+    local root jf common
     root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "jb2b: not inside a git repo" >&2; return 1; }
+    # In a LINKED WORKTREE justfile.v2 never came along — it is gitignored
+    # (**/justfile.*), so worktrees are created without it and the scan below
+    # finds nothing. --git-common-dir points at the MAIN checkout's .git, so
+    # retarget there and `jb2b <recipe>` works identically from any worktree.
+    # (In the main checkout common == root, so this is a no-op.)
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    common=${common%/.git}
+    if [ -n "$common" ] && [ -d "$common" ] && [ "$common" != "$root" ]; then
+        root="$common"
+    fi
     if [ -f "$root/justfile.v2" ]; then
         jf="$root/justfile.v2"
     else
