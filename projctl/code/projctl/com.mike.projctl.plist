@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mike.projctl</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/opt/homebrew/bin/just</string>
+        <string>--justfile</string>
+        <string>/Users/mikeshevchuk/code/projctl/justfile</string>
+        <string>up</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/mikeshevchuk/code/projctl</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/Users/mikeshevchuk/.local/bin:/usr/bin:/bin</string>
+    </dict>
+
+    <!-- Run once on login. Not KeepAlive: projctl only kicks off the projects;
+         each project stays alive in its own tmux session. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/mikeshevchuk/code/projctl/projctl.log</string>
+    <key>StandardErrorPath</key>
+    <string>/Users/mikeshevchuk/code/projctl/projctl.log</string>
+</dict>
+</plist>

@@ -1,0 +1,19 @@
+# projctl — systemd user service (Linux auto-start on login)
+# Installed by `just install` to ~/.config/systemd/user/projctl.service
+# %h = the user's home directory (portable across machines)
+
+[Unit]
+Description=projctl — start all projects in tmux on login
+After=graphical-session.target
+
+[Service]
+Type=oneshot
+# keep the unit "active" after ExecStart returns so systemd does NOT tear down
+# the tmux sessions that `up` spawned
+RemainAfterExit=yes
+Environment=PATH=/usr/local/bin:/usr/bin:/bin:%h/.local/bin
+ExecStart=/usr/bin/env just --justfile %h/code/projctl/justfile up all
+ExecStop=/usr/bin/env just --justfile %h/code/projctl/justfile down
+
+[Install]
+WantedBy=default.target

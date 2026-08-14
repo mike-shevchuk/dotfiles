@@ -23,3 +23,8 @@ hammerspoon/.hammerspoon/.env
 # /review-html skill artifacts (generated HTML, explanations, comments)
 .claude-review/
 __pycache__/
+
+# projctl: machine-specific project list + local state (registry.conf.example is tracked)
+projctl/code/projctl/registry.conf
+projctl/code/projctl/projctl.log
+*.projctl-bak
