@@ -51,6 +51,16 @@ render() {
     printf "  ${C_DIM}in DiffView${C_OFF} C-j/C-k scroll · C-d/C-u half page · ]c/[c next/prev hunk · C-h/C-l panes\n"
     printf "  ${C_DIM}           ${C_OFF} from the file list C-j/C-k scroll the diff · zR all folds · zo expand one\n"
 
+    grp "Scroll a pane (no prefix, no mouse)"
+    row "PageUp"     "scroll 1 line up (plain key) — hold to glide; auto-exits at the bottom"
+    row "PageDown"   "scroll 1 line down; inside nvim/less the key passes through"
+    row "prefix PgUp" "same, always works even if the terminal eats plain keys"
+    row "S-PageUp"   "scroll one screen up — enters copy-mode automatically"
+    row "S-PageDown" "scroll one screen down"
+    row "S-Up/S-Down" "scroll 3 lines (Shift+arrows); exits at the bottom on its own"
+    row "M-Up/M-Down" "same, Alt+arrows (only on terminals that send them)"
+    printf "  ${C_DIM}in copy-mode${C_OFF} j/k · C-u/C-d · g/G · /search · q quit  (mouse wheel also works)\n"
+
     grp "Status bar"
     printf "  ${C_DIM}row 0${C_OFF} session · tabs · 🐍 python · 󰚩 claude · cpu · ram · clock\n"
     printf "  ${C_DIM}row 1${C_OFF} active pane: 🌿 branch · 🔀 PR#n · path · 🐍 python\n"

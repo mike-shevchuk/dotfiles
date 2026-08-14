@@ -287,6 +287,57 @@ bind R display-popup -E -w 80% -h 70% -d "#{pane_current_path}" "~/dotfiles/tmux
 bind '?' display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
 
+# -- Scroll the PANE without the mouse -----------------------------------------
+# No prefix needed: these enter copy-mode for you, scroll, and (with `-e`) drop
+# back to the shell automatically once you reach the bottom. The mouse wheel
+# already does this (WheelUpPane → copy-mode -e); these are its keyboard twin.
+#   Shift-PageUp / Shift-PageDown → one screen
+#   Shift-Up     / Shift-Down     → three lines
+#   Alt-Up       / Alt-Down       → three lines (same; kept as an alias)
+# Inside copy-mode the usual keys keep working: j/k, C-u/C-d, g/G, /search, q.
+#
+# Shift+arrows are the PRIMARY line-scroll keys: macOS/SSH terminals often don't
+# emit M-Up/M-Down at all (Option is eaten or sent as a composed char), while
+# Shift+arrow is transmitted by everything that already sends Shift-PageUp.
+# PLAIN PageUp / PageDown — no modifier at all, because some terminals (and SSH
+# clients) never transmit modified arrows/pages: S-Up, M-Up and even S-PageUp
+# can be swallowed before tmux ever sees them. A bare key always arrives.
+# Guarded so it stays invisible to full-screen apps: inside nvim/less/fzf
+# (alternate screen) or an already-open copy-mode the key is passed straight
+# through to the program, so their own paging keeps working. Only at the shell
+# prompt does it mean "scroll my scrollback".
+# ONE line per press — the key auto-repeats while held, so holding it scrolls
+# smoothly like a wheel instead of jumping.
+#
+# The guard is on `alternate_on` ONLY (a real full-screen app: nvim, less, fzf →
+# the key belongs to them). It must NOT include `pane_in_mode`: passing the key
+# through while copy-mode is already open handed it to copy-mode's own PageUp,
+# which pages a whole screen — that was the "first press small, then it jumps"
+# behaviour. Inside copy-mode we keep doing our own one-line scroll.
+#
+# tmux cannot show scrollback outside copy-mode, but `-e` leaves it the moment
+# you reach the bottom again, so it never feels like a mode you're stuck in.
+# Want a bigger step? change both `-N 1` values.
+bind -n PPage if -F '#{alternate_on}' \
+    { send-keys PPage } { copy-mode -e ; send-keys -X -N 1 scroll-up }
+bind -n NPage if -F '#{alternate_on}' \
+    { send-keys NPage } \
+    { if -F '#{pane_in_mode}' { send-keys -X -N 1 scroll-down } { send-keys NPage } }
+
+# prefix PgUp — same one-line scroll, but behind the prefix so it always works
+# even on terminals/SSH clients that swallow the plain PageUp key.
+bind PPage copy-mode -e \; send-keys -X -N 1 scroll-up
+
+# Modified pages/arrows: same `alternate_on` guard as PPage/NPage above, so inside
+# a full-screen app (nvim/less/fzf) the key is passed straight through instead of
+# being hijacked into copy-mode (or, for the Down variants, silently swallowed).
+bind -n S-PageUp   if -F '#{alternate_on}' { send-keys S-PageUp }   { copy-mode -eu }
+bind -n S-PageDown if -F '#{alternate_on}' { send-keys S-PageDown } { if -F '#{pane_in_mode}' { send-keys -X page-down } { } }
+bind -n S-Up       if -F '#{alternate_on}' { send-keys S-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n S-Down     if -F '#{alternate_on}' { send-keys S-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
+bind -n M-Up       if -F '#{alternate_on}' { send-keys M-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n M-Down     if -F '#{alternate_on}' { send-keys M-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
+
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
