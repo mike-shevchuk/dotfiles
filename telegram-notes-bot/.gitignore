@@ -1,0 +1,5 @@
+data/
+recaps/
+__pycache__/
+.venv/
+*.pyc

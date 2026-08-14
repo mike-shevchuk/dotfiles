@@ -324,12 +324,19 @@ bind -n NPage if -F '#{alternate_on}' \
     { send-keys NPage } \
     { if -F '#{pane_in_mode}' { send-keys -X -N 1 scroll-down } { send-keys NPage } }
 
-bind -n S-PageUp   copy-mode -eu
-bind -n S-PageDown if -F '#{pane_in_mode}' { send-keys -X page-down } { }
-bind -n S-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
-bind -n S-Down     if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { }
-bind -n M-Up       copy-mode -e \; send-keys -X -N 3 scroll-up
-bind -n M-Down     if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { }
+# prefix PgUp — same one-line scroll, but behind the prefix so it always works
+# even on terminals/SSH clients that swallow the plain PageUp key.
+bind PPage copy-mode -e \; send-keys -X -N 1 scroll-up
+
+# Modified pages/arrows: same `alternate_on` guard as PPage/NPage above, so inside
+# a full-screen app (nvim/less/fzf) the key is passed straight through instead of
+# being hijacked into copy-mode (or, for the Down variants, silently swallowed).
+bind -n S-PageUp   if -F '#{alternate_on}' { send-keys S-PageUp }   { copy-mode -eu }
+bind -n S-PageDown if -F '#{alternate_on}' { send-keys S-PageDown } { if -F '#{pane_in_mode}' { send-keys -X page-down } { } }
+bind -n S-Up       if -F '#{alternate_on}' { send-keys S-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n S-Down     if -F '#{alternate_on}' { send-keys S-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
+bind -n M-Up       if -F '#{alternate_on}' { send-keys M-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n M-Down     if -F '#{alternate_on}' { send-keys M-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------

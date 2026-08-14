@@ -1,6 +1,13 @@
 #!/bin/bash
 set -f # disable globbing
 
+# Force C numeric locale so awk printf uses '.' (not ',') as the decimal
+# separator. Under uk_UA.UTF-8, "%.2f" emits "84,00", which then breaks any
+# awk expression it is interpolated into (ep = 84,00 → syntax error) and the
+# pace/speed indicator collapses to a bare "~x". LC_NUMERIC only affects number
+# formatting — LC_CTYPE stays UTF-8 so emoji still render.
+export LC_NUMERIC=C
+
 input=$(cat)
 
 if [ -z "$input" ]; then
@@ -389,12 +396,25 @@ if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   if [ "$_dage" -gt 30 ] && command -v gh >/dev/null 2>&1 && [ -n "$cwd" ]; then
     echo "$_dnow" > "$_deploy_stamp"
     (
-      _c=$(cd "$cwd" && gh pr checks "$pr_number" --json name,bucket 2>/dev/null)
+      # Use ALL check-runs for the head SHA, not `gh pr checks` (which keeps only
+      # the LATEST run per check name). The deploy workflow serialises through a
+      # concurrency group, so a duplicate queued run gets cancelled and becomes
+      # "latest" even when an earlier run of the same check deployed successfully
+      # — that made a healthy deploy render as "failed".
+      # SHA must be the PR's *pushed* head, not local HEAD: with unpushed commits
+      # `git rev-parse HEAD` points at a SHA GitHub has no runs for, so a real
+      # deploy renders as "none". @{u} is the pushed upstream tip (the PR head);
+      # fall back to the PR's headRefOid if there is no upstream ref.
+      _dsha=$(cd "$cwd" && git rev-parse '@{u}' 2>/dev/null)
+      [ -n "$_dsha" ] || _dsha=$(cd "$cwd" && gh pr view "$pr_number" --json headRefOid --jq .headRefOid 2>/dev/null)
+      _c=$(cd "$cwd" && gh api "repos/{owner}/{repo}/commits/${_dsha}/check-runs" \
+             --jq '[.check_runs[] | {name: .name, bucket: (.conclusion // .status)}]' 2>/dev/null)
       _st=$(jq -r '[.[] | select(.name | test("deploy"; "i"))] |
         if length == 0 then "none"
-        elif any(.[]; .bucket == "pending") then "deploying"
-        elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "failed"
-        elif any(.[]; .bucket == "pass") then "deployed"
+        elif any(.[]; .bucket == "in_progress" or .bucket == "queued" or .bucket == "pending") then "deploying"
+        elif any(.[]; .bucket == "failure" or .bucket == "timed_out") then "failed"
+        elif any(.[]; .bucket == "success") then "deployed"
+        elif any(.[]; .bucket == "cancelled") then "failed"
         else "skipped" end' <<<"${_c:-[]}" 2>/dev/null)
       # While deploying, grab the in-progress deploy run's start time so the
       # render can draw a live elapsed-based progress bar between refreshes.
@@ -606,6 +626,34 @@ get_oauth_token() {
   echo ""
 }
 
+# ===== Usage snapshot history (for recent pace) =====
+# Defined here (before the usage-data fetch below) because that fetch calls
+# record_usage_snapshot on both cache-hit and API-refresh paths.
+history_file="/tmp/claude/statusline-usage-history.txt"
+
+# Append a snapshot; prune entries older than 24h
+# Deduplicates: skip if last entry has same values and is < 60s old
+record_usage_snapshot() {
+  local five_pct=$1 seven_pct=$2
+  if [ -f "$history_file" ]; then
+    local last_line
+    last_line=$(tail -1 "$history_file")
+    local last_epoch last_five last_seven
+    last_epoch=$(echo "$last_line" | cut -d: -f1)
+    last_five=$(echo "$last_line" | cut -d: -f2)
+    last_seven=$(echo "$last_line" | cut -d: -f3)
+    # Skip if same values and less than 60s ago
+    if [ "$last_five" = "$five_pct" ] && [ "$last_seven" = "$seven_pct" ] && \
+       [ -n "$last_epoch" ] && [ $((now_epoch - last_epoch)) -lt 60 ]; then
+      return
+    fi
+  fi
+  echo "${now_epoch}:${five_pct}:${seven_pct}" >> "$history_file"
+  local cutoff=$((now_epoch - 86400))
+  awk -F: -v c="$cutoff" '$1 >= c' "$history_file" > "${history_file}.tmp" && \
+    mv "${history_file}.tmp" "$history_file"
+}
+
 # ===== Usage data (cached) =====
 cache_file="/tmp/claude/statusline-usage-cache.json"
 cache_max_age=180
@@ -690,30 +738,9 @@ format_reset_time() {
 }
 
 # ===== Usage snapshot history (for recent pace) =====
-history_file="/tmp/claude/statusline-usage-history.txt"
-
-# Append a snapshot; prune entries older than 24h
-# Deduplicates: skip if last entry has same values and is < 60s old
-record_usage_snapshot() {
-  local five_pct=$1 seven_pct=$2
-  if [ -f "$history_file" ]; then
-    local last_line
-    last_line=$(tail -1 "$history_file")
-    local last_epoch last_five last_seven
-    last_epoch=$(echo "$last_line" | cut -d: -f1)
-    last_five=$(echo "$last_line" | cut -d: -f2)
-    last_seven=$(echo "$last_line" | cut -d: -f3)
-    # Skip if same values and less than 60s ago
-    if [ "$last_five" = "$five_pct" ] && [ "$last_seven" = "$seven_pct" ] && \
-       [ -n "$last_epoch" ] && [ $((now_epoch - last_epoch)) -lt 60 ]; then
-      return
-    fi
-  fi
-  echo "${now_epoch}:${five_pct}:${seven_pct}" >> "$history_file"
-  local cutoff=$((now_epoch - 86400))
-  awk -F: -v c="$cutoff" '$1 >= c' "$history_file" > "${history_file}.tmp" && \
-    mv "${history_file}.tmp" "$history_file"
-}
+# record_usage_snapshot + history_file are defined ABOVE, before the usage-data
+# fetch that calls them (bash needs the function defined before the call site).
+# history_file stays a global, referenced by calc_recent_pace below.
 
 # Recent pace over a lookback window
 # Usage: calc_recent_pace <current_pct> <window_secs> <lookback_secs> <col>

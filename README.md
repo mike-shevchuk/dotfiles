@@ -241,6 +241,28 @@ Claude Code CLI with custom hooks, statusline, and sound notifications.
 - Voice: enabled
 - Plugins (reinstall via `/plugin`, not backed up): context7, code-review, code-simplifier, playwright, superpowers, huggingface-skills, claude-md-management, ralph-loop, telegram, linear, frontend-design, claude-code-kanban, ui-ux-pro-max, stop-slop, ralph-skills
 
+### Cheatsheets — one fuzzy entry point
+
+Every hotkey/command cheatsheet on the machine is reachable from anywhere with
+`cheat` (alias for `just -g cheat`). It indexes three sources with **no data
+migration** — the files stay where they are:
+
+| Source | What |
+|--------|------|
+| `README.md` | every `##` section (Tmux, Neovim, Kitty, Yazi, Hyprland, Mise, Claude Code, …), split into `~/.cache/cheat/readme/` and refreshed when README changes |
+| `~/zettelkasten/**/cheatsheet/*.md` | any note inside a `cheatsheet/` folder (nvim, tmux, python, …) |
+| `~/zettelkasten/**/*cheatsheet*.md` | any note whose name contains "cheatsheet" (claude_code, uv, …) |
+
+```bash
+cheat            # fzf over everything, bat preview, Enter opens full sheet
+cheat tmux       # jump straight to tmux-related sheets
+cheats           # plain scriptable list (just -g cheat-list)
+```
+
+To add a sheet: drop any `*.md` into a `cheatsheet/` folder under
+`~/zettelkasten`, or add a `## …` section to this README — it appears
+automatically, no re-index step.
+
 ### Migrating to a new machine
 
 Full checklist: [`docs/claude-migration.md`](docs/claude-migration.md) — what the
@@ -420,6 +442,101 @@ All hotkeys use **Alt+Shift** (`hyper`).
 | `hyper + W` | Pomodoro |
 | `hyper + A` | Screenshot + annotate |
 | `hyper + R` | Reload config |
+
+### Displays
+
+| Key | Action |
+|-----|--------|
+| `hyper + I` | Pick which display is main |
+| `hyper + N` | Toggle mirror ⇄ extended |
+| `hyper2 + M` | Mirror this screen onto the iPad, and back |
+| `hyper2 + P` | Pick any offered Screen Mirroring device |
+
+(`hyper2` = Ctrl+Alt+Shift — every `hyper` letter is already taken.)
+
+---
+
+## Screen Mirroring (iPad / Sidecar)
+
+Duplicate the Mac onto an iPad — or use it as an extra display — from the
+terminal. Sidecar is wireless, so **the iPad can be in another room**: nothing
+is plugged in and the iPad is never touched.
+
+```bash
+just -g mirror              # duplicate this screen onto the iPad
+just -g mirror-extend       # use the iPad as an extra display instead
+just -g mirror-off          # disconnect
+just -g mirror-toggle       # connect ⇄ disconnect  (same as hyper + O)
+just -g mirror-status       # is it attached, and which displays exist
+just -g mirror-list         # devices Screen Mirroring is offering
+just -g mirror-pick         # fzf over those devices
+just -g mirror-res          # resolutions the mirrored set can take
+just -g mirror-res 1600x1112   # …and set one
+just -g mirror-solo         # iPad only: monitor backlight to 0, then mirror
+just -g mirror-wake         # leave solo — drop Sidecar, monitor back on
+just -g mirror-help         # the whole cheatsheet, in the terminal
+```
+
+### Making things fit, and going iPad-only
+
+Mirroring squeezes both screens to a shared resolution — 1180x820 by default,
+which is why nothing fits. `mirror-res` lists what the iPad can take and sets
+it; `mirror-res max` jumps straight to the widest mode.
+
+This matters most under a tiling WM. Measured here with PaperWM holding 23
+windows: 1180x820 shows 3 columns, 2360x1640 shows 5. The rest are not gone —
+PaperWM parks them past the edge with a 1px sliver showing, so scrolling brings
+them back.
+
+`mirror-solo` turns the monitor's backlight off over DDC (`m1ddc`) and mirrors,
+so the picture exists only on the iPad. Order is forced by macOS: while a
+mirrored set is up the physical monitor is unreachable over DDC, so the
+backlight is dimmed *before* Sidecar attaches and restored *after* it detaches —
+`mirror-wake` therefore drops the session on its way out. If the iPad fails to
+attach, the brightness is put back immediately rather than leaving a dark
+monitor.
+
+### Input from the iPad side
+
+Sidecar forwards only a hardware **keyboard** and **Apple Pencil** to the Mac. A
+trackpad or mouse paired to the *iPad* does nothing — its pointer never leaves
+iPadOS. Pair the keyboard/trackpad to the **Mac** instead; the iPad is only a
+display.
+
+Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —
+defaulting to `iPad`.
+
+### Menubar widget
+
+Hammerspoon puts a Screen Mirroring item in the menu bar:
+
+| Icon | Meaning |
+|------|---------|
+| `📱` | iPad not connected |
+| `🪞` | attached (tooltip says mirror or extend) |
+| `⏳` | connecting — Sidecar takes a few seconds |
+
+Click it for *Mirror this screen* / *Use as extended display* / *Disconnect*
+(shown only when attached) / *Pick device…*, plus the current display list. It
+never opens Control Center just to refresh itself — the icon follows the display
+list, and `hs.screen.watcher` updates it the moment a display comes or goes.
+
+**How it works.** macOS exposes no API for this, so
+`hammerspoon/.hammerspoon/modules/mirror.lua` drives the real Control Center →
+Screen Mirroring pane through the accessibility API and reads the result back
+from it. The recipes only ask Hammerspoon to run it and wait for the answer in
+`~/.cache/hs/mirror.txt`.
+
+**Requirements**
+
+- Hammerspoon running, with Accessibility permission and the `hs` CLI
+  (`hs.ipc.cliInstall()` once, from the Hammerspoon console)
+- iPad awake, on the same Wi-Fi, signed into the same Apple Account, within
+  Sidecar range (~10 m, walls included)
+
+**When it will not connect**, `mirror` says so instead of hanging — check the
+iPad is awake first; `just -g mirror-list` shows whether macOS is offering it
+at all.
 
 ---
 
