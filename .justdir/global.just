@@ -41,16 +41,20 @@ default:
 #   just -g cheat-list       → plain list of all sheets (no fzf, scriptable)
 # To add a sheet: drop any *.md into ~/zettelkasten/IT/cheatsheet/ — done.
 
-# Fuzzy-browse every cheatsheet (README sections + zettelkasten notes)
+# Rebuild the README→sections cache (only when README changed). Emits the
+# full tab-delimited index "SOURCE\tTITLE\tPATH" to stdout. Private helper
+# shared by `cheat` and `cheat-list` so the glob/split logic lives once.
 [group('cheat')]
-cheat query="":
+[private]
+_cheat-index:
     #!/usr/bin/env bash
     set -uo pipefail
+    # NB: macOS system bash is 3.2 (no globstar) → use find for any-depth walks.
     cache="$HOME/.cache/cheat/readme"
     readme="$HOME/dotfiles/README.md"
+    zk="$HOME/zettelkasten"
     mkdir -p "$cache"
 
-    # Rebuild the README split only when README changed (mtime compare)
     marker="$cache/.src-mtime"
     src_mtime=$(stat -f %m "$readme" 2>/dev/null || stat -c %Y "$readme" 2>/dev/null || echo 0)
     if [ "$(cat "$marker" 2>/dev/null || echo 0)" != "$src_mtime" ]; then
@@ -67,25 +71,31 @@ cheat query="":
         echo "$src_mtime" > "$marker"
     fi
 
-    # Build the index:  "SOURCE\tTITLE\tPATH"  (tab-delimited)
-    build_index() {
-        for f in "$cache"/*.md; do
-            [ -f "$f" ] || continue
-            t=$(head -1 "$f" | sed 's/^#* *//')
-            printf 'README\t%s\t%s\n' "$t" "$f"
-        done
-        for f in "$HOME/zettelkasten/IT/cheatsheet"/**/*.md \
-                 "$HOME/zettelkasten/IT/cheatsheet"/*.md; do
-            [ -f "$f" ] || continue
-            printf 'zettel\t%s\t%s\n' "$(basename "$f" .md)" "$f"
-        done
-        for f in "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
-            [ -f "$f" ] || continue
-            printf 'claude\t%s\t%s\n' "$(basename "$(dirname "$f")")/$(basename "$f" .md)" "$f"
-        done
-    }
+    # README sections (one file per `##` heading in the split cache)
+    find "$cache" -maxdepth 1 -name '*.md' 2>/dev/null | sort | while IFS= read -r f; do
+        printf 'README\t%s\t%s\n' "$(head -1 "$f" | sed 's/^#* *//')" "$f"
+    done
 
-    index=$(build_index | sort -u)
+    # Every cheatsheet under zettelkasten, any depth: files inside a
+    # `cheatsheet/` dir OR any file with "cheatsheet" in its name. Tag the
+    # SOURCE by top area (claude_code → claude, else zettel). Dedupe by path.
+    if [ -d "$zk" ]; then
+        # -not -path '*/.*/*' skips hidden dirs (.git, .claude/worktrees, .obsidian)
+        { find "$zk" -type f -name '*.md' -path '*/cheatsheet/*' -not -path '*/.*/*' 2>/dev/null
+          find "$zk" -type f -iname '*cheatsheet*.md' -not -path '*/.*/*' 2>/dev/null; } | sort -u | \
+        while IFS= read -r f; do
+            case "$f" in *"/claude_code/"*) src=claude ;; *) src=zettel ;; esac
+            label="$(basename "$(dirname "$f")")/$(basename "$f" .md)"
+            printf '%s\t%s\t%s\n' "$src" "$label" "$f"
+        done
+    fi
+
+# Fuzzy-browse every cheatsheet (README sections + zettelkasten notes)
+[group('cheat')]
+cheat query="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    index=$(just -g _cheat-index | sort -t"$(printf '\t')" -k1,2 -u)
     if [ -z "$index" ]; then echo "  no cheatsheets found" >&2; exit 1; fi
 
     # fzf: show "SOURCE  title" (fields 1-2), preview field 3 with bat.
@@ -99,22 +109,14 @@ cheat query="":
     path=$(printf '%s' "$pick" | cut -f3)
     bat --paging=always --style=full "$path" 2>/dev/null || less "$path"
 
-# Plain list of all cheatsheets — scriptable, no fzf (SOURCE · title · path)
+# Plain list of all cheatsheets — scriptable, no fzf (SOURCE + title)
 [group('cheat')]
 cheat-list:
     #!/usr/bin/env bash
     set -uo pipefail
-    just -g cheat >/dev/null 2>&1 &  # warm the README cache in background
-    cache="$HOME/.cache/cheat/readme"
-    printf "\n  %-8s  %s\n" "SOURCE" "CHEATSHEET"
-    printf "  %-8s  %s\n" "------" "----------"
-    for f in "$cache"/*.md; do
-        [ -f "$f" ] && printf "  %-8s  %s\n" "README" "$(head -1 "$f" | sed 's/^#* *//')"
-    done
-    for f in "$HOME/zettelkasten/IT/cheatsheet"/*.md \
-             "$HOME/zettelkasten/claude_code"/**/*cheatsheet*.md; do
-        [ -f "$f" ] && printf "  %-8s  %s\n" "zettel" "$(basename "$f" .md)"
-    done
+    printf "\n  %-8s  %s\n  %-8s  %s\n" "SOURCE" "CHEATSHEET" "------" "----------"
+    just -g _cheat-index | sort -t"$(printf '\t')" -k1,2 -u | \
+        awk -F'\t' '{ printf "  %-8s  %s\n", $1, $2 }'
     printf "\n"
 
 # --- Git / repo sync --------------------------------------------------------
