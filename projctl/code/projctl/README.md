@@ -77,9 +77,10 @@ just up-all                # те саме, що 'up all'
 just down                  # зупинити всі
 just down immich           # зупинити лише вказані
 just restart alexa         # перезапустити
-just status                # таблиця: стан + порт по кожному
-just git                   # git по кожному проекту: UNPUSHED / UNPULLED / DIRTY
-FETCH=1 just git           # спершу git fetch (точний UNPULLED), потім таблиця
+just status                # таблиця: стан + порт + GIT (↑ahead↓behind, *=dirty, -=не git)
+just git                   # git по кожному проекту: UNPUSHED / UNPULLED / DIRTY (кількість)
+just commits [names…]      # самі коміти: список незапушених (↑) / незапулених (↓)
+FETCH=1 just git           # (або just commits) спершу git fetch, потім результат
 just list                  # показати реєстр проектів
 just logs stt-host         # останній вивід із tmux-сесії
 just attach smartbj        # приєднатись до tmux-сесії (Ctrl-b d — відʼєднатись)
@@ -158,19 +159,28 @@ name | /абсолютний/шлях | tmux-сесія | порт(опц.) | д
 
 ## Як додати новий проект (напр. flow debugger)
 
-1. **Дай проекту стандартний інтерфейс.** Скопіюй блок рецептів із
-   [`service.template.just`](./service.template.just) у `justfile` проекту й заповни 3 змінні:
-   ```just
-   session := "flowdbg"          # унікальне імʼя tmux-сесії
-   port    := "9000"             # порт, або "" якщо нема
-   run     := "python app.py"    # команда запуску (в tmux)
-   ```
-2. **Додай один рядок у реєстр** у `~/code/projctl/justfile`:
-   ```
-   flowdbg|/Users/mikeshevchuk/code/flow-debugger|flowdbg|9000|
-   ```
+Одна команда — і `just add` сама перевірить/створить стандартний інтерфейс:
 
-Готово — `up`/`down`/`status`/TUI підхоплять його автоматично.
+```bash
+# з run-командою → якщо в теці нема justfile, він створюється зі стандартними рецептами
+just add flowdbg ~/code/flow-debugger flowdbg 9000 "" "python app.py"
+```
+
+На `add` тулза:
+- реєструє проект,
+- перевіряє justfile проекту на рецепти `start/stop/restart/status/logs`:
+  - **є всі** → `✓ standard recipes present`;
+  - **нема justfile** і передано `run` → **створює** його з `service.template.just` (session/port/run підставлені);
+  - **justfile є, але неповний** → `⚠ missing: …` (додай рецепти вручну — існуючий файл не чіпається);
+  - **нема justfile і нема run** → підказка з готовою командою.
+
+Створити стандартний justfile окремо:
+```bash
+just scaffold ~/code/flow-debugger flowdbg "python app.py" 9000
+```
+
+> Аргумент `run` — це foreground-команда, що крутиться в tmux-сесії (напр. `uvicorn …`,
+> `uv run python main.py bot`, `docker compose up`). З пробілами — в лапках.
 
 ---
 
