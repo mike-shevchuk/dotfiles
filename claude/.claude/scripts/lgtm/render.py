@@ -79,6 +79,29 @@ def _row(cls: str, sign: str, ln, text: str) -> str:
     return (f'<span class="{cls}"><span class="ln">{ln}</span>'
             f'{sign}{H.escape(text)}</span>')
 
+def _hunk_path_label(path: str, dir_limit: int = 44) -> str:
+    """`📄 name · dir` for a hunk header.
+
+    The directory is trimmed from the LEFT, because the informative end of a
+    path is the one next to the file — `…/routes/enterprise` says more than
+    `backend/src/lambdas/…`. Full path stays available on hover via `title`.
+    """
+    if not path:
+        return ""
+    name = path.rsplit("/", 1)[-1]
+    d = path.rsplit("/", 1)[0] if "/" in path else ""
+    if len(d) > dir_limit:
+        # Drop whole leading segments rather than slicing mid-word: "…/routes/
+        # enterprise" reads, "…kend/src/…/enterprise" doesn't.
+        segs = d.split("/")
+        while len(segs) > 1 and len("/".join(segs)) + 2 > dir_limit:
+            segs.pop(0)
+        d = "…/" + "/".join(segs)
+    dir_html = (f'<span style="opacity:.7"> · {H.escape(d)}</span>') if d else ""
+    return (f'<span title="{H.escape(path, quote=True)}">'
+            f'📄 <b style="color:var(--txt)">{H.escape(name)}</b>{dir_html}</span> · ')
+
+
 def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str,
                path: str = "") -> str:
     rows = "".join(_row(*_KIND[l.kind], l.new_ln or l.old_ln or "", l.text) for l in h.lines)
@@ -119,7 +142,8 @@ def _hunk_html(sid: str, h: Hunk, findings: list[Finding], lang: str,
         f'<input type="hidden" class="fid" value="">'
         f'</div>')
     return (f'<div style="padding:6px 12px;background:var(--panel2);font-size:.85em;'
-            f'color:var(--dim)">{H.escape(h.header)} · {h.hunk_id} {seg}</div>'
+            f'color:var(--dim)">{_hunk_path_label(path)}'
+            f'{H.escape(h.header)} · {h.hunk_id} {seg}</div>'
             f'{views}{finds}{thread}')
 
 def _finding_html(x: Finding, lang: str, vid: str = "") -> str:
@@ -316,6 +340,10 @@ CSS = r"""
   .rv .msg .codeblk{margin-top:6px;padding:6px;border-radius:6px;background:var(--bg)}
   .rv .msg.thinking{opacity:.65;font-style:italic}
   .rv .ask{display:flex;gap:8px;padding:8px 12px;align-items:flex-end}
+  /* dead = served over http but no LGTM backend answering (plain static server). */
+  .rv .ask.dead{opacity:.45}
+  .rv .ask.dead textarea{border-style:dashed;border-color:var(--red);cursor:not-allowed}
+  .rv .ask.dead button{filter:grayscale(1);pointer-events:none}
   .rv .ask textarea{flex:1;background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit;resize:vertical;min-width:0}
   .rv .ask textarea:focus{border-color:var(--acc);outline:none}
   .rv .ask button{background:rgba(88,166,255,.15);color:var(--acc);border:1px solid var(--acc);border-radius:8px;padding:7px 14px;cursor:pointer}
@@ -333,16 +361,25 @@ JS = r"""
       document.body.removeChild(ta);
     } catch(e){}
     if (!ok && navigator.clipboard) { navigator.clipboard.writeText(cmd); ok = true; }
-    var t = document.getElementById('cpToast');
-    t.textContent = (ok ? '📋 в буфері: ' : '⚠️ скопіюй вручну: ') + cmd;
-    t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(function(){t.style.display='none'},3200);
+    toast(ok ? 'ok' : 'warn', (ok ? '📋 в буфері: ' : '⚠️ скопіюй вручну: ') + cmd, 3200);
     if (window.event) window.event.stopPropagation();
   }
   function cpy2(msg){
-    var t = document.getElementById('cpToast');
-    t.textContent = 'ℹ️ ' + msg;
-    t.style.display='block'; clearTimeout(t._t); t._t=setTimeout(function(){t.style.display='none'},3000);
+    toast('info', 'ℹ️ ' + msg, 3000);
     if (window.event) window.event.stopPropagation();
+  }
+  /* One toast element, four meanings — the border colour carries the state so
+     "надіслано" and "нікуди не пішло" can't be confused at a glance. */
+  var TOAST_COLOR = {ok:'var(--grn)', warn:'var(--org)', err:'var(--red)', info:'var(--acc)'};
+  function toast(kind, msg, ms){
+    var t = document.getElementById('cpToast');
+    if (!t) return;
+    t.textContent = msg;
+    t.style.borderColor = TOAST_COLOR[kind] || TOAST_COLOR.ok;
+    t.style.whiteSpace = msg.length > 70 ? 'normal' : 'nowrap';
+    t.style.display = 'block';
+    clearTimeout(t._t);
+    t._t = setTimeout(function(){ t.style.display='none'; }, ms || 3200);
   }
   function go(id){
     var el = document.getElementById(id);
@@ -421,25 +458,76 @@ JS = r"""
                    finding_id: f.querySelector('.fid').value};
     fetch('/comment', {method: 'POST', headers: {'Content-Type': 'application/json'},
                        body: JSON.stringify(payload)})
-      .then(function(r){ if (!r.ok) throw new Error(r.status);
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status);
         ta.value = ''; f.querySelector('.fid').value = '';
         var box = document.getElementById('th-' + vid);
         var th = document.createElement('div');
         th.className = 'msg claude thinking'; th.textContent = '🟣 Claude думає…';
-        box.appendChild(th); })
-      .catch(function(e){ cpy2('не надіслалось: ' + e + ' — сервер живий? jb2b review-serve'); });
+        box.appendChild(th);
+        setLive(true);
+        toast('ok', '✅ надіслано в роботу · ' + f.dataset.hunk + ' — чекай відповіді нижче'); })
+      .catch(function(e){ setLive(false);
+        toast('err', '🔴 НЕ надіслано (' + e.message + ') — бекенду немає. '
+                   + 'Це статичний перегляд: запусти jb2b review-serve', 7000); });
+  }
+  /* Being served over http only proves SOMETHING answers — a plain
+     `python3 -m http.server` serves the page happily and 404s every /comment.
+     So track the backend as its own state and say it out loud: silence is the
+     one thing a reviewer must never have to guess about. */
+  var liveState = null;   // null = not decided yet, true = backend answering, false = dead
+  function setLive(up, quiet){
+    if (liveState === up) return;             // toast only on real transitions
+    var first = liveState === null;
+    liveState = up;
+    var dot = document.getElementById('liveDot');
+    document.querySelectorAll('.ask').forEach(function(f){
+      f.classList.toggle('dead', !up);
+      var ta = f.querySelector('textarea');
+      ta.disabled = !up;
+      ta.placeholder = up
+        ? '💬 запитати Claude про цей ханк… (Ctrl-Enter — надіслати)'
+        : '🔴 бекенду немає — коментар нікуди не піде';
+    });
+    if (up){
+      if (dot){ dot.textContent = '● live'; dot.classList.add('on'); }
+      if (!quiet) toast('ok', '🟢 живе — Claude слухає, коментарі підуть у роботу');
+    } else {
+      if (dot){ dot.textContent = '○ мертве'; dot.classList.remove('on'); }
+      if (!quiet) toast('err', first
+        ? '🔴 МЕРТВЕ · це статичний перегляд — форми коментарів вимкнено. '
+          + 'Щоб оживити: jb2b review-serve + /lgtm-listen'
+        : '🔴 зв\'язок із сервером обірвався — відповіді Claude не прийдуть', 7000);
+    }
   }
   if (LIVE){
     document.querySelectorAll('.ask').forEach(function(f){ f.style.display = 'flex';
       f.querySelector('textarea').addEventListener('keydown', function(e){
         if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askSend(f.id.slice(4)); }); });
     document.querySelectorAll('.ask-live').forEach(function(b){ b.style.display = ''; });
-    var dot = document.getElementById('liveDot');
     var es = new EventSource('/events?after=0.0');
-    es.onopen = function(){ if (dot){ dot.textContent = '● live'; dot.classList.add('on'); } };
-    es.onerror = function(){ if (dot){ dot.textContent = '○ reconnect…'; dot.classList.remove('on'); } };
-    es.onmessage = function(e){
-      try { addMsg(JSON.parse(e.data)); } catch(err) {}
+    /* EventSource auto-reconnects and fires onerror on every transient blip.
+       Debounce the "dead" transition so a brief drop that recovers within the
+       grace window never spams an alternating dead/live toast pair: only a
+       permanent close (readyState CLOSED) or an outage that outlasts the timer
+       actually flips to dead. onopen cancels any pending "dead". */
+    var deadTimer = null;
+    function clearDead(){ if (deadTimer){ clearTimeout(deadTimer); deadTimer = null; } }
+    es.onopen = function(){ clearDead(); setLive(true); };
+    es.onerror = function(){
+      if (es.readyState === EventSource.CLOSED){ clearDead(); setLive(false); return; }
+      if (!deadTimer) deadTimer = setTimeout(function(){ deadTimer = null; setLive(false); }, 3000);
     };
+    es.onmessage = function(e){
+      try {
+        var m = JSON.parse(e.data);
+        addMsg(m);
+        if (m.who === 'claude')
+          toast('info', '🟣 Claude відповів' + (m.hunk ? ' · ' + m.hunk : '') + ' — дивись нижче');
+      } catch(err) {}
+    };
+    // EventSource can sit "connecting" for a while before erroring out; if we
+    // still don't know after 4s, treat it as dead rather than leaving the
+    // reviewer typing into a form that goes nowhere.
+    setTimeout(function(){ if (liveState === null) setLive(false); }, 4000);
   }
 """
