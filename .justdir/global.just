@@ -22,6 +22,11 @@
 #   jq-  = `just -g --quiet`   (suppress recipe banners — `jq` is taken)
 # =============================================================================
 
+# Forward recipe args faithfully to wrappers (e.g. `proj`) as "$@" — preserves
+# quoted/spaced args and empty positionals. (Only affects top-level $@ in recipe
+# bodies; awk $1 and shell-function args are unaffected.)
+set positional-arguments
+
 # Default: pop the chooser (use `jjg` from zsh for the grouped preview view)
 default:
     @just -g --choose
@@ -178,7 +183,7 @@ git-status-all:
 # Delegates to ~/code/projctl (stowed) so its registry.conf + self-calls resolve.
 [group('projects')]
 proj *args:
-    @cd ~/code/projctl && just {{args}}
+    @cd ~/code/projctl && just "$@"
 
 # --- Reddit daily digest ----------------------------------------------------
 
