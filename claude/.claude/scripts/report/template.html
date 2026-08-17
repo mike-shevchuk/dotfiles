@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{TITLE}}</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<style>
+/* ============================================================================
+   HOUSE STYLE — evidence-backed technical analysis report (GitHub Dark).
+   Shared by: duplicate-emergency, pun1548-push-latency, pun1548-coldstart-sweep.
+   Do NOT redesign per report. Add report-specific rules in the EXTRA block only.
+   ============================================================================ */
+:root{
+ --bg:#0d1117;--panel:#161b22;--panel2:#1c2230;--bd:#30363d;--tx:#c9d1d9;--mut:#8b949e;
+ --acc:#58a6ff;--red:#f85149;--org:#d29922;--grn:#3fb950;--pur:#bc8cff;
+ --e1:#1f6feb;--e2:#f85149;--cold:#58a6ff;--warm:#3fb950;
+}
+:root.light{--bg:#ffffff;--panel:#f6f8fa;--panel2:#eef1f5;--bd:#d0d7de;--tx:#1f2328;--mut:#636c76;--acc:#0969da;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:24px 18px 80px}
+h1{font-size:25px;margin:.2em 0}
+h2{font-size:20px;margin:1.6em 0 .5em;border-bottom:1px solid var(--bd);padding-bottom:.3em}
+h3{font-size:15px;margin:1.1em 0 .4em;color:var(--acc)}
+a{color:var(--acc)}
+code,.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.86em}
+.sub{color:var(--mut);font-size:13px}
+.footnote{color:var(--mut);font-size:12.5px;margin-top:6px}
+
+/* --- language + theme toggles (bilingual is mandatory) --- */
+:root:not(.ua) [data-ua]{display:none}
+:root.ua [data-en]{display:none}
+.bar{position:sticky;top:0;z-index:10;display:flex;gap:8px;align-items:center;justify-content:flex-end;background:linear-gradient(var(--bg),var(--bg) 70%,transparent);padding:8px 0 6px}
+.bar button{background:var(--panel);color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:6px 11px;cursor:pointer;font-size:13px;font-family:inherit}
+.bar button:hover{border-color:var(--acc)}
+
+/* --- download control: export a standalone .html (both / UA only / EN only) --- */
+.dl{position:relative}
+.dl>summary{list-style:none;background:var(--panel);color:var(--tx);border:1px solid var(--bd);border-radius:7px;padding:6px 11px;cursor:pointer;font-size:13px;user-select:none}
+.dl>summary::-webkit-details-marker{display:none}
+.dl>summary::marker{content:""}
+.dl>summary:hover{border-color:var(--acc)}
+.dl[open]>summary{border-color:var(--acc)}
+.dl .menu{position:absolute;right:0;top:calc(100% + 6px);background:var(--panel);border:1px solid var(--bd);border-radius:9px;padding:6px;display:flex;flex-direction:column;gap:4px;min-width:180px;box-shadow:0 8px 26px rgba(0,0,0,.45);z-index:30}
+:root.light .dl .menu{box-shadow:0 8px 26px rgba(140,149,159,.3)}
+.dl .menu button{width:100%;text-align:left;white-space:nowrap}
+
+/* --- verdict box: the answer, before the investigation --- */
+.verdict{background:var(--panel);border:1px solid var(--bd);border-left:4px solid var(--org);border-radius:10px;padding:16px 18px;margin:14px 0}
+.verdict.bad{border-left-color:var(--red)}
+.verdict.good{border-left-color:var(--grn)}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:12px;font-weight:600;border:1px solid var(--bd)}
+.pill.e1{background:rgba(31,111,235,.15);color:#79b8ff;border-color:rgba(31,111,235,.5)}
+.pill.e2{background:rgba(248,81,73,.15);color:#ffa198;border-color:rgba(248,81,73,.5)}
+.chip{font-size:11px;padding:1px 6px;border-radius:5px;font-weight:700}
+.chip.c{background:rgba(88,166,255,.15);color:#9cc7ff}
+.chip.w{background:rgba(63,185,80,.15);color:#7ee787}
+.hl{color:var(--red);font-weight:700}.hlg{color:var(--grn);font-weight:700}
+.hlb{color:var(--acc);font-weight:700}.hlo{color:var(--org);font-weight:700}
+.big{font-size:34px;font-weight:800;line-height:1}
+
+/* --- facts: side-by-side cards with key/value tables --- */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:14px;margin:14px 0}
+.card{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:14px 16px}
+.card.e1{border-top:4px solid var(--e1)}
+.card.e2{border-top:4px solid var(--e2)}
+table.kv{width:100%;border-collapse:collapse;margin-top:8px;font-size:13px}
+table.kv td{padding:5px 6px;border-bottom:1px solid var(--bd);vertical-align:top}
+table.kv td:first-child{color:var(--mut);white-space:nowrap;width:1%;padding-right:14px}
+
+/* --- big-number comparison (cold vs warm, before vs after) --- */
+.cmp{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+@media(max-width:620px){.cmp{grid-template-columns:1fr}}
+.cmp .box{background:var(--panel);border:1px solid var(--bd);border-radius:12px;padding:16px 18px;text-align:center}
+.cmp .box.cold{border-top:4px solid var(--cold)}
+.cmp .box.warm{border-top:4px solid var(--warm)}
+.cmp .box .k{color:var(--mut);font-size:12px;text-transform:uppercase;letter-spacing:.05em}
+.cmp .box .v{font-size:46px;font-weight:800;line-height:1.05;margin:.08em 0}
+.cmp .box.cold .v{color:var(--cold)}
+.cmp .box.warm .v{color:var(--warm)}
+.cmp .box .s{color:var(--mut);font-size:12.5px}
+
+/* --- generic + wide tables --- */
+table{width:100%;border-collapse:collapse;margin:.4em 0}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--bd);vertical-align:top}
+th{color:var(--mut);font-size:11.5px;text-transform:uppercase;letter-spacing:.04em}
+.tl-wrap,.lam-wrap{overflow-x:auto;border:1px solid var(--bd);border-radius:10px}
+table.lam{font-size:12.5px;min-width:820px;margin:0}
+table.lam td,table.lam th{white-space:nowrap}
+table.lam td.name{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--pur);white-space:normal}
+table.lam td.role{white-space:normal;color:var(--mut);font-size:12px;min-width:220px}
+table.lam td.num{font-family:ui-monospace,monospace;text-align:right}
+tr.hot td{background:rgba(248,81,73,.09)}
+
+/* --- annotated timeline: one row per log line, coloured by actor/stream --- */
+table.tl{font-size:12px;min-width:900px;margin:0}
+table.tl th{position:sticky;top:0;background:var(--panel2);z-index:1}
+table.tl td.t{font-family:ui-monospace,monospace;white-space:nowrap;color:var(--tx)}
+table.tl td.d{font-family:ui-monospace,monospace;white-space:nowrap;color:var(--mut)}
+table.tl td.svc{font-family:ui-monospace,monospace;font-size:11px;color:var(--pur);white-space:nowrap}
+table.tl td.msg{font-family:ui-monospace,monospace;font-size:11px;line-height:1.5;word-break:break-word}
+tr.r-sub td{background:rgba(88,166,255,.07)}
+tr.r-e1 td{background:rgba(31,111,235,.09)}
+tr.r-e2 td{background:rgba(248,81,73,.09)}
+tr.r-res td{background:rgba(63,185,80,.08)}
+tr.r-other td{opacity:.72}
+
+/* --- ASCII causality diagram: how the bug actually flows --- */
+.flow{overflow-x:auto}
+.flow pre{font-family:ui-monospace,Menlo,monospace;font-size:12px;line-height:1.5;color:var(--tx);background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:14px;min-width:560px}
+
+/* --- raw untrimmed evidence dump --- */
+pre.raw{background:#010409;border:1px solid var(--bd);border-radius:10px;padding:14px;overflow:auto;max-height:560px;font-size:11px;line-height:1.5;color:#adbac7}
+:root.light pre.raw{background:#f6f8fa;color:#1f2328}
+pre.diff{background:#010409;border:1px solid var(--bd);border-radius:10px;padding:14px;overflow:auto;font-size:12px;line-height:1.55;color:#adbac7;font-family:ui-monospace,Menlo,monospace}
+:root.light pre.diff{background:#f6f8fa;color:#1f2328}
+pre.diff .add{color:#7ee787;background:rgba(63,185,80,.12);display:block}
+pre.diff .del{color:#ffa198;background:rgba(248,81,73,.12);display:block}
+pre.diff .file{color:#9cc7ff;font-weight:700;display:block;margin-top:8px}
+pre.diff .file:first-child{margin-top:0}
+details.hunk summary{cursor:pointer;font-size:12px;color:var(--acc);font-weight:600;user-select:none}
+details.hunk summary:hover{text-decoration:underline}
+
+/* --- horizontal bar chart (per-item magnitudes) --- */
+.barrow{display:flex;align-items:center;gap:8px;margin:3px 0;font-size:12px}
+.barrow .lab{width:90px;color:var(--mut);text-align:right;font-family:ui-monospace,monospace}
+.barrow .track{flex:1;background:var(--panel2);border:1px solid var(--bd);border-radius:4px;height:16px;overflow:hidden}
+.barrow .track > i{display:block;height:100%}
+.barrow .val{width:56px;font-family:ui-monospace,monospace;color:var(--tx)}
+.legend{display:flex;flex-wrap:wrap;gap:12px;font-size:12px;color:var(--mut);margin:.5em 0}
+.legend span{display:inline-flex;align-items:center;gap:5px}
+.sw{width:12px;height:12px;border-radius:3px;display:inline-block}
+
+/* --- fix options + rollout plan --- */
+.optgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(300px,100%),1fr));gap:12px;margin:12px 0}
+.opt{background:var(--panel);border:1px solid var(--bd);border-radius:10px;padding:12px 14px;font-size:13px}
+.opt.rec{border-color:rgba(56,139,253,.55);box-shadow:0 0 0 1px rgba(56,139,253,.25)}
+.opt .head{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.opt .letter{width:26px;height:26px;border-radius:7px;background:var(--panel2);border:1px solid var(--bd);display:flex;align-items:center;justify-content:center;font:800 14px ui-monospace,monospace}
+.opt .eff{font:700 14px ui-monospace,monospace;margin:6px 0 2px;color:#9cc7ff}
+.opt ul{margin:6px 0 0;padding-left:16px;font-size:12.3px}
+.opt li{margin:2px 0}
+.opt li.plus::marker{color:var(--grn)}
+.opt li.minus::marker{color:var(--red)}
+.plan{display:flex;flex-wrap:wrap;gap:10px;margin:14px 0}
+.plan .step{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--bd);border-left:4px solid #388bfd;border-radius:10px;padding:10px 14px;font-size:13px}
+
+/* {{EXTRA_CSS}} — report-specific rules only; never restyle the base above */
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="bar">
+ <details class="dl" id="dl">
+  <summary>⬇︎ HTML</summary>
+  <div class="menu">
+   <button data-dl="both"><span data-en>⬇︎ Both languages</span><span data-ua>⬇︎ Обидві мови</span></button>
+   <button data-dl="ua"><span data-en>⬇︎ Ukrainian only</span><span data-ua>⬇︎ Лише українська</span></button>
+   <button data-dl="en"><span data-en>⬇︎ English only</span><span data-ua>⬇︎ Лише англійська</span></button>
+  </div>
+ </details>
+ <button id="lang">🇺🇦 UA</button>
+ <button id="theme">☀︎</button>
+</div>
+
+<h1><span data-en>{{H1_EN}}</span><span data-ua>{{H1_UA}}</span></h1>
+<p class="sub">{{SUBTITLE}}</p>
+
+{{SECTIONS}}
+
+</div>
+<script>
+(function(){
+ var r=document.documentElement, L=document.getElementById('lang'), T=document.getElementById('theme'), D=document.getElementById('dl');
+ // Null-safe: single-language exports ship without the #lang / #dl controls.
+ function lang(ua){r.classList.toggle('ua',ua);if(L)L.textContent=ua?'🇬🇧 EN':'🇺🇦 UA';try{localStorage.setItem('rep:ua',ua?'1':'0')}catch(e){}}
+ function theme(li){r.classList.toggle('light',li);if(T)T.textContent=li?'☾':'☀︎';try{localStorage.setItem('rep:light',li?'1':'0')}catch(e){}}
+ if(L)L.onclick=function(){lang(!r.classList.contains('ua'))};
+ if(T)T.onclick=function(){theme(!r.classList.contains('light'))};
+ var su,sl;try{su=localStorage.getItem('rep:ua');sl=localStorage.getItem('rep:light')}catch(e){}
+ if(L)lang(su==='1'); theme(sl==='1');
+
+ // --- export a standalone .html: 'both' | 'ua' | 'en' ---------------------
+ // Single-language exports strip the other language's nodes AND the surviving
+ // data-* attributes. Keeping the attributes would let the
+ // `:root:not(.ua) [data-ua]{display:none}` rule (plus a stale localStorage
+ // value) render the downloaded file blank.
+ function exportDoc(mode){
+  var root=document.documentElement.cloneNode(true), i, n, kill;
+  n=root.querySelector('#dl'); if(n)n.parentNode.removeChild(n);
+  if(mode!=='both'){
+   kill=root.querySelectorAll(mode==='ua'?'[data-en]':'[data-ua]');
+   for(i=kill.length-1;i>=0;i--)kill[i].parentNode.removeChild(kill[i]);
+   var keep=root.querySelectorAll('[data-en],[data-ua]');
+   for(i=0;i<keep.length;i++){keep[i].removeAttribute('data-en');keep[i].removeAttribute('data-ua');}
+   n=root.querySelector('#lang'); if(n)n.parentNode.removeChild(n);
+   root.classList.remove('ua');
+   root.setAttribute('lang',mode==='ua'?'uk':'en');
+  }
+  var base=(location.pathname.split('/').pop()||'report.html').replace(/\.html?$/,'')||'report';
+  var blob=new Blob(['<!DOCTYPE html>\n'+root.outerHTML],{type:'text/html;charset=utf-8'});
+  var url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=base+(mode==='both'?'':'-'+mode)+'.html';
+  document.body.appendChild(a); a.click();
+  setTimeout(function(){URL.revokeObjectURL(url);if(a.parentNode)a.parentNode.removeChild(a);},0);
+  if(D)D.open=false;
+ }
+ if(D){
+  var btns=D.querySelectorAll('[data-dl]');
+  for(var k=0;k<btns.length;k++)(function(b){b.onclick=function(){exportDoc(b.getAttribute('data-dl'))};})(btns[k]);
+  document.addEventListener('click',function(e){if(D.open&&!D.contains(e.target))D.open=false;});
+ }
+})();
+</script>
+</body>
+</html>
