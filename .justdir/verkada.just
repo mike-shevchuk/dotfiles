@@ -4,8 +4,12 @@
 # ANTHROPIC_API_KEY is resolved, in order, and NEVER printed (banners show the
 # variable NAME, like `todo-today`):
 #   1. $ANTHROPIC_API_KEY already in the environment
-#   2. ~/dotfiles/.env
-#   3. AWS Secrets Manager  →  /dev/rescue-serverless  (same blob as `jb2b secret-keys`)
+#   2. AWS Secrets Manager  →  /dev/rescue-serverless  (same blob as `jb2b secret-keys`)
+#   3. ~/dotfiles/.env  (last resort, sourced in an isolated subshell)
+# NOTE: AWS is tried BEFORE .env on purpose — ~/dotfiles/.env exports stale
+# AWS_ACCESS_KEY_ID/SECRET/SESSION_TOKEN that would clobber your working creds
+# and make the Secrets Manager call fail. The .env fallback runs in a subshell
+# so those AWS_* vars die with it and never touch the aws call.
 # Linear: https://linear.app/punchrescue/issue/PUN-1650
 
 _VK_SESSION := "sesn_01R3QaeE8wkg7kMUvknzfnBt"
@@ -20,16 +24,19 @@ _VK_ENVFILE := "/tmp/verkada-session.env"
 verkada-send session=_VK_SESSION text=_VK_MSG:
     #!/usr/bin/env bash
     set -uo pipefail
-    echo "→ [1/3] resolving ANTHROPIC_API_KEY (env → .env → AWS Secrets Manager)..." >&2
-    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$HOME/dotfiles/.env" ]; then set -a; source "$HOME/dotfiles/.env"; set +a; fi
+    echo "→ [1/3] resolving ANTHROPIC_API_KEY (env → AWS Secrets Manager → .env)..." >&2
     if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        echo "  · not in env/.env — pulling from AWS Secrets Manager ({{_VK_SID}})..." >&2
+        echo "  · pulling from AWS Secrets Manager ({{_VK_SID}}) with ambient creds..." >&2
         ANTHROPIC_API_KEY=$(aws secretsmanager get-secret-value --secret-id '{{_VK_SID}}' \
-            --query SecretString --output text --region '{{_VK_REGION}}' 2>/dev/null \
+            --query SecretString --output text --region '{{_VK_REGION}}' \
             | jq -r '.ANTHROPIC_API_KEY // empty')
     fi
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$HOME/dotfiles/.env" ]; then
+        echo "  · AWS empty — trying ~/dotfiles/.env (isolated subshell)..." >&2
+        ANTHROPIC_API_KEY=$(set -a; . "$HOME/dotfiles/.env" >/dev/null 2>&1; printf '%s' "${ANTHROPIC_API_KEY:-}")
+    fi
     if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-        echo "  FAIL — could not resolve ANTHROPIC_API_KEY (env / .env / AWS all empty)." >&2; exit 1
+        echo "  FAIL — could not resolve ANTHROPIC_API_KEY (env / AWS / .env all empty)." >&2; exit 1
     fi
     echo "  OK (key resolved, ${#ANTHROPIC_API_KEY} chars — value hidden)" >&2
 
@@ -69,11 +76,13 @@ verkada-send session=_VK_SESSION text=_VK_MSG:
 verkada-stream session=_VK_SESSION max_time="0":
     #!/usr/bin/env bash
     set -uo pipefail
-    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$HOME/dotfiles/.env" ]; then set -a; source "$HOME/dotfiles/.env"; set +a; fi
     if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
         ANTHROPIC_API_KEY=$(aws secretsmanager get-secret-value --secret-id '{{_VK_SID}}' \
-            --query SecretString --output text --region '{{_VK_REGION}}' 2>/dev/null \
+            --query SecretString --output text --region '{{_VK_REGION}}' \
             | jq -r '.ANTHROPIC_API_KEY // empty')
+    fi
+    if [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -f "$HOME/dotfiles/.env" ]; then
+        ANTHROPIC_API_KEY=$(set -a; . "$HOME/dotfiles/.env" >/dev/null 2>&1; printf '%s' "${ANTHROPIC_API_KEY:-}")
     fi
     [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "  FAIL — ANTHROPIC_API_KEY unresolved." >&2; exit 1; }
     url="https://api.anthropic.com/v1/sessions/{{session}}/events/stream"
@@ -135,3 +144,24 @@ verkada-secrets:
     [ -n "$name" ] || { echo "  (nothing picked)" >&2; exit 130; }
     v=$(printf '%s' "$blob" | jq -r --arg k "$name" '.[$k] // empty')
     printf '  %-34s %s…%s  (%d chars)\n' "$name" "${v:0:4}" "${v: -4}" "${#v}" >&2
+
+# Diagnostic: list the agents + sessions THIS key can see (find valid IDs)
+[group('claude/verkada')]
+verkada-ls:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+        ANTHROPIC_API_KEY=$(aws secretsmanager get-secret-value --secret-id '{{_VK_SID}}' \
+            --query SecretString --output text --region '{{_VK_REGION}}' \
+            | jq -r '.ANTHROPIC_API_KEY // empty')
+    fi
+    [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "  FAIL — ANTHROPIC_API_KEY unresolved." >&2; exit 1; }
+    for ep in agents sessions; do
+        echo "━━━ GET /v1/$ep ━━━" >&2
+        curl -sS "https://api.anthropic.com/v1/$ep?limit=20" \
+            -H "x-api-key: $ANTHROPIC_API_KEY" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "anthropic-beta: {{_VK_BETA}}" \
+        | jq -r 'if .data then (.data[] | "  \(.id)   \(.name // .agent_id // .status // "")") else (.error.message // .) end' 2>/dev/null \
+        || echo "  (unparseable / empty)"
+    done
