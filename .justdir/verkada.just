@@ -165,3 +165,20 @@ verkada-ls:
         | jq -r 'if .data then (.data[] | "  \(.id)   \(.name // .agent_id // .status // "")") else (.error.message // .) end' 2>/dev/null \
         || echo "  (unparseable / empty)"
     done
+
+# Print the verkada cheat-sheet (full guide: .justdir/verkada.md)
+[group('claude/verkada')]
+verkada-help:
+    #!/usr/bin/env bash
+    echo "  verkada — drive an Anthropic Managed Agent that has direct Verkada access (PUN-1650)" >&2
+    echo "" >&2
+    echo "    verkada-send    [session] [text]        POST a user.message (default: list devices, no thumbnails)" >&2
+    echo "    verkada-stream  [session] [max_time]    SSE stream (0=no timeout, 60=60s window)" >&2
+    echo "    verkada-env     [keys]                  pull secrets → 0600 /tmp/verkada-session.env → source it" >&2
+    echo "    verkada-env-clean                       delete that file" >&2
+    echo "    verkada-secrets                         fzf over key NAMES; pick shows masked value only" >&2
+    echo "    verkada-ls                              list agents/sessions this key can see" >&2
+    echo "" >&2
+    echo "  Key resolves: env → AWS Secrets Manager (/dev/rescue-serverless) → ~/dotfiles/.env — never printed." >&2
+    echo "  404 'Session not found' → session is stale or owned by another key; run verkada-ls." >&2
+    echo "  Full guide: {{justfile_directory()}}/.justdir/verkada.md" >&2
