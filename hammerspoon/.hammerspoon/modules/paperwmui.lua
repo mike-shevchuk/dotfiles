@@ -9,6 +9,7 @@ local paperwm = require("modules.paperwm")
 local focusborder = require("modules.focusborder")
 local geom = require("modules.paperwmgeom")
 local model = require("modules.paperwmmodel")
+local interact = require("modules.paperwminteract")
 
 -- frozen public API: re-export the mutations that moved into the model
 M.toggleFullWidth  = model.toggleFullWidth
@@ -37,17 +38,7 @@ M.canvas = nil
 M.pinned = false
 M.hideTimer = nil
 M.filter = nil
-M.dragging = false
-M.slider = nil        -- {x, w, col} hit geometry for the width slider
-M.scrollSlider = nil  -- {x, w, maxOffset} hit geometry for the view slider
-M.lastDrag = 0
-M.boxes = nil        -- drawn column geometry, for hit-testing during a drag
-M.canvasFrame = nil  -- absolute frame of the map, to place the drop caret
-M.caret = nil        -- separate canvas: the main one cannot be rebuilt mid-drag
-M.drag = nil         -- {col, x0, moved}
-M.dragGuard = nil
-M.vpDrag = nil       -- {x0, offset0} while the screen frame is being dragged
-M.viewport = nil     -- {x, w, offset, scale} of the visible-area frame
+M._geom = nil -- geometry published each draw; interact reads it via ctx getters
 
 -- Every mutation used to spawn its own redraw timer, so a slider drag queued a
 -- pile of them and the map redrew far more often than it had to. Coalesce.
@@ -60,67 +51,6 @@ model.onChange(function()
     if M.pinned then M.draw() end
   end)
 end)
-
--- Slider: any percentage, not just the preset chips. x is canvas-relative.
-function M.applySlider(x)
-  local sl = M.slider
-  if not sl then return end
-  local cur = model.strip()
-  local e = cur and sl.col and cur.columns[sl.col]
-  local win = e and e.wins[1]
-  if not win then return end
-  local ratio = math.max(model.floorRatio(win), math.min(1.0, (x - sl.x) / sl.w))
-  model.setWidth(win, ratio)
-end
-
--- View slider: maps the track onto the scrollable range of the strip.
-function M.applyScroll(x)
-  local sl = M.scrollSlider
-  if not (sl and sl.maxOffset and sl.maxOffset > 0) then return end
-  local frac = math.max(0, math.min(1, (x - sl.x) / sl.w))
-  model.scrollTo(frac * sl.maxOffset)
-end
-
--- The drop marker lives on its own canvas so it can follow the pointer without
--- rebuilding the map, which would kill the mouse tracking mid-drag.
-local function caretShow(col, toRight)
-  if not (M.boxes and M.canvasFrame) then return end
-  local b
-  for _, box in ipairs(M.boxes) do if box.col == col then b = box end end
-  if not b then return end
-
-  if not M.caret then
-    M.caret = hs.canvas.new({ x = 0, y = 0, w = 3, h = 10 })
-    M.caret:level(hs.canvas.windowLevels.overlay)
-    M.caret:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces |
-      hs.canvas.windowBehaviors.stationary)
-    M.caret:clickActivating(false)
-    M.caret:canvasMouseEvents(false, false, false, false)
-    M.caret:appendElements({ type = "rectangle", action = "fill", fillColor = ACCENT,
-      roundedRectRadii = { xRadius = 2, yRadius = 2 } })
-  end
-
-  M.caret:frame({
-    x = M.canvasFrame.x + (toRight and (b.x + b.w + 1) or (b.x - 4)),
-    y = M.canvasFrame.y + PAD - 3,
-    w = 3,
-    h = BOX_H + 6,
-  })
-  M.caret:show()
-end
-
-local function caretHide()
-  if M.caret then M.caret:hide() end
-end
-
--- Resolve a drop: which column is under x, and move `from` there.
--- Public so the behaviour can be verified without synthesising mouse events.
-function M.dropAt(from, x)
-  local cur = model.strip()
-  local to = geom.columnAt(x, M.boxes)
-  if cur and to then model.moveColumn(cur.space, from, to) end
-  return to
-end
 
 -- ── menubar ─────────────────────────────────────────────────────
 local function columnMenu(entry, col, space)
@@ -249,7 +179,7 @@ local function chipRow(s)
 end
 
 function M.draw()
-  if M.dragging then return end
+  if interact.isDragging() then return end
   local s = model.strip()
   if not s then
     if M.canvas then M.canvas:hide() end
@@ -257,7 +187,6 @@ function M.draw()
   end
 
   local boxes, floats, total_w, viewport = geom.layout(s, geom.DIMS)
-  M.viewport = viewport
   local chips = M.pinned and chipRow(s) or {}
   local has_chips = #chips > 0
   if has_chips then
@@ -270,14 +199,13 @@ function M.draw()
   local f = screen:frame()
 
   if M.canvas then M.canvas:delete() end
-  M.canvasFrame = {
+  local canvasFrame = {
     x = f.x + (f.w - total_w) / 2,
     y = f.y2 - height - 64,
     w = total_w,
     h = height,
   }
-  M.boxes = boxes
-  M.canvas = hs.canvas.new(M.canvasFrame)
+  M.canvas = hs.canvas.new(canvasFrame)
   M.canvas:level(hs.canvas.windowLevels.overlay)
   M.canvas:behavior(hs.canvas.windowBehaviors.canJoinAllSpaces |
     hs.canvas.windowBehaviors.stationary)
@@ -437,6 +365,7 @@ function M.draw()
     }
   end
 
+  local slider, scrollSlider -- {x, w, col}/{x, w, maxOffset} hit geometry, published below
   if has_chips then
     local cx = (total_w - geom.chipsWidth(chips, geom.DIMS)) / 2
     local cy = PAD + BOX_H + 6
@@ -492,8 +421,8 @@ function M.draw()
     local maxOffset = math.max(0, s.stripW - s.canvas.w)
     local curV = maxOffset > 0 and ((s.canvas.x - s.left) / maxOffset) or 0
 
-    M.slider = { x = sx, w = sw, col = s.col }
-    M.scrollSlider = { x = sx, w = sw, maxOffset = maxOffset }
+    slider = { x = sx, w = sw, col = s.col }
+    scrollSlider = { x = sx, w = sw, maxOffset = maxOffset }
 
     local wmin = fwin and model.floorRatio(fwin) or model.minRatio()
     local tracks = {
@@ -589,181 +518,19 @@ function M.draw()
 
   M.canvas:appendElements(els)
 
-  M.canvas:mouseCallback(function(_, message, id, x, y)
-    if not id then return end
-
-    if tostring(id) == "close" then
-      if message == "mouseUp" and M.pinned then M.togglePin() end
-      return
-    end
-
-    if tostring(id) == "vstep:-1" or tostring(id) == "vstep:1" then
-      if message == "mouseUp" then
-        model.scrollStep(tostring(id) == "vstep:1" and 1 or -1)
-        hs.timer.doAfter(0.4, function() M.update() end)
-      end
-      return
-    end
-
-    if tostring(id) == "scroll:track" then
-      if message == "mouseDown" then
-        M.dragging = true
-        M.applyScroll(x)
-      elseif message == "mouseMove" then
-        if M.dragging then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - M.lastDrag > 0.08 then
-            M.lastDrag = now
-            M.applyScroll(x)
-          end
-        end
-      elseif message == "mouseUp" then
-        M.dragging = false
-        M.applyScroll(x)
-        hs.timer.doAfter(0.4, function() M.update() end)
-      end
-      return
-    end
-
-    -- the slider is the only control that tracks press and drag
-    if tostring(id) == "slide:track" then
-      if message == "mouseDown" then
-        M.dragging = true
-        M.applySlider(x)
-      elseif message == "mouseMove" then
-        if M.dragging then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - M.lastDrag > 0.12 then
-            M.lastDrag = now
-            M.applySlider(x)
-          end
-        end
-      elseif message == "mouseUp" then
-        M.dragging = false
-        M.applySlider(x)
-        hs.timer.doAfter(0.4, function() M.update() end)
-      end
-      return
-    end
-
-    -- dragging the screen frame scrolls the row
-    if tostring(id) == "vp:frame" then
-      if message == "mouseDown" then
-        M.dragging = true
-        M.vpDrag = { x0 = x, offset0 = M.viewport and M.viewport.offset or 0 }
-        if M.dragGuard then M.dragGuard:stop() end
-        M.dragGuard = hs.timer.doAfter(6, function()
-          M.vpDrag, M.dragging = nil, false
-          M.update()
-        end)
-      elseif message == "mouseMove" then
-        if M.vpDrag and M.viewport then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - M.lastDrag > 0.06 then
-            M.lastDrag = now
-            local cur2 = model.strip()
-            if cur2 then
-              model.scrollToStrip(cur2, M.vpDrag.offset0 + (x - M.vpDrag.x0) / M.viewport.scale)
-            end
-          end
-        end
-      elseif message == "mouseUp" then
-        local d = M.vpDrag
-        M.vpDrag, M.dragging = nil, false
-        if M.dragGuard then M.dragGuard:stop(); M.dragGuard = nil end
-        local cur2 = model.strip()
-        if d and cur2 and M.viewport then
-          model.scrollToStrip(cur2, d.offset0 + (x - d.x0) / M.viewport.scale)
-        end
-        hs.timer.doAfter(0.4, function() M.update() end)
-      end
-      return
-    end
-
-    -- dragging a column box to reorder it
-    local dk, dcol = tostring(id):match("^(focus):(%d+)$")
-    if dk then
-      dcol = tonumber(dcol)
-      if message == "mouseDown" then
-        M.dragging = true
-        M.drag = { col = dcol, x0 = x, y0 = y, moved = false }
-        -- if the release never arrives (mouse let go off-canvas) do not freeze
-        if M.dragGuard then M.dragGuard:stop() end
-        M.dragGuard = hs.timer.doAfter(6, function()
-          M.drag, M.dragging = nil, false
-          caretHide(); M.update()
-        end)
-        return
-      elseif message == "mouseMove" then
-        if M.drag then
-          if math.abs(x - M.drag.x0) > 6 then M.drag.moved = true end
-          if M.drag.moved then
-            local t = geom.columnAt(x, M.boxes)
-            if t then caretShow(t, t >= M.drag.col) end
-          end
-        end
-        return
-      elseif message == "mouseUp" then
-        local d = M.drag
-        M.drag, M.dragging = nil, false
-        if M.dragGuard then M.dragGuard:stop(); M.dragGuard = nil end
-        caretHide()
-        if d and d.moved then
-          local dy = y - (d.y0 or y)
-          local dx = x - d.x0
-          if math.abs(dy) > math.abs(dx) and math.abs(dy) > 18 then
-            -- a mostly-vertical drag changes the column stack instead of order:
-            -- up folds the window into the column on its left, down pulls it out
-            local cur2 = model.strip()
-            local e = cur2 and cur2.columns[d.col]
-            local win = e and e.wins[1]
-            if win then
-              if dy < 0 then model.stack(win) else model.unstack(win) end
-            end
-          else
-            M.dropAt(d.col, x)
-          end
-        else
-          -- never moved: it was a plain click, so just focus that column
-          local cur2 = model.strip()
-          local e = cur2 and cur2.columns[dcol]
-          if e and e.wins[1] then e.wins[1]:focus() end
-        end
-        M.update()
-        return
-      end
-    end
-
-    if message ~= "mouseUp" then return end
-    local cur = model.strip()
-    if not cur then return end
-
-    local kind, arg = tostring(id):match("^(%a+):(.+)$")
-
-    -- focus:N is handled above by the drag branch
-    if kind == "left" or kind == "right" then
-      local c = tonumber(arg)
-      model.moveColumn(cur.space, c, c + ((kind == "left") and -1 or 1))
-    elseif kind == "unfloat" then
-      local w = hs.window.get(tonumber(arg))
-      if w then model.toggleFloat(w) end
-    elseif kind == "w" then
-      local e = cur.col and cur.columns[cur.col]
-      if not (e and e.wins[1]) then return end
-      if arg == "full" then model.fullWidth(e.wins[1]) else model.setWidth(e.wins[1], tonumber(arg)) end
-    elseif kind == "act" then
-      local e = cur.col and cur.columns[cur.col]
-      local win = e and e.wins[1]
-      if not win then return end
-      if arg == "slurp" then
-        model.stack(win)
-      elseif arg == "barf" then
-        model.unstack(win)
-      elseif arg == "float" then
-        model.toggleFloat(win)
-      end
-    end
-  end)
+  -- publish this draw's geometry and (re)attach the interaction layer; it
+  -- reads live geometry through these getters instead of owning it
+  M._geom = { boxes = boxes, viewport = viewport, canvasFrame = canvasFrame,
+              slider = slider, scrollSlider = scrollSlider }
+  interact.attach(M.canvas, {
+    boxes       = function() return M._geom.boxes end,
+    viewport    = function() return M._geom.viewport end,
+    sliders     = function() return M._geom.slider, M._geom.scrollSlider end,
+    canvasFrame = function() return M._geom.canvasFrame end,
+    pinned      = function() return M.pinned end,
+    togglePin   = function() M.togglePin() end,
+    afterUpdate = function() M.update() end,
+  })
 
   M.canvas:show()
 end
