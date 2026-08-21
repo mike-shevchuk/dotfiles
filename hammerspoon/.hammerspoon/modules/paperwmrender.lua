@@ -43,7 +43,35 @@ M.lastGeom = nil
 M.boxIdx = nil
 M.lastPinned = nil
 
+-- Element indices for the two things a slider/frame drag previews in place:
+-- M.knobIdx.width = {fillIdx, knobIdx, sx, sw, y} (width slider fill+knob),
+-- M.knobIdx.vpFrame = {idx, w} (the viewport-frame rectangle). Captured on
+-- every full build (below), like M.boxIdx; nil when the strip is unpinned
+-- (those elements are not drawn, and drags on them are not possible either).
+M.knobIdx = nil
+
 function M.canvas() return canvas end
+
+-- Moves only the given track's own visual in place — a pure element mutation,
+-- no `model` call and no window write. Used by `interact` on every mouseMove
+-- of a slider/frame drag; the real model.setWidth/scrollTo happens once, on
+-- release. track == "width" moves the width slider's own knob+fill; "view"
+-- moves the viewport-frame rectangle (the on-strip "screen" outline) — that
+-- is the shared visual for both the view slider and dragging the frame itself.
+function M.previewKnob(track, frac)
+  if not (canvas and M.knobIdx) then return end
+  frac = math.max(0, math.min(1, frac))
+  if track == "width" then
+    local k = M.knobIdx.width
+    if not k then return end
+    canvas[k.fillIdx].frame = { x = k.sx, y = k.y + SLIDER_H / 2 - 3, w = k.sw * frac, h = 6 }
+    canvas[k.knobIdx].center = { x = k.sx + k.sw * frac, y = k.y + SLIDER_H / 2 }
+  elseif track == "view" then
+    local v = M.knobIdx.vpFrame
+    if not v then return end
+    canvas[v.idx].frame = { x = PAD + frac * (STRIP_W - v.w), y = PAD - 5, w = v.w, h = BOX_H + 10 }
+  end
+end
 
 -- Restyles exactly the previously-focused and newly-focused boxes in place
 -- (fillColor/strokeColor/text color), via indexed element assignment, using
@@ -154,6 +182,7 @@ function M.draw(s, opts)
   }
 
   local newBoxIdx = {}
+  local newKnobIdx = {}
   for _, b in ipairs(boxes) do
     local col, e = b.col, b.entry
     local current = (col == s.col)
@@ -236,6 +265,7 @@ function M.draw(s, opts)
       trackMouseUp = pinned,
       trackMouseMove = pinned,
     }
+    newKnobIdx.vpFrame = { idx = #els, w = viewport.w }
     els[#els + 1] = {
       type = "text",
       frame = { x = viewport.x, y = PAD - 20, w = math.max(60, viewport.w), h = 14 },
@@ -401,6 +431,7 @@ function M.draw(s, opts)
         fillColor = { red = ACCENT.red, green = ACCENT.green, blue = ACCENT.blue, alpha = dim },
         roundedRectRadii = { xRadius = 3, yRadius = 3 },
       }
+      local fillIdx = #els
       els[#els + 1] = {
         type = "circle", action = "strokeAndFill",
         center = { x = sx + sw * frac, y = y + SLIDER_H / 2 }, radius = 7,
@@ -408,6 +439,9 @@ function M.draw(s, opts)
         strokeColor = { red = ACCENT.red, green = ACCENT.green, blue = ACCENT.blue, alpha = dim },
         strokeWidth = 2,
       }
+      if t.id == "slide:track" then
+        newKnobIdx.width = { fillIdx = fillIdx, knobIdx = #els, sx = sx, sw = sw, y = y }
+      end
       els[#els + 1] = {
         type = "text",
         frame = { x = sx + sw + 4, y = y + 4, w = 40, h = SLIDER_H },
@@ -472,6 +506,7 @@ function M.draw(s, opts)
   canvas:show()
 
   M.boxIdx = newBoxIdx
+  M.knobIdx = newKnobIdx
   M.lastTier = { hash = newHash, col = s.col }
   M.lastPinned = pinned
   M.lastGeom = {

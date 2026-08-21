@@ -15,32 +15,49 @@ local attachedCanvas = nil -- last canvas M.attach was installed on
 local dragging = false
 local drag = nil        -- {col, x0, moved}
 local dragGuard = nil
-local vpDrag = nil       -- {x0, offset0} while the screen frame is being dragged
+local vpDrag = nil       -- {x0, offset0, maxOffset} while the screen frame is being dragged
 local lastDrag = 0
 local caret = nil        -- separate canvas: the main one cannot be rebuilt mid-drag
+
+-- Slider/frame drags preview on every move (render.previewKnob — a pure
+-- element mutation, no window write) and commit the one real window mutation
+-- on mouseUp. Set >0 to also push a throttled real write during the drag
+-- itself; 0 (default) is release-only.
+M.LIVE_MS = 0
+
+local pendingWin, pendingRatio = nil, nil -- width slider: committed on mouseUp
+local pendingOffset = nil                 -- view slider / frame: committed on mouseUp
 
 function M.isDragging()
   return dragging
 end
 
--- Slider: any percentage, not just the preset chips. x is canvas-relative.
-function M.applySlider(x)
+local function maybeLiveWrite(fn)
+  if M.LIVE_MS <= 0 then return end
+  local now = hs.timer.secondsSinceEpoch()
+  if now - lastDrag < M.LIVE_MS / 1000 then return end
+  lastDrag = now
+  fn()
+end
+
+-- Width slider: ratio for x, floor-clamped to what the window will accept.
+-- The same value doubles as the preview frac and the eventual setWidth arg.
+local function widthRatioAt(x)
   local sl = ctx.sliders()
-  if not sl then return end
+  if not sl then return nil, nil end
   local cur = model.strip()
   local e = cur and sl.col and cur.columns[sl.col]
   local win = e and e.wins[1]
-  if not win then return end
-  local ratio = math.max(model.floorRatio(win), math.min(1.0, (x - sl.x) / sl.w))
-  model.setWidth(win, ratio)
+  if not win then return nil, nil end
+  return win, math.max(model.floorRatio(win), math.min(1.0, (x - sl.x) / sl.w))
 end
 
--- View slider: maps the track onto the scrollable range of the strip.
-function M.applyScroll(x)
+-- View slider: fraction along the strip's scrollable range for x, plus the
+-- range itself so callers can turn the frac back into an absolute offset.
+local function viewFracAt(x)
   local _, sl = ctx.sliders()
-  if not (sl and sl.maxOffset and sl.maxOffset > 0) then return end
-  local frac = math.max(0, math.min(1, (x - sl.x) / sl.w))
-  model.scrollTo(frac * sl.maxOffset)
+  if not (sl and sl.maxOffset and sl.maxOffset > 0) then return nil, nil end
+  return math.max(0, math.min(1, (x - sl.x) / sl.w)), sl.maxOffset
 end
 
 -- The drop marker lives on its own canvas so it can follow the pointer without
@@ -109,18 +126,26 @@ function M.attach(canvas, c)
     if tostring(id) == "scroll:track" then
       if message == "mouseDown" then
         dragging = true
-        M.applyScroll(x)
+        local frac, maxOffset = viewFracAt(x)
+        if frac then
+          pendingOffset = frac * maxOffset
+          render.previewKnob("view", frac)
+        end
       elseif message == "mouseMove" then
         if dragging then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - lastDrag > 0.08 then
-            lastDrag = now
-            M.applyScroll(x)
+          local frac, maxOffset = viewFracAt(x)
+          if frac then
+            pendingOffset = frac * maxOffset
+            render.previewKnob("view", frac)
+            maybeLiveWrite(function() model.scrollTo(pendingOffset) end)
           end
         end
       elseif message == "mouseUp" then
         dragging = false
-        M.applyScroll(x)
+        local frac, maxOffset = viewFracAt(x)
+        if frac then pendingOffset = frac * maxOffset end
+        if pendingOffset then model.scrollTo(pendingOffset) end
+        pendingOffset = nil
         hs.timer.doAfter(0.4, function() ctx.afterUpdate() end)
       end
       return
@@ -130,18 +155,26 @@ function M.attach(canvas, c)
     if tostring(id) == "slide:track" then
       if message == "mouseDown" then
         dragging = true
-        M.applySlider(x)
+        local win, ratio = widthRatioAt(x)
+        if ratio then
+          pendingWin, pendingRatio = win, ratio
+          render.previewKnob("width", ratio)
+        end
       elseif message == "mouseMove" then
         if dragging then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - lastDrag > 0.12 then
-            lastDrag = now
-            M.applySlider(x)
+          local win, ratio = widthRatioAt(x)
+          if ratio then
+            pendingWin, pendingRatio = win, ratio
+            render.previewKnob("width", ratio)
+            maybeLiveWrite(function() model.setWidth(pendingWin, pendingRatio) end)
           end
         end
       elseif message == "mouseUp" then
         dragging = false
-        M.applySlider(x)
+        local win, ratio = widthRatioAt(x)
+        if ratio then pendingWin, pendingRatio = win, ratio end
+        if pendingWin and pendingRatio then model.setWidth(pendingWin, pendingRatio) end
+        pendingWin, pendingRatio = nil, nil
         hs.timer.doAfter(0.4, function() ctx.afterUpdate() end)
       end
       return
@@ -152,33 +185,32 @@ function M.attach(canvas, c)
       if message == "mouseDown" then
         dragging = true
         local viewport = ctx.viewport()
-        vpDrag = { x0 = x, offset0 = viewport and viewport.offset or 0 }
+        local _, sl = ctx.sliders()
+        vpDrag = { x0 = x, offset0 = viewport and viewport.offset or 0, maxOffset = sl and sl.maxOffset or 0 }
         if dragGuard then dragGuard:stop() end
         dragGuard = hs.timer.doAfter(6, function()
-          vpDrag, dragging = nil, false
+          vpDrag, dragging, pendingOffset = nil, false, nil
           ctx.afterUpdate()
         end)
       elseif message == "mouseMove" then
         local viewport = ctx.viewport()
         if vpDrag and viewport then
-          local now = hs.timer.secondsSinceEpoch()
-          if now - lastDrag > 0.06 then
-            lastDrag = now
-            local cur2 = model.strip()
-            if cur2 then
-              model.scrollToStrip(cur2, vpDrag.offset0 + (x - vpDrag.x0) / viewport.scale)
-            end
-          end
+          local offset = math.max(0, math.min(vpDrag.offset0 + (x - vpDrag.x0) / viewport.scale, vpDrag.maxOffset))
+          pendingOffset = offset
+          local frac = vpDrag.maxOffset > 0 and (offset / vpDrag.maxOffset) or 0
+          render.previewKnob("view", frac)
+          maybeLiveWrite(function() model.scrollTo(pendingOffset) end)
         end
       elseif message == "mouseUp" then
         local d = vpDrag
         local viewport = ctx.viewport()
         vpDrag, dragging = nil, false
         if dragGuard then dragGuard:stop(); dragGuard = nil end
-        local cur2 = model.strip()
-        if d and cur2 and viewport then
-          model.scrollToStrip(cur2, d.offset0 + (x - d.x0) / viewport.scale)
+        if d and viewport then
+          pendingOffset = math.max(0, math.min(d.offset0 + (x - d.x0) / viewport.scale, d.maxOffset))
         end
+        if pendingOffset then model.scrollTo(pendingOffset) end
+        pendingOffset = nil
         hs.timer.doAfter(0.4, function() ctx.afterUpdate() end)
       end
       return
