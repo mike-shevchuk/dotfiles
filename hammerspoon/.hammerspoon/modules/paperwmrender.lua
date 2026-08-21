@@ -30,7 +30,38 @@ local WIDTH_CHIP, ACT_CHIP = DIMS.WIDTH_CHIP, DIMS.ACT_CHIP
 local canvas = nil
 local frame = nil -- last frame set on `canvas`, to detect when it must move
 
+-- Two-tier redraw bookkeeping: M.lastTier is the {hash, col} of what's on
+-- screen, M.lastGeom is the geometry table handed back to `interact`
+-- (unchanged by a "none"/"cheap" redraw), M.boxIdx maps col -> the element
+-- indices of that column's box (rect/texts/label) recorded by the last full
+-- build, so a "cheap" redraw can restyle just two boxes in place.
+M.lastTier = nil
+M.lastGeom = nil
+M.boxIdx = nil
+
 function M.canvas() return canvas end
+
+-- Restyles exactly the previously-focused and newly-focused boxes in place
+-- (fillColor/strokeColor/text color), via indexed element assignment, using
+-- the element indices recorded on the last full build. Either col may be nil
+-- (no previous/new focus).
+function M.recolorFocus(oldCol, newCol)
+  local function style(col, isCurrent)
+    local idx = M.boxIdx and M.boxIdx[col]
+    if not idx then return end
+    canvas[idx.rect].fillColor = isCurrent and FILL_ON or FILL_OFF
+    canvas[idx.rect].strokeColor = isCurrent and ACCENT or EDGE_OFF
+    canvas[idx.rect].strokeWidth = isCurrent and 2 or 1
+    for _, ti in ipairs(idx.texts) do
+      canvas[ti].textColor = isCurrent and { white = 1, alpha = 1 } or { white = 0.72, alpha = 1 }
+    end
+    if idx.label then
+      canvas[idx.label].textColor = isCurrent and { white = 0.92, alpha = 1 } or { white = 0.45, alpha = 1 }
+    end
+  end
+  if oldCol then style(oldCol, false) end
+  if newCol then style(newCol, true) end
+end
 
 function M.hide()
   if canvas then canvas:hide() end
@@ -62,6 +93,22 @@ function M.draw(s, opts)
   local pinned = opts.pinned
   local screen = opts.screen
 
+  -- Two-tier redraw: "none" (nothing moved) and "cheap" (only the focused
+  -- column changed) skip the full build below. Cheap is restricted to the
+  -- unpinned strip — while pinned, the chip row and sliders also read s.col
+  -- (active width chip, slider fraction), so those need the full rebuild too.
+  local newHash = geom.stripHash(s)
+  local tier = geom.redrawTier(M.lastTier, { hash = newHash, col = s.col })
+  if tier == "none" and M.lastGeom then
+    return M.lastGeom
+  end
+  if tier == "cheap" and not pinned and canvas and M.lastGeom and M.lastTier
+      and M.boxIdx and M.boxIdx[M.lastTier.col] and M.boxIdx[s.col] then
+    M.recolorFocus(M.lastTier.col, s.col)
+    M.lastTier = { hash = newHash, col = s.col }
+    return M.lastGeom
+  end
+
   local boxes, floats, total_w, viewport = geom.layout(s, DIMS)
   local chips = pinned and chipRow(s) or {}
   local has_chips = #chips > 0
@@ -92,6 +139,7 @@ function M.draw(s, opts)
     fillColor = { white = 0.18, alpha = 1 },
   }
 
+  local newBoxIdx = {}
   for _, b in ipairs(boxes) do
     local col, e = b.col, b.entry
     local current = (col == s.col)
@@ -109,8 +157,10 @@ function M.draw(s, opts)
       trackMouseUp = pinned,
       trackMouseMove = pinned,
     }
+    local rectIdx = #els
 
     local rows = #e.wins
+    local textIdxs = {}
     for row = 1, rows do
       local rh = (BOX_H - 15) / rows
       els[#els + 1] = {
@@ -121,6 +171,7 @@ function M.draw(s, opts)
         textColor = current and { white = 1, alpha = 1 } or { white = 0.72, alpha = 1 },
         textAlignment = "center",
       }
+      textIdxs[#textIdxs + 1] = #els
     end
 
     -- width readout doubles as the order label
@@ -132,6 +183,9 @@ function M.draw(s, opts)
       textColor = current and { white = 0.92, alpha = 1 } or { white = 0.45, alpha = 1 },
       textAlignment = "center",
     }
+    local labelIdx = #els
+
+    newBoxIdx[col] = { rect = rectIdx, texts = textIdxs, label = labelIdx }
 
     if current and pinned then
       if col > 1 then
@@ -403,7 +457,9 @@ function M.draw(s, opts)
   canvas:replaceElements(els)
   canvas:show()
 
-  return {
+  M.boxIdx = newBoxIdx
+  M.lastTier = { hash = newHash, col = s.col }
+  M.lastGeom = {
     boxes = boxes,
     floats = floats,
     viewport = viewport,
@@ -412,6 +468,7 @@ function M.draw(s, opts)
     scrollSlider = scrollSlider,
     canvas = canvas,
   }
+  return M.lastGeom
 end
 
 return M

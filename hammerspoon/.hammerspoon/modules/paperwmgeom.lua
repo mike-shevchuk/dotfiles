@@ -76,7 +76,7 @@ end
 -- first-window id so a reorder changes the hash; widths are rounded to the px so
 -- sub-pixel jitter does not force a redraw. Floating ids are sorted.
 function M.stripHash(s)
-  local parts = { "c=" .. tostring(s.col) }
+  local parts = {}
   for _, e in ipairs(s.columns) do
     local first = e.wins and e.wins[1]
     local id = first and (first.id and (type(first.id) == "function" and first:id() or first.id)) or "?"
@@ -91,9 +91,13 @@ function M.stripHash(s)
   return table.concat(parts, "|")
 end
 
-function M.redrawTier(prevHash, newHash)
-  if prevHash == newHash then return "none" end
-  return "full"
+-- prev/new are { hash, col }; hash covers order/widths/floating (not focus),
+-- so a col-only change can be restyled cheaply instead of a full relayout.
+function M.redrawTier(prev, new)
+  if not prev then return "full" end
+  if prev.hash ~= new.hash then return "full" end
+  if prev.col ~= new.col then return "cheap" end
+  return "none"
 end
 
 return M
