@@ -7,8 +7,12 @@ local M = {}
 
 local paperwm = require("modules.paperwm")
 local focusborder = require("modules.focusborder")
-local paperwmfit = require("modules.paperwmfit")
 local geom = require("modules.paperwmgeom")
+local model = require("modules.paperwmmodel")
+
+-- frozen public API: re-export the mutations that moved into the model
+M.toggleFullWidth  = model.toggleFullWidth
+M.toggleFullscreen = model.toggleFullscreen
 
 local CHEATSHEET = "file://" .. os.getenv("HOME") ..
     "/zettelkasten/claude_code/tools/paperwm-cheatsheet.html"
@@ -33,7 +37,6 @@ M.canvas = nil
 M.pinned = false
 M.hideTimer = nil
 M.filter = nil
-M.lastCol = nil
 M.dragging = false
 M.slider = nil        -- {x, w, col} hit geometry for the width slider
 M.scrollSlider = nil  -- {x, w, maxOffset} hit geometry for the view slider
@@ -45,183 +48,29 @@ M.drag = nil         -- {col, x0, moved}
 M.dragGuard = nil
 M.vpDrag = nil       -- {x0, offset0} while the screen frame is being dragged
 M.viewport = nil     -- {x, w, offset, scale} of the visible-area frame
-M.scrollAnchor = nil -- window we last anchored a scroll on, to avoid refocusing
 
--- ── reading PaperWM state ───────────────────────────────────────
-local function shortName(win)
-  if not win then return "?" end
-  local app = win:application()
-  local name = app and app:name() or (win:title() or "?")
-  return #name > 10 and name:sub(1, 10) or name
-end
-
--- Reading the strip means an Accessibility round-trip per window, and the drag
--- handlers used to call it several times per mouse event — that is where the
--- jerkiness came from. Cache it briefly; every mutation clears the cache.
-local stripCache, stripCacheAt = nil, 0
-local STRIP_TTL = 0.25
-
-local function invalidate() stripCacheAt = 0 end
-
--- { columns = { { wins, ratio } … }, floating = { win … }, col, total, space }
-local function computeStrip()
-  local pwm = paperwm.pwm
-  if not pwm then return nil end
-
-  local focused = hs.window.focusedWindow()
-  local index = focused and pwm.state.windowIndex(focused) or nil
-  local space = index and index.space or hs.spaces.focusedSpace()
-
-  local list = pwm.state.windowList(space)
-
-  -- width is measured against PaperWM's canvas, not the raw screen
-  local screen = focused and focused:screen() or hs.screen.mainScreen()
-  local canvas = pwm.windows.getCanvas(screen)
-
-  -- PaperWM keeps a virtual x for every window, which is where the column
-  -- really sits on the strip even when macOS has parked it in the edge margin.
-  -- That is what lets the map show what is off-screen.
-  local xpos = pwm.state.xPositions(space)
-  local columns = {}
-  local left, right
-  if list then
-    for col = 1, #list do
-      local wins = {}
-      for row = 1, #list[col] do wins[#wins + 1] = list[col][row] end
-      local first = wins[1]
-      local w = first and first:frame().w or 0
-      local vx = first and (xpos[first:id()] or first:frame().x) or 0
-      columns[#columns + 1] = {
-        wins = wins,
-        ratio = canvas.w > 0 and (w / canvas.w) or 0,
-        vx = vx,
-        px = w,
-      }
-      left = left and math.min(left, vx) or vx
-      right = right and math.max(right, vx + w) or (vx + w)
-    end
-  end
-
-  -- floating windows vanish from the strip, which is exactly why they are
-  -- hard to get back — surface them next to it
-  local floating = {}
-  for id, _ in pairs(pwm.state.is_floating) do
-    local w = hs.window.get(id)
-    if w and w:isVisible() and (hs.spaces.windowSpaces(w) or {})[1] == space then
-      floating[#floating + 1] = w
-    end
-  end
-  table.sort(floating, function(a, b) return shortName(a) < shortName(b) end)
-
-  if #columns == 0 and #floating == 0 then return nil end
-
-  -- macOS intermittently reports no focused window (notably right after a
-  -- click on an overlay). Fall back to the last column we knew about, so the
-  -- map keeps its chips and chevrons instead of going blank.
-  local col = index and index.col or nil
-  if col then
-    M.lastCol = col
-  elseif M.lastCol and M.lastCol <= #columns then
-    col = M.lastCol
-  end
-
-  -- the strip always covers at least the screen, so the viewport frame has
-  -- something to sit inside even when a single window is up
-  left = math.min(left or canvas.x, canvas.x)
-  right = math.max(right or canvas.x2, canvas.x + canvas.w)
-
-  return {
-    columns = columns,
-    floating = floating,
-    col = col,
-    total = #columns,
-    space = space,
-    canvas = canvas,
-    left = left,
-    stripW = right - left,
-  }
-end
-
-local function strip()
-  local now = hs.timer.secondsSinceEpoch()
-  if stripCache and (now - stripCacheAt) < STRIP_TTL then return stripCache end
-  stripCache, stripCacheAt = computeStrip(), now
-  return stripCache
-end
-
--- ── mutations ───────────────────────────────────────────────────
 -- Every mutation used to spawn its own redraw timer, so a slider drag queued a
 -- pile of them and the map redrew far more often than it had to. Coalesce.
 local refreshTimer
-
-local function afterChange()
-  invalidate()
+model.onChange(function()
+  model.invalidate()
   if refreshTimer then refreshTimer:stop() end
   refreshTimer = hs.timer.doAfter(0.25, function()
     M.update()
     if M.pinned then M.draw() end
   end)
-end
-
--- exact ratio, mirroring how PaperWM's own cycleWindowSize computes it
-local function setWidth(win, ratio)
-  local pwm = paperwm.pwm
-  if not (pwm and win) then return end
-  local canvas = pwm.windows.getCanvas(win:screen())
-  local gap = (pwm.windows.getGap("left") + pwm.windows.getGap("right")) / 2
-  local frame = win:frame()
-  local new_w = ratio * (canvas.w + gap) - gap
-  frame.x = frame.x + ((frame.w - new_w) // 2)
-  frame.w = new_w
-  pwm.windows.moveWindow(win, frame)
-  local space = (hs.spaces.windowSpaces(win) or {})[1]
-  if space then pwm:tileSpace(space) end
-  paperwmfit.setDesired(win, ratio)
-  paperwmfit.refit()
-  afterChange()
-end
-
--- PaperWM's own full_width action reads hs.window.focusedWindow(), which is
--- intermittently nil right after a click on an overlay — keep our own memory
--- of the previous width instead so the widget never depends on focus
-local prevRatio = {}
-
-local function fullWidth(win)
-  local pwm = paperwm.pwm
-  if not (pwm and win) then return end
-  local canvas = pwm.windows.getCanvas(win:screen())
-  local cur = win:frame().w / canvas.w
-  if cur > 0.97 and prevRatio[win:id()] then
-    setWidth(win, prevRatio[win:id()])
-    prevRatio[win:id()] = nil
-  else
-    prevRatio[win:id()] = cur
-    setWidth(win, 1.0)
-  end
-end
-
--- Some apps refuse to shrink past a hard minimum (Chromium stops at ~500px).
--- On a narrow display that can be 40%+ of the screen, so a width you pick below
--- it simply cannot happen — the UI has to say so instead of ignoring you.
-local function floorRatio(win)
-  local pwm = paperwm.pwm
-  if not (pwm and win) then return paperwmfit.MIN end
-  local canvas = pwm.windows.getCanvas(win:screen())
-  local px = paperwmfit.floor[win:id()]
-  if not (px and canvas.w > 0) then return paperwmfit.MIN end
-  return math.max(paperwmfit.MIN, px / canvas.w)
-end
+end)
 
 -- Slider: any percentage, not just the preset chips. x is canvas-relative.
 function M.applySlider(x)
   local sl = M.slider
   if not sl then return end
-  local cur = strip()
+  local cur = model.strip()
   local e = cur and sl.col and cur.columns[sl.col]
   local win = e and e.wins[1]
   if not win then return end
-  local ratio = math.max(floorRatio(win), math.min(1.0, (x - sl.x) / sl.w))
-  setWidth(win, ratio)
+  local ratio = math.max(model.floorRatio(win), math.min(1.0, (x - sl.x) / sl.w))
+  model.setWidth(win, ratio)
 end
 
 -- View slider: maps the track onto the scrollable range of the strip.
@@ -229,85 +78,7 @@ function M.applyScroll(x)
   local sl = M.scrollSlider
   if not (sl and sl.maxOffset and sl.maxOffset > 0) then return end
   local frac = math.max(0, math.min(1, (x - sl.x) / sl.w))
-  M.scrollTo(frac * sl.maxOffset)
-end
-
--- Nudge the view for the ◀ ▶ buttons. Stepping to the next column boundary
--- was too coarse — columns are often half the screen wide — so move by a fixed
--- slice of the screen instead and let the view land wherever it lands.
-M.STEP = 0.15  -- share of the screen width per press
-
-function M.scrollStep(dir)
-  local cur = strip()
-  if not cur then return end
-  local offset = cur.canvas.x - cur.left
-  -- via the module table: the local scrollTo is defined further down
-  M.scrollTo(offset + dir * cur.canvas.w * M.STEP)
-end
-
--- Scroll the row so the screen shows the slice starting at `offset` px from
--- the strip's left edge. tileSpace takes an explicit anchor, so we pick a
--- column that will actually be on screen and pin it at the right spot.
-local function scrollTo(s, offset)
-  local pwm = paperwm.pwm
-  if not (pwm and s) then return end
-  offset = math.max(0, math.min(offset, math.max(0, s.stripW - s.canvas.w)))
-
-  -- Anchor on whichever column lands nearest the middle of the viewport.
-  -- Anchoring on the left-most one made PaperWM's on-screen clamp fight the
-  -- target position, so far scrolls kept falling short.
-  local centre = offset + s.canvas.w / 2
-  local anchorCol, best
-  for col, e in ipairs(s.columns) do
-    local mid = (e.vx - s.left) + e.px / 2
-    local d = math.abs(mid - centre)
-    if not best or d < best then anchorCol, best = col, d end
-  end
-  anchorCol = anchorCol or 1
-  local e = s.columns[anchorCol]
-  local win = e and e.wins[1]
-  if not win then return end
-
-  local f = win:frame()
-  f.x = s.canvas.x + (e.vx - s.left) - offset
-  pwm.windows.moveWindow(win, f)
-  pwm:tileSpace(s.space, win)
-
-  -- PaperWM re-tiles from the focused window on every move, so a view scrolled
-  -- away from it snaps straight back. Moving focus to the column we scrolled to
-  -- is what makes the new position stick — and it is where you were heading.
-  -- Only when the anchor actually changes though: focusing on every drag step
-  -- fired the whole event cascade (fit, border, widget) dozens of times a drag.
-  local id = win:id()
-  if id ~= M.scrollAnchor then
-    M.scrollAnchor = id
-    if win ~= hs.window.focusedWindow() then win:focus() end
-  end
-
-  -- positions just moved; the next read must not come from the cache
-  invalidate()
-end
-
--- Public wrapper: scroll the row to an absolute offset. Also lets the
--- behaviour be verified without synthesising mouse drags.
-function M.scrollTo(offset)
-  local cur = strip()
-  if cur then scrollTo(cur, offset) end
-  return cur and cur.canvas.x - cur.left or nil
-end
-
--- Move a column to a given position. swapWindows() would be the obvious call
--- but it acts on the focused window, and focus is exactly what a click on an
--- overlay disturbs — this list surgery works no matter what holds focus.
-local function moveColumnTo(space, from, to)
-  local pwm = paperwm.pwm
-  if not pwm or from == to then return end
-  local list = pwm.state.windowList(space)
-  if not (list and list[from] and list[to]) then return end
-  local column = table.remove(list, from)
-  table.insert(list, to, column)
-  pwm:tileSpace(space)
-  afterChange()
+  model.scrollTo(frac * sl.maxOffset)
 end
 
 -- The drop marker lives on its own canvas so it can follow the pointer without
@@ -345,154 +116,51 @@ end
 -- Resolve a drop: which column is under x, and move `from` there.
 -- Public so the behaviour can be verified without synthesising mouse events.
 function M.dropAt(from, x)
-  local cur = strip()
+  local cur = model.strip()
   local to = geom.columnAt(x, M.boxes)
-  if cur and to then moveColumnTo(cur.space, from, to) end
+  if cur and to then model.moveColumn(cur.space, from, to) end
   return to
-end
-
--- slurp/barf rely on a file-local helper inside the spoon, so they cannot be
--- reimplemented here — focus the window first and let PaperWM do the work
-local function withFocus(win, fn)
-  if not win then return end
-  win:focus()
-  hs.timer.doAfter(0.2, function()
-    if hs.window.focusedWindow() then
-      fn()
-      afterChange()
-    else
-      hs.timer.doAfter(0.3, function() fn(); afterChange() end)
-    end
-  end)
-end
-
--- toggleFloating() takes an explicit window, so moving one in or out of the
--- floating layer never depends on focus
-local function toggleFloat(win)
-  local pwm = paperwm.pwm
-  if not (pwm and win) then return end
-  pwm.floating.toggleFloating(win)
-  afterChange()
-end
-
--- Full width, and back to the previous width.
---
--- Deliberately not PaperWM's own full_width action: that one changes the frame
--- and leaves fit to find out about it later, which is a race — when the read
--- came back late or focus read nil, fit restored the old width and the key
--- looked dead. Setting the intent directly has no race at all.
-M.beforeFull = {}
-
-function M.toggleFullWidth()
-  local pwm = paperwm.pwm
-  if not pwm then return end
-
-  local win = hs.window.focusedWindow()
-  if not win then
-    local cur = strip()
-    local e = cur and cur.col and cur.columns[cur.col]
-    win = e and e.wins[1]
-  end
-  if not win then return end
-
-  -- Decide from the remembered intent, not from the measured frame. The frame
-  -- is whatever compression happens to have left behind, so reading it made the
-  -- toggle pick the wrong branch and set full width twice in a row.
-  local id = win:id()
-  local canvas = pwm.windows.getCanvas(win:screen())
-  local intent = paperwmfit.desired[id] or (canvas.w > 0 and win:frame().w / canvas.w) or 0.5
-
-  if intent >= 0.97 then
-    local back = M.beforeFull[id] or 0.5
-    M.beforeFull[id] = nil
-    setWidth(win, back)
-    hs.alert.show(string.format("⇔ back to %d%%", math.floor(back * 100 + 0.5)), 0.7)
-  else
-    M.beforeFull[id] = intent
-    setWidth(win, 1.0)
-    hs.alert.show("⇔ full width", 0.7)
-  end
-end
-
--- Full screen, and back again.
---
--- A tiled window cannot simply be resized to the whole screen: PaperWM re-lays
--- the row on the very next event and puts it back. So zooming lifts the window
--- out of the tiling layer first, then fills the screen; unzooming drops it back
--- into the row at the width it had before.
-M.zoomed = {}
-
-function M.toggleFullscreen()
-  local pwm = paperwm.pwm
-  local win = hs.window.focusedWindow()
-  if not (pwm and win) then return end
-  local id = win:id()
-  local prev = M.zoomed[id]
-
-  if prev then
-    M.zoomed[id] = nil
-    if pwm.floating.isFloating(win) then pwm.floating.toggleFloating(win) end
-    if prev.ratio then paperwmfit.setDesired(win, prev.ratio) end
-    paperwmfit.refit()
-    afterChange()
-    hs.alert.show("⤢ back to the row", 0.8)
-    return
-  end
-
-  local canvas = pwm.windows.getCanvas(win:screen())
-  M.zoomed[id] = { ratio = canvas.w > 0 and (win:frame().w / canvas.w) or nil }
-
-  if not pwm.floating.isFloating(win) then pwm.floating.toggleFloating(win) end
-  -- toggleFloating retiles the space, so fill the screen once that has settled
-  hs.timer.doAfter(hs.window.animationDuration + 0.08, function()
-    if not M.zoomed[id] then return end
-    win:setFrame(win:screen():frame())
-    win:raise()
-    afterChange()
-  end)
-  hs.alert.show("⤢ full screen", 0.8)
 end
 
 -- ── menubar ─────────────────────────────────────────────────────
 local function columnMenu(entry, col, space)
-  local pwm = paperwm.pwm
   local win = entry.wins[1]
   local items = {
     { title = "Focus", fn = function() win:focus() end },
     { title = "-" },
-    { title = "Move left",  fn = function() moveColumnTo(space, col, col - 1) end },
-    { title = "Move right", fn = function() moveColumnTo(space, col, col + 1) end },
+    { title = "Move left",  fn = function() model.moveColumn(space, col, col - 1) end },
+    { title = "Move right", fn = function() model.moveColumn(space, col, col + 1) end },
     { title = "-" },
     { title = "Stack into column on the left",
-      fn = function() withFocus(win, pwm.windows.slurpWindow) end },
+      fn = function() model.stack(win) end },
     { title = "Unstack into its own column",
-      fn = function() withFocus(win, pwm.windows.barfWindow) end },
+      fn = function() model.unstack(win) end },
     { title = "-" },
   }
-  for _, r in ipairs(pwm.window_ratios) do
+  for _, r in ipairs(model.widthRatios()) do
     items[#items + 1] = {
       title = string.format("Width %d%%", math.floor(r * 100 + 0.5)),
-      fn = function() setWidth(win, r) end,
+      fn = function() model.setWidth(win, r) end,
     }
   end
-  items[#items + 1] = { title = "Full width", fn = function() fullWidth(win) end }
+  items[#items + 1] = { title = "Full width", fn = function() model.fullWidth(win) end }
   items[#items + 1] = {
-    title = M.zoomed[win:id()] and "Leave full screen" or "Full screen",
+    title = model.zoomed[win:id()] and "Leave full screen" or "Full screen",
     fn = function() win:focus(); hs.timer.doAfter(0.15, M.toggleFullscreen) end,
   }
   items[#items + 1] = { title = "-" }
-  items[#items + 1] = { title = "Make floating", fn = function() toggleFloat(win) end }
+  items[#items + 1] = { title = "Make floating", fn = function() model.toggleFloat(win) end }
   return items
 end
 
 local function menuTable()
   local items = {}
-  local s = strip()
+  local s = model.strip()
 
   if s then
     for col, entry in ipairs(s.columns) do
       local titles = {}
-      for _, w in ipairs(entry.wins) do titles[#titles + 1] = shortName(w) end
+      for _, w in ipairs(entry.wins) do titles[#titles + 1] = model.shortName(w) end
       items[#items + 1] = {
         title = string.format("%s %d. %s  ·  %d%%", (col == s.col) and "▸" or "  ",
           col, table.concat(titles, " / "), math.floor(entry.ratio * 100 + 0.5)),
@@ -505,8 +173,8 @@ local function menuTable()
       items[#items + 1] = { title = "Floating (outside the strip)", disabled = true }
       for _, w in ipairs(s.floating) do
         items[#items + 1] = {
-          title = "  ⊘ " .. shortName(w) .. " — return to tiling",
-          fn = function() toggleFloat(w) end,
+          title = "  ⊘ " .. model.shortName(w) .. " — return to tiling",
+          fn = function() model.toggleFloat(w) end,
         }
       end
       if #s.floating > 1 then
@@ -516,7 +184,7 @@ local function menuTable()
             -- space them out: each toggle retiles, and PaperWM needs the
             -- previous retile to land before the next add
             for i, w in ipairs(s.floating) do
-              hs.timer.doAfter((i - 1) * 0.4, function() toggleFloat(w) end)
+              hs.timer.doAfter((i - 1) * 0.4, function() model.toggleFloat(w) end)
             end
           end,
         }
@@ -534,9 +202,9 @@ local function menuTable()
     fn = function() M.togglePin() end,
   }
   items[#items + 1] = {
-    title = paperwmfit.enabled and "Fit mode is ON — windows squeeze"
+    title = model.fitEnabled() and "Fit mode is ON — windows squeeze"
         or "Fit mode is OFF — windows scroll off-screen",
-    fn = function() paperwmfit.toggle(); M.update() end,
+    fn = function() model.toggleFit(); M.update() end,
   }
   items[#items + 1] = {
     title = focusborder.enabled and "Focus border is ON — turn off"
@@ -545,12 +213,12 @@ local function menuTable()
   }
   items[#items + 1] = {
     title = "Forget learned min widths",
-    fn = function() paperwmfit.clearFloors(); M.update() end,
+    fn = function() model.clearFloors(); M.update() end,
   }
   items[#items + 1] = {
     title = "Refresh layout",
     fn = function()
-      if paperwm.pwm then paperwm.pwm.windows.refreshWindows() end
+      model.refreshWindows()
       M.update()
     end,
   }
@@ -565,7 +233,7 @@ local WIDTH_CHIP, ACT_CHIP = 44, 60
 local function chipRow(s)
   local chips = {}
   if s.col then
-    for _, r in ipairs(paperwm.pwm.window_ratios) do
+    for _, r in ipairs(model.widthRatios()) do
       chips[#chips + 1] = {
         text = string.format("%d%%", math.floor(r * 100 + 0.5)),
         id = "w:" .. tostring(r), w = WIDTH_CHIP, ratio = r,
@@ -582,7 +250,7 @@ end
 
 function M.draw()
   if M.dragging then return end
-  local s = strip()
+  local s = model.strip()
   if not s then
     if M.canvas then M.canvas:hide() end
     return
@@ -654,7 +322,7 @@ function M.draw()
       els[#els + 1] = {
         type = "text",
         frame = { x = b.x + 3, y = PAD + 3 + (row - 1) * rh, w = b.w - 6, h = rh + 2 },
-        text = shortName(e.wins[row]),
+        text = model.shortName(e.wins[row]),
         textSize = 10.5,
         textColor = current and { white = 1, alpha = 1 } or { white = 0.72, alpha = 1 },
         textAlignment = "center",
@@ -758,7 +426,7 @@ function M.draw()
     els[#els + 1] = {
       type = "text",
       frame = { x = b.x + 3, y = PAD + 4, w = b.w - 6, h = 15 },
-      text = shortName(b.win),
+      text = model.shortName(b.win),
       textSize = 10.5, textColor = { white = 0.95, alpha = 1 }, textAlignment = "center",
     }
     els[#els + 1] = {
@@ -774,7 +442,7 @@ function M.draw()
     local cy = PAD + BOX_H + 6
     local cur_ratio = s.col and s.columns[s.col] and s.columns[s.col].ratio or 0
     local fwin = s.col and s.columns[s.col] and s.columns[s.col].wins[1]
-    local fmin = fwin and floorRatio(fwin) or paperwmfit.MIN
+    local fmin = fwin and model.floorRatio(fwin) or model.minRatio()
 
     for _, c in ipairs(chips) do
       if c.gap then
@@ -827,9 +495,9 @@ function M.draw()
     M.slider = { x = sx, w = sw, col = s.col }
     M.scrollSlider = { x = sx, w = sw, maxOffset = maxOffset }
 
-    local wmin = fwin and floorRatio(fwin) or paperwmfit.MIN
+    local wmin = fwin and model.floorRatio(fwin) or model.minRatio()
     local tracks = {
-      { label = wmin > paperwmfit.MIN + 0.005
+      { label = wmin > model.minRatio() + 0.005
           and string.format("width\nmin %d%%", math.floor(wmin * 100 + 0.5)) or "width",
         frac = curW, id = "slide:track", floor = wmin,
         value = string.format("%d%%", math.floor(curW * 100 + 0.5)), live = true },
@@ -856,7 +524,7 @@ function M.draw()
         roundedRectRadii = { xRadius = 3, yRadius = 3 },
       }
       -- the part of the track the app will not honour, marked as unreachable
-      if t.floor and t.floor > paperwmfit.MIN + 0.005 then
+      if t.floor and t.floor > model.minRatio() + 0.005 then
         els[#els + 1] = {
           type = "rectangle", action = "fill",
           frame = { x = sx, y = y + SLIDER_H / 2 - 3, w = sw * math.min(1, t.floor), h = 6 },
@@ -931,7 +599,7 @@ function M.draw()
 
     if tostring(id) == "vstep:-1" or tostring(id) == "vstep:1" then
       if message == "mouseUp" then
-        M.scrollStep(tostring(id) == "vstep:1" and 1 or -1)
+        model.scrollStep(tostring(id) == "vstep:1" and 1 or -1)
         hs.timer.doAfter(0.4, function() M.update() end)
       end
       return
@@ -993,9 +661,9 @@ function M.draw()
           local now = hs.timer.secondsSinceEpoch()
           if now - M.lastDrag > 0.06 then
             M.lastDrag = now
-            local cur2 = strip()
+            local cur2 = model.strip()
             if cur2 then
-              scrollTo(cur2, M.vpDrag.offset0 + (x - M.vpDrag.x0) / M.viewport.scale)
+              model.scrollToStrip(cur2, M.vpDrag.offset0 + (x - M.vpDrag.x0) / M.viewport.scale)
             end
           end
         end
@@ -1003,9 +671,9 @@ function M.draw()
         local d = M.vpDrag
         M.vpDrag, M.dragging = nil, false
         if M.dragGuard then M.dragGuard:stop(); M.dragGuard = nil end
-        local cur2 = strip()
+        local cur2 = model.strip()
         if d and cur2 and M.viewport then
-          scrollTo(cur2, d.offset0 + (x - d.x0) / M.viewport.scale)
+          model.scrollToStrip(cur2, d.offset0 + (x - d.x0) / M.viewport.scale)
         end
         hs.timer.doAfter(0.4, function() M.update() end)
       end
@@ -1046,19 +714,18 @@ function M.draw()
           if math.abs(dy) > math.abs(dx) and math.abs(dy) > 18 then
             -- a mostly-vertical drag changes the column stack instead of order:
             -- up folds the window into the column on its left, down pulls it out
-            local cur2 = strip()
+            local cur2 = model.strip()
             local e = cur2 and cur2.columns[d.col]
             local win = e and e.wins[1]
             if win then
-              withFocus(win, dy < 0 and paperwm.pwm.windows.slurpWindow
-                or paperwm.pwm.windows.barfWindow)
+              if dy < 0 then model.stack(win) else model.unstack(win) end
             end
           else
             M.dropAt(d.col, x)
           end
         else
           -- never moved: it was a plain click, so just focus that column
-          local cur2 = strip()
+          local cur2 = model.strip()
           local e = cur2 and cur2.columns[dcol]
           if e and e.wins[1] then e.wins[1]:focus() end
         end
@@ -1068,33 +735,32 @@ function M.draw()
     end
 
     if message ~= "mouseUp" then return end
-    local cur = strip()
+    local cur = model.strip()
     if not cur then return end
 
-    local pwm = paperwm.pwm
     local kind, arg = tostring(id):match("^(%a+):(.+)$")
 
     -- focus:N is handled above by the drag branch
     if kind == "left" or kind == "right" then
       local c = tonumber(arg)
-      moveColumnTo(cur.space, c, c + ((kind == "left") and -1 or 1))
+      model.moveColumn(cur.space, c, c + ((kind == "left") and -1 or 1))
     elseif kind == "unfloat" then
       local w = hs.window.get(tonumber(arg))
-      if w then toggleFloat(w) end
+      if w then model.toggleFloat(w) end
     elseif kind == "w" then
       local e = cur.col and cur.columns[cur.col]
       if not (e and e.wins[1]) then return end
-      if arg == "full" then fullWidth(e.wins[1]) else setWidth(e.wins[1], tonumber(arg)) end
+      if arg == "full" then model.fullWidth(e.wins[1]) else model.setWidth(e.wins[1], tonumber(arg)) end
     elseif kind == "act" then
       local e = cur.col and cur.columns[cur.col]
       local win = e and e.wins[1]
       if not win then return end
       if arg == "slurp" then
-        withFocus(win, pwm.windows.slurpWindow)
+        model.stack(win)
       elseif arg == "barf" then
-        withFocus(win, pwm.windows.barfWindow)
+        model.unstack(win)
       elseif arg == "float" then
-        toggleFloat(win)
+        model.toggleFloat(win)
       end
     end
   end)
@@ -1104,7 +770,7 @@ end
 
 -- ── refresh ─────────────────────────────────────────────────────
 function M.update()
-  local s = strip()
+  local s = model.strip()
 
   if M.menubar then
     local title
@@ -1163,7 +829,7 @@ function M.start()
       M.update()
       -- only surface the map when the position actually moved, otherwise it
       -- pops up on every stray click
-      local s = strip()
+      local s = model.strip()
       local col, total = s and s.col, s and s.total
       local nfloat = s and #s.floating or 0
       if paperwm.running and (col ~= lastCol or total ~= lastTotal or nfloat ~= lastFloat) then
