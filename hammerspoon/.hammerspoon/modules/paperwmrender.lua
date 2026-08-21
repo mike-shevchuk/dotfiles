@@ -382,7 +382,7 @@ function M.draw(s, opts)
     local baseY = PAD + BOX_H + 6 + CHIP_H + 4
 
     local curW = s.col and s.columns[s.col] and s.columns[s.col].ratio or 0
-    local maxOffset = math.max(0, s.stripW - s.canvas.w)
+    local maxOffset = geom.maxOffset(s.stripW, s.canvas.w)
     local curV = maxOffset > 0 and ((s.canvas.x - s.left) / maxOffset) or 0
 
     slider = { x = sx, w = sw, col = s.col }

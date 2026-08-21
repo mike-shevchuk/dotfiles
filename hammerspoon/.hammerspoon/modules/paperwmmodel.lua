@@ -4,6 +4,7 @@ local M = {}
 
 local paperwm = require("modules.paperwm")
 local paperwmfit = require("modules.paperwmfit")
+local geom = require("modules.paperwmgeom")
 
 -- ── reading PaperWM state ───────────────────────────────────────
 function M.shortName(win)
@@ -189,7 +190,7 @@ end
 function M.scrollToStrip(s, offset)
   local pwm = paperwm.pwm
   if not (pwm and s) then return end
-  offset = math.max(0, math.min(offset, math.max(0, s.stripW - s.canvas.w)))
+  offset = geom.clampOffset(offset, s.stripW, s.canvas.w)
 
   -- Anchor on whichever column lands nearest the middle of the viewport.
   -- Anchoring on the left-most one made PaperWM's on-screen clamp fight the

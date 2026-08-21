@@ -5,7 +5,7 @@ local M = {}
 
 M.DIMS = {
   STRIP_W = 560, BOX_H = 42, GAP = 6, PAD = 22,
-  MIN_BOX = 46, FLOAT_W = 74, SEP = 18,
+  FLOAT_W = 74, SEP = 18,
   CHIP_H = 22, CHIP_G = 5, SLIDER_H = 24, SLIDER_MAXW = 420,
   WIDTH_CHIP = 44, ACT_CHIP = 60,
 }
@@ -67,14 +67,23 @@ function M.chipsWidth(chips, dims)
   return total
 end
 
+-- The single definition of "how far the strip can scroll" — clampOffset and
+-- render's view-slider fraction both route through this so the formula lives
+-- in exactly one place.
+function M.maxOffset(stripW, canvasW)
+  return math.max(0, stripW - canvasW)
+end
+
 function M.clampOffset(offset, stripW, canvasW)
-  local maxOffset = math.max(0, stripW - canvasW)
-  return math.max(0, math.min(offset, maxOffset))
+  return math.max(0, math.min(offset, M.maxOffset(stripW, canvasW)))
 end
 
 -- Stable string fingerprint of what the map draws. Order is by each column's
 -- first-window id so a reorder changes the hash; widths are rounded to the px so
--- sub-pixel jitter does not force a redraw. Floating ids are sorted.
+-- sub-pixel jitter does not force a redraw. Floating ids are sorted. The strip's
+-- scroll offset is folded in (coarsely, /8px) so a pure scroll — columns/order/
+-- widths/floating/col all unchanged — still changes the hash and forces a "full"
+-- tier, repositioning the on-strip viewport frame instead of leaving it stale.
 function M.stripHash(s)
   local parts = {}
   for _, e in ipairs(s.columns) do
@@ -88,6 +97,7 @@ function M.stripHash(s)
   end
   table.sort(fids)
   parts[#parts + 1] = "f=" .. table.concat(fids, ",")
+  parts[#parts + 1] = "o=" .. math.floor(((s.canvas and s.canvas.x or 0) - (s.left or 0)) / 8)
   return table.concat(parts, "|")
 end
 
