@@ -34,10 +34,14 @@ local frame = nil -- last frame set on `canvas`, to detect when it must move
 -- screen, M.lastGeom is the geometry table handed back to `interact`
 -- (unchanged by a "none"/"cheap" redraw), M.boxIdx maps col -> the element
 -- indices of that column's box (rect/texts/label) recorded by the last full
--- build, so a "cheap" redraw can restyle just two boxes in place.
+-- build, so a "cheap" redraw can restyle just two boxes in place. M.lastPinned
+-- is the pinned state of the last full build — pinned toggles the chip
+-- row/sliders/EDIT-close button/chevrons and the box rects' mouse-tracking
+-- flags, none of which stripHash sees, so a pinned change always forces full.
 M.lastTier = nil
 M.lastGeom = nil
 M.boxIdx = nil
+M.lastPinned = nil
 
 function M.canvas() return canvas end
 
@@ -97,15 +101,25 @@ function M.draw(s, opts)
   -- column changed) skip the full build below. Cheap is restricted to the
   -- unpinned strip — while pinned, the chip row and sliders also read s.col
   -- (active width chip, slider fraction), so those need the full rebuild too.
+  -- A pinned-state flip is forced to "full" regardless of hash/col: pinned
+  -- gates whole element groups (chips, sliders, EDIT/close, chevrons) and the
+  -- box rects' trackMouseDown/Up/Move flags, none of which stripHash covers.
   local newHash = geom.stripHash(s)
   local tier = geom.redrawTier(M.lastTier, { hash = newHash, col = s.col })
+  if pinned ~= M.lastPinned then
+    tier = "full"
+  end
   if tier == "none" and M.lastGeom then
+    -- match the full path, which always ends with canvas:show() — a "none"
+    -- redraw right after an auto-hidden flash must still bring it back.
+    if canvas then canvas:show() end
     return M.lastGeom
   end
   if tier == "cheap" and not pinned and canvas and M.lastGeom and M.lastTier
       and M.boxIdx and M.boxIdx[M.lastTier.col] and M.boxIdx[s.col] then
     M.recolorFocus(M.lastTier.col, s.col)
     M.lastTier = { hash = newHash, col = s.col }
+    canvas:show()
     return M.lastGeom
   end
 
@@ -459,6 +473,7 @@ function M.draw(s, opts)
 
   M.boxIdx = newBoxIdx
   M.lastTier = { hash = newHash, col = s.col }
+  M.lastPinned = pinned
   M.lastGeom = {
     boxes = boxes,
     floats = floats,
