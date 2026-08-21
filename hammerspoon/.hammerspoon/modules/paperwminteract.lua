@@ -5,10 +5,12 @@ local M = {}
 
 local geom = require("modules.paperwmgeom")
 local model = require("modules.paperwmmodel")
+local render = require("modules.paperwmrender")
 
-local ACCENT = { red = 0.35, green = 0.65, blue = 1.00, alpha = 1 }
+local ACCENT = render.COLORS.ACCENT
 
 local ctx = nil -- { boxes(), viewport(), sliders(), canvasFrame(), pinned(), togglePin(), afterUpdate(fn) }
+local attachedCanvas = nil -- last canvas M.attach was installed on
 
 local dragging = false
 local drag = nil        -- {col, x0, moved}
@@ -266,6 +268,15 @@ function M.attach(canvas, c)
       end
     end
   end)
+end
+
+-- Reinstalling the callback on every redraw is unnecessary now that the
+-- canvas is persistent — only do it when the canvas identity actually changes
+-- (first draw, or a rare rebuild).
+function M.ensureAttached(canvas, c)
+  if canvas == attachedCanvas then return end
+  attachedCanvas = canvas
+  M.attach(canvas, c)
 end
 
 return M
