@@ -10,8 +10,8 @@
 # CONVENTIONS (per ~/CLAUDE.md justfile visibility rules)
 # ═══════════════════════════════════════════════════════
 # Every recipe echoes progress to stderr — `→ doing X` before work,
-# `OK`/`FAIL` after. Recipes that hit the network show the curl command
-# inside a `━━━ curl ... ━━━` banner so it's copy-pasteable.
+# `OK`/`FAIL` after. Recipes that hit the network show the xh command
+# inside a `━━━ xh ... ━━━` banner so it's copy-pasteable.
 #
 # ZSH SHORTCUTS (defined in zsh/.zshrc)
 # ═════════════════════════════════════
@@ -317,8 +317,8 @@ cron-list:
 [group('system')]
 ip:
     #!/usr/bin/env bash
-    echo "━━━ curl -s https://ifconfig.me ━━━" >&2
-    curl -s https://ifconfig.me && echo ""
+    echo "━━━ xh -b --ignore-stdin GET https://ifconfig.me/ip ━━━" >&2
+    xh -b --ignore-stdin GET https://ifconfig.me/ip && echo ""
 
 # Local weather, optional CITY arg (multi-word OK: `weather "New York"`)
 [group('system')]
@@ -327,8 +327,8 @@ weather city="":
     # URL-encode the city so spaces / non-ASCII work
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?format=3"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"; echo
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"; echo
 
 # Multi-day ASCII forecast from wttr.in. days=1|2|3 (wttr max is 3).
 [group('system')]
@@ -337,8 +337,8 @@ forecast city="" days="3":
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     # ?{{days}} limits days; F=hide follow line, M=metric wind, q=no header
     url="https://wttr.in/${city_enc}?{{days}}FMq"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Compact wttr.in view — morning/noon/evening/night summary table, narrower
 [group('system')]
@@ -346,8 +346,8 @@ forecast-narrow city="":
     #!/usr/bin/env bash
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?nFMq"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Resolve a city (or auto-detect via ip-api) → lat<TAB>lon<TAB>name on stdout
 [group('system')]
@@ -357,13 +357,13 @@ _resolve-location city="":
     set -uo pipefail
     if [ -z "{{city}}" ]; then
         geo_url="http://ip-api.com/json/?fields=city,lat,lon"
-        echo "━━━ curl -s '$geo_url' ━━━" >&2
-        curl -s "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        xh -b --ignore-stdin GET "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
     else
         city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
         geo_url="https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}"
-        echo "━━━ curl -s '$geo_url' ━━━" >&2
-        out=$(curl -s "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        out=$(xh -b --ignore-stdin GET "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
         [ -z "$out" ] && { echo "  FAIL — city '{{city}}' not found" >&2; exit 1; }
         printf '%s\n' "$out"
     fi
@@ -378,8 +378,8 @@ forecast-chart city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching 24h forecast for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    fc=$(curl -s "$url")
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$url")
     NAME="$name" JSON="$fc" python3 - <<'PY'
     import json, sys, os, math
     data = json.loads(os.environ['JSON'])
@@ -466,8 +466,8 @@ forecast-graph city="":
     #!/usr/bin/env bash
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?format=v2"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Hourly numeric table for next 24h via Open-Meteo
 [group('system')]
@@ -479,8 +479,8 @@ forecast-hourly city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching next 24h for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url" | jq -r '
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url" | jq -r '
         .hourly as $h
         | "  time              temp    precip   p(%)   wind",
           "  ──────────────────────────────────────────────────",
@@ -498,8 +498,8 @@ forecast-week city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching 7-day forecast for $name (lat=$lat lon=$lon)..." >&2
     fc_url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=auto&forecast_days=7"
-    echo "━━━ curl -s '$fc_url' ━━━" >&2
-    fc=$(curl -s "$fc_url")
+    echo "━━━ xh -b --ignore-stdin GET '$fc_url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$fc_url")
     echo "$fc" | jq -r '
         def wmo(c):
             {"0":"☀️  clear","1":"🌤️  mostly clear","2":"⛅️ partly cloudy","3":"☁️  overcast",
@@ -729,10 +729,10 @@ todo-today:
     if [ -z "${TODOIST_TOKEN:-}" ]; then
         echo "TODOIST_TOKEN not set — add it to ~/dotfiles/.env" >&2; exit 1
     fi
-    echo "━━━ curl -s -G 'https://api.todoist.com/api/v1/tasks' --data-urlencode 'filter=today' -H 'Authorization: Bearer \$TODOIST_TOKEN' ━━━" >&2
-    curl -s -G "https://api.todoist.com/api/v1/tasks" \
-        --data-urlencode "filter=today" \
-        -H "Authorization: Bearer $TODOIST_TOKEN" \
+    echo "━━━ xh -b --ignore-stdin GET 'https://api.todoist.com/api/v1/tasks' filter==today 'Authorization:Bearer \$TODOIST_TOKEN' ━━━" >&2
+    xh -b --ignore-stdin GET "https://api.todoist.com/api/v1/tasks" \
+        filter==today \
+        "Authorization:Bearer $TODOIST_TOKEN" \
         | jq -r '.results[]? | "  • \(.content)   [\(.id)]"' 2>/dev/null \
         || echo "  (no tasks or jq missing)"
 
