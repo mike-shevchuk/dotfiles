@@ -39,8 +39,8 @@ M.ctx = {
 }
 
 function M.screenForDraw()
-  return (hs.window.focusedWindow() and hs.window.focusedWindow():screen())
-      or hs.screen.mainScreen()
+  local win = hs.window.focusedWindow()
+  return (win and win:screen()) or hs.screen.mainScreen()
 end
 
 -- Every mutation used to spawn its own redraw timer, so a slider drag queued a

@@ -381,19 +381,18 @@ function M.draw(s, opts)
     local sx = (total_w - sw) / 2 + 20
     local baseY = PAD + BOX_H + 6 + CHIP_H + 4
 
-    local curW = s.col and s.columns[s.col] and s.columns[s.col].ratio or 0
     local maxOffset = geom.maxOffset(s.stripW, s.canvas.w)
     local curV = maxOffset > 0 and ((s.canvas.x - s.left) / maxOffset) or 0
 
     slider = { x = sx, w = sw, col = s.col }
     scrollSlider = { x = sx, w = sw, maxOffset = maxOffset }
 
-    local wmin = fwin and model.floorRatio(fwin) or model.minRatio()
+    -- cur_ratio (focused width) and fmin (learned floor) computed once above
     local tracks = {
-      { label = wmin > model.minRatio() + 0.005
-          and string.format("width\nmin %d%%", math.floor(wmin * 100 + 0.5)) or "width",
-        frac = curW, id = "slide:track", floor = wmin,
-        value = string.format("%d%%", math.floor(curW * 100 + 0.5)), live = true },
+      { label = fmin > model.minRatio() + 0.005
+          and string.format("width\nmin %d%%", math.floor(fmin * 100 + 0.5)) or "width",
+        frac = cur_ratio, id = "slide:track", floor = fmin,
+        value = string.format("%d%%", math.floor(cur_ratio * 100 + 0.5)), live = true },
       { label = "view", frac = curV, id = "scroll:track",
         value = maxOffset > 0 and string.format("%d%%", math.floor(curV * 100 + 0.5)) or "all",
         live = maxOffset > 0 },
