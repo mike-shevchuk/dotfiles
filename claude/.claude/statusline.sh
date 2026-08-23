@@ -688,13 +688,13 @@ fi
 if $needs_refresh; then
   token=$(get_oauth_token)
   if [ -n "$token" ] && [ "$token" != "null" ]; then
-    response=$(xh -b --timeout 10 GET "https://api.anthropic.com/api/oauth/usage" \
+    response=$(xh -b --ignore-stdin --timeout 10 GET "https://api.anthropic.com/api/oauth/usage" \
       Accept:application/json \
       Content-Type:application/json \
       "Authorization:Bearer $token" \
       anthropic-beta:oauth-2025-04-20 \
       User-Agent:claude-code/2.1.34 \
-      </dev/null 2>/dev/null)
+      2>/dev/null)
     # Only accept the response if it is valid JSON and does NOT contain an error field
     if [ -n "$response" ] && echo "$response" | jq -e 'has("error") | not' >/dev/null 2>&1; then
       usage_data="$response"

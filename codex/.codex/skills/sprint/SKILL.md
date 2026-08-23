@@ -118,7 +118,7 @@ for t in tasks:
 **Updating Todoist descriptions** — after codebase analysis (Step 3), for each Todoist task being worked this sprint, optionally PATCH the description with key findings:
 ```bash
 source ~/dotfiles/.env
-xh -b POST "https://api.todoist.com/api/v1/tasks/{TASK_ID}" \
+xh -b --ignore-stdin POST "https://api.todoist.com/api/v1/tasks/{TASK_ID}" \
   "Authorization:Bearer $TODOIST_TOKEN" \
   description="<codebase findings, file:line, next step>"
 ```

@@ -729,10 +729,10 @@ todo-today:
     if [ -z "${TODOIST_TOKEN:-}" ]; then
         echo "TODOIST_TOKEN not set — add it to ~/dotfiles/.env" >&2; exit 1
     fi
-    echo "━━━ xh -b GET 'https://api.todoist.com/api/v1/tasks' filter==today 'Authorization: Bearer \$TODOIST_TOKEN' ━━━" >&2
+    echo "━━━ xh -b GET 'https://api.todoist.com/api/v1/tasks' filter==today 'Authorization:Bearer \$TODOIST_TOKEN' ━━━" >&2
     xh -b GET "https://api.todoist.com/api/v1/tasks" \
         filter==today \
-        "Authorization: Bearer $TODOIST_TOKEN" \
+        "Authorization:Bearer $TODOIST_TOKEN" \
         | jq -r '.results[]? | "  • \(.content)   [\(.id)]"' 2>/dev/null \
         || echo "  (no tasks or jq missing)"
 
