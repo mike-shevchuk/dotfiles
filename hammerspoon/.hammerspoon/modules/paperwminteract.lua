@@ -126,6 +126,13 @@ function M.attach(canvas, c)
     if tostring(id) == "scroll:track" then
       if message == "mouseDown" then
         dragging = true
+        -- guard against a lost mouseUp (released off-canvas): without it dragging
+        -- would stay true forever and freeze every strip-map redraw
+        if dragGuard then dragGuard:stop() end
+        dragGuard = hs.timer.doAfter(6, function()
+          dragging, pendingOffset = false, nil
+          ctx.afterUpdate()
+        end)
         local frac, maxOffset = viewFracAt(x)
         if frac then
           pendingOffset = frac * maxOffset
@@ -142,6 +149,7 @@ function M.attach(canvas, c)
         end
       elseif message == "mouseUp" then
         dragging = false
+        if dragGuard then dragGuard:stop(); dragGuard = nil end
         local frac, maxOffset = viewFracAt(x)
         if frac then pendingOffset = frac * maxOffset end
         if pendingOffset then model.scrollTo(pendingOffset) end
@@ -155,6 +163,13 @@ function M.attach(canvas, c)
     if tostring(id) == "slide:track" then
       if message == "mouseDown" then
         dragging = true
+        -- guard against a lost mouseUp (see scroll:track): keeps a dropped drag
+        -- from pinning dragging=true and freezing redraws
+        if dragGuard then dragGuard:stop() end
+        dragGuard = hs.timer.doAfter(6, function()
+          dragging, pendingWin, pendingRatio = false, nil, nil
+          ctx.afterUpdate()
+        end)
         local win, ratio = widthRatioAt(x)
         if ratio then
           pendingWin, pendingRatio = win, ratio
@@ -171,6 +186,7 @@ function M.attach(canvas, c)
         end
       elseif message == "mouseUp" then
         dragging = false
+        if dragGuard then dragGuard:stop(); dragGuard = nil end
         local win, ratio = widthRatioAt(x)
         if ratio then pendingWin, pendingRatio = win, ratio end
         if pendingWin and pendingRatio then model.setWidth(pendingWin, pendingRatio) end
@@ -232,7 +248,9 @@ function M.attach(canvas, c)
         return
       elseif message == "mouseMove" then
         if drag then
-          if math.abs(x - drag.x0) > 6 then drag.moved = true end
+          -- vertical movement also counts: a straight-up/down drag is the
+          -- stack/unstack gesture, which used to be misread as a plain click
+          if math.abs(x - drag.x0) > 6 or math.abs(y - drag.y0) > 6 then drag.moved = true end
           if drag.moved then
             local t = geom.columnAt(x, ctx.boxes())
             if t then caretShow(t, t >= drag.col) end
