@@ -95,7 +95,7 @@ Run all of these simultaneously:
 **2a. Todoist — Back2Back project tasks**
 ```bash
 source ~/dotfiles/.env
-xh -b GET "https://api.todoist.com/api/v1/tasks" \
+xh -b --ignore-stdin GET "https://api.todoist.com/api/v1/tasks" \
   "Authorization:Bearer $TODOIST_TOKEN" | \
 python3 -c "
 import json, sys
