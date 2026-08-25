@@ -153,9 +153,13 @@ hub-up port="8890":
     tmux kill-session -t hub 2>/dev/null || true
     echo "━━━ just ━━━  tmux new -d -s hub  just -g hub {{port}}" >&2
     tmux new-session -d -s hub "just -g hub {{port}}"
-    sleep 0.6
-    url=$(tmux capture-pane -t hub -p 2>/dev/null | grep -oE 'http://[0-9.]+:[0-9]+/' | head -1)
-    echo "  OK — hub in tmux session 'hub': ${url:-starting…}" >&2
+    url=""
+    for _ in $(seq 1 15); do
+        url=$(tmux capture-pane -t hub -p 2>/dev/null | grep -oE 'http://[0-9.]+:[0-9]+/' | head -1)
+        [ -n "$url" ] && break
+        sleep 0.2
+    done
+    echo "  OK — hub in tmux session 'hub': ${url:-starting… (tmux attach -t hub)}" >&2
     echo "  watch:  tmux attach -t hub   (detach = Ctrl-b d)" >&2
     echo "  stop:   jg hub-down" >&2
 
