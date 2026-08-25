@@ -144,6 +144,27 @@ hub port="8890" root="~/zettelkasten/claude_code":
     console.error(`  OK — LAN index: ${url}`);
     console.error(`━━━ hub ━━━  ${url}   (Ctrl-C to stop)`);
 
+# Bring the hub UP as a persistent detached tmux session (survives this shell).
+# `jg hub` = foreground with live logs; `jg hub-up` = background, keeps running.
+[group('reports')]
+hub-up port="8890":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmux kill-session -t hub 2>/dev/null || true
+    echo "━━━ just ━━━  tmux new -d -s hub  just -g hub {{port}}" >&2
+    tmux new-session -d -s hub "just -g hub {{port}}"
+    sleep 0.6
+    url=$(tmux capture-pane -t hub -p 2>/dev/null | grep -oE 'http://[0-9.]+:[0-9]+/' | head -1)
+    echo "  OK — hub in tmux session 'hub': ${url:-starting…}" >&2
+    echo "  watch:  tmux attach -t hub   (detach = Ctrl-b d)" >&2
+    echo "  stop:   jg hub-down" >&2
+
+# Stop the detached hub session.
+[group('reports')]
+hub-down:
+    #!/usr/bin/env bash
+    if tmux kill-session -t hub 2>/dev/null; then echo "  OK — hub stopped" >&2; else echo "  hub was not running" >&2; fi
+
 # Default: pop the chooser (use `jjg` from zsh for the grouped preview view)
 default:
     @just -g --choose
