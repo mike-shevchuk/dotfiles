@@ -27,6 +27,123 @@
 # bodies; awk $1 and shell-function args are unaffected.)
 set positional-arguments
 
+# Browse every HTML report under ~/zettelkasten/claude_code and open one.
+# Serves the whole tree once (dir listing = "see all"), fzf-picks one to open.
+[group('reports')]
+reports filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    root="$HOME/zettelkasten/claude_code"
+    [ -d "$root" ] || { echo "  FAIL: $root not found" >&2; exit 1; }
+    echo "→ [1/3] picking a free port..." >&2
+    PORT=""
+    for P in 8899 8898 8897 8896 8895 8894; do
+        lsof -nP -iTCP:$P -sTCP:LISTEN >/dev/null 2>&1 || { PORT=$P; break; }
+    done
+    [ -n "$PORT" ] || { echo "  FAIL: no free port 8894-8899" >&2; exit 1; }
+    echo "→ [2/3] serving $root in tmux (session 'reports', port $PORT)..." >&2
+    tmux has-session -t reports 2>/dev/null && tmux kill-session -t reports 2>/dev/null || true
+    tmux new-session -d -s reports -c "$root" "python3 -m http.server $PORT --bind 0.0.0.0"
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)
+    echo "  OK — index: http://$ip:$PORT/   (dir listing of ALL reports)" >&2
+    echo "→ [3/3] pick a page to open (fzf)..." >&2
+    rel=""
+    if command -v fzf >/dev/null && command -v fd >/dev/null; then
+        rel=$(fd -e html {{filter}} "$root" 2>/dev/null | sed "s#$root/##"               | fzf --prompt="report > " --height=70% --reverse                     --preview "echo http://$ip:$PORT/{}") || true
+    fi
+    if [ -n "$rel" ]; then
+        url="http://$ip:$PORT/$rel"
+    else
+        url="http://$ip:$PORT/"
+        echo "  (no pick — opening the index listing)" >&2
+    fi
+    echo "  → open $url" >&2
+    echo "━━━ open '$url' ━━━" >&2
+    open "$url" 2>/dev/null || echo "  (open failed — paste the URL in a browser)" >&2
+    echo "  stop later: tmux kill-session -t reports" >&2
+
+# bun ↔ justfile: this whole recipe body IS a TypeScript program, run by bun
+# (just executes shebang recipes in any language). One fast LAN server for every
+# HTML/MD report under <root>, with LIVE-RELOAD (save a report -> browser refreshes).
+# Native Bun.serve = ZERO npm deps, so it survives a worktree. Ctrl-C to stop.
+#   jg hub            -> serve ~/zettelkasten/claude_code on :8890
+#   jg hub 8891       -> other port
+#   jg hub 8890 ~/x   -> other root
+[group('reports')]
+hub port="8890" root="~/zettelkasten/claude_code":
+    #!/usr/bin/env bun
+    import { watch } from "node:fs";
+    import { readdir } from "node:fs/promises";
+    import { networkInterfaces } from "node:os";
+    import { join, extname, relative } from "node:path";
+
+    const PORT = Number("{{port}}");
+    const ROOT = "{{root}}".replace(/^~/, process.env.HOME!);
+    const lanIP = Object.values(networkInterfaces()).flat()
+      .find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
+
+    const RELOAD = `<script>new EventSource("/__reload").onmessage=()=>location.reload()</script>`;
+    const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
+
+    const clients = new Set<ReadableStreamDefaultController>();
+    watch(ROOT, { recursive: true }, () => {
+      for (const c of clients) { try { c.enqueue("data: change\n\n"); } catch {} }
+    });
+
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    function md(s: string): string {
+      s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => `<pre><code>${esc(c)}</code></pre>`);
+      s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>");
+      s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+      s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+      s = s.replace(/^[-*] (.*)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
+      return s.split(/\n\n+/).map(p => /^\s*<(h|ul|pre)/.test(p) ? p : `<p>${p}</p>`).join("\n");
+    }
+
+    async function walk(dir: string): Promise<string[]> {
+      const out: string[] = [];
+      for (const e of await readdir(dir, { withFileTypes: true })) {
+        if (e.name.startsWith(".")) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...await walk(p));
+        else if (/\.(html?|md)$/i.test(e.name)) out.push(p);
+      }
+      return out;
+    }
+
+    async function index(): Promise<string> {
+      const files = (await walk(ROOT)).sort();
+      const items = files.map(f => `<li><a href="/${relative(ROOT, f)}">${relative(ROOT, f)}</a></li>`).join("\n");
+      return `<!doctype html><meta charset=utf-8><title>reports hub</title>${DARK}${RELOAD}`
+        + `<h1>📊 reports hub <span class=d>${files.length} files · ${ROOT.replace(process.env.HOME!, "~")}</span></h1><ul>${items}</ul>`;
+    }
+
+    console.error(`→ [1/2] serving ${ROOT} on 0.0.0.0:${PORT} (bun native, live-reload)`);
+    Bun.serve({
+      port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
+      async fetch(req) {
+        const url = new URL(req.url);
+        if (url.pathname === "/__reload") {
+          let self: ReadableStreamDefaultController;
+          return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
+            { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "connection": "keep-alive" } });
+        }
+        if (url.pathname === "/") return new Response(await index(), { headers: { "content-type": "text/html" } });
+        const path = join(ROOT, decodeURIComponent(url.pathname));
+        if (!path.startsWith(ROOT)) return new Response("forbidden", { status: 403 });
+        const file = Bun.file(path);
+        if (!(await file.exists())) return new Response("not found", { status: 404 });
+        const ext = extname(path).toLowerCase();
+        if (ext === ".md") return new Response(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}` + md(await file.text()), { headers: { "content-type": "text/html" } });
+        if (ext === ".html" || ext === ".htm") return new Response((await file.text()) + RELOAD, { headers: { "content-type": "text/html" } });
+        return new Response(file);
+      },
+    });
+    const url = `http://${lanIP}:${PORT}/`;
+    console.error(`  OK — LAN index: ${url}`);
+    console.error(`━━━ hub ━━━  ${url}   (Ctrl-C to stop)`);
+
 # Default: pop the chooser (use `jjg` from zsh for the grouped preview view)
 default:
     @just -g --choose
@@ -183,7 +300,10 @@ git-status-all:
 # Delegates to ~/code/projctl (stowed) so its registry.conf + self-calls resolve.
 [group('projects')]
 proj *args:
-    @cd ~/code/projctl && just "$@"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "━━━ projctl ━━━  cd ~/code/projctl && just ${*:-tui}" >&2
+    cd ~/code/projctl && exec just "$@"
 
 # --- Reddit daily digest ----------------------------------------------------
 
@@ -739,7 +859,9 @@ todo-today:
 # Forward to the project-local Claude statusline tokens recipe
 [group('claude/todoist')]
 tokens:
-    @cd ~/dotfiles && just tokens
+    #!/usr/bin/env bash
+    echo "━━━ just ━━━  cd ~/dotfiles && just tokens" >&2
+    cd ~/dotfiles && exec just tokens
 
 # --- Search / FS helpers ----------------------------------------------------
 
