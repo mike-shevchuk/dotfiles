@@ -65,6 +65,11 @@ zinit light agnoster/agnoster-zsh-theme
 zinit ice wait"1"; zinit light Aloxaf/fzf-tab
 # autopair — auto-close brackets/quotes/parens while typing commands
 zinit ice wait"1"; zinit light hlissner/zsh-autopair
+# forgit — fzf-powered git (add/log/diff/checkout/stash/fixup/worktree).
+# NO_ALIASES=1 keeps forgit's default ga/gd/gco from clobbering your own git aliases;
+# reach it via the gi* aliases in the Git section of .zshrc instead.
+FORGIT_NO_ALIASES=1
+zinit ice wait"1"; zinit light wfxr/forgit
 
 # Essential OH-MY-ZSH plugins - after 2s
 zinit ice wait"2"; zinit snippet OMZ::plugins/git/git.plugin.zsh
