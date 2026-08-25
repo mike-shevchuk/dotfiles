@@ -100,6 +100,17 @@ fi
 # zoxide — smarter cd (z <dir>, zi = interactive fzf picker); replaces rupa/z
 if command -v zoxide >/dev/null 2>&1; then
     eval "$(zoxide init zsh)"
+    # z-prune — drop DB entries whose directory no longer exists (stale worktrees,
+    # deleted branches). Those dead-but-high-ranked paths are why `z <query>` jumps
+    # wrong. When `z` still guesses badly among LIVE dirs, use `zi <query>` (fzf picker)
+    # or add a keyword: `z b2b fast` instead of `z fast`.
+    z-prune() {
+        local p n=0
+        while IFS= read -r p; do
+            [[ -d "$p" ]] || { zoxide remove "$p" && (( ++n )) }
+        done < <(zoxide query --list)
+        echo "z-prune: removed $n stale entr$([[ $n == 1 ]] && echo y || echo ies)"
+    }
 fi
 
 # Initialize pyenv (after zinit to avoid conflicts).
@@ -846,5 +857,6 @@ if [ -d "$HOME/.bun" ]; then
   [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
 fi
 
-# Added by Antigravity IDE
-export PATH="/Users/mikeshevchuk/.antigravity-ide/antigravity-ide/bin:$PATH"
+# Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
+# PATH entry on the Orange Pi, which shares this file via stow)
+[[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
