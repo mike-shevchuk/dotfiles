@@ -149,6 +149,10 @@ local function menuTable()
     fn = function() model.clearFloors(); M.update() end,
   }
   items[#items + 1] = {
+    title = "Forget saved widths",
+    fn = function() model.clearAppWidths(); M.update() end,
+  }
+  items[#items + 1] = {
     title = "Refresh layout",
     fn = function()
       model.refreshWindows()

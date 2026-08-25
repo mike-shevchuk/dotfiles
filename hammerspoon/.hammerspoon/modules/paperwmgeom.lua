@@ -110,4 +110,35 @@ function M.redrawTier(prev, new)
   return "none"
 end
 
+-- Keep-focus fit: given each column's wanted width (px), its floor (px), the
+-- available width, and which column is focused, return the widths to apply.
+-- If the row already fits, widths are unchanged. On overflow the FOCUS column
+-- keeps its width (capped at avail) and every OTHER column shrinks by a single
+-- proportional factor, floored — so nothing is crushed to the minimum merely
+-- for being last, and switching focus is the only thing that reshuffles widths.
+-- `floor` may be nil (treated as 0). `focusIdx` nil falls back to the last col.
+function M.fitWidths(want, floor, avail, focusIdx)
+  local n = #want
+  local widths, sum = {}, 0
+  for i = 1, n do widths[i] = want[i]; sum = sum + want[i] end
+  if sum <= avail then return widths end
+
+  local f = (focusIdx and want[focusIdx]) and focusIdx or n
+  local fw = math.min(want[f], avail)
+  local rem = avail - fw
+  local otherWant = 0
+  for i = 1, n do if i ~= f then otherWant = otherWant + want[i] end end
+  if otherWant <= 0 then widths[f] = fw; return widths end
+
+  local factor = rem / otherWant -- < 1 on overflow (may be 0 if focus fills avail)
+  for i = 1, n do
+    if i == f then
+      widths[i] = fw
+    else
+      widths[i] = math.max((floor and floor[i]) or 0, want[i] * factor)
+    end
+  end
+  return widths
+end
+
 return M

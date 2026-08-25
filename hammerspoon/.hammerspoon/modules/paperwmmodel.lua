@@ -115,6 +115,7 @@ function M.minRatio() return paperwmfit.MIN end
 function M.fitEnabled() return paperwmfit.enabled end
 function M.toggleFit() paperwmfit.toggle() end
 function M.clearFloors() paperwmfit.clearFloors() end
+function M.clearAppWidths() paperwmfit.clearAppWidths() end
 
 -- The preset width chips/menu entries are driven by PaperWM's own list.
 function M.widthRatios()
