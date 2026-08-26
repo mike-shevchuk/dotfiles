@@ -22,6 +22,50 @@ local STRIP_TTL = 0.25
 
 function M.invalidate() stripCacheAt = 0 end
 
+-- A window whose app has quit abruptly can linger in PaperWM's list: its id no
+-- longer resolves to a live window. It surfaces as a phantom "0%" column you
+-- cannot focus, and touching its dead Accessibility element can stall — a real
+-- source of the sluggishness. Detect purely by id (no AX call).
+local function isDead(w)
+  if not w then return true end
+  local id = w:id()
+  return not id or hs.window.get(id) == nil
+end
+
+-- Prune dead windows from PaperWM's own state so the phantom column disappears
+-- everywhere — widget count AND focus navigation. refreshWindows() does NOT fix
+-- this (it re-adds them), so we remove them directly, BY ID ONLY: this mirrors
+-- PaperWM's removeWindow minus its focus loop and its title() logging, both of
+-- which touch the dead AX element and can hang. One at a time (removals shift
+-- indices), bounded so a stubborn entry never loops forever.
+local lastPrune = 0
+function M.pruneDead(space)
+  local pwm = paperwm.pwm
+  if not pwm then return false end
+  space = space or hs.spaces.focusedSpace()
+  local removed = false
+  for _ = 1, 12 do
+    local list = pwm.state.windowList(space)
+    if not list then break end
+    local target, tcol, trow
+    for c = 1, #list do
+      for r = 1, #list[c] do
+        if isDead(list[c][r]) then target, tcol, trow = list[c][r], c, r; break end
+      end
+      if target then break end
+    end
+    if not target then break end
+    pwm.state.windowIndex(target, true)                 -- drop from the id index (by id)
+    table.remove(list[tcol], trow)                      -- drop from the nested list
+    if #list[tcol] == 0 then table.remove(list, tcol) end -- drop the now-empty column
+    pcall(function() pwm.state.xPositions(space)[target:id()] = nil end)
+    pcall(function() pwm.state.uiWatcherDelete(target:id()) end)
+    removed = true
+  end
+  if removed then pcall(function() pwm:tileSpace(space) end) end
+  return removed
+end
+
 -- { columns = { { wins, ratio } … }, floating = { win … }, col, total, space }
 local function computeStrip()
   local pwm = paperwm.pwm
@@ -32,6 +76,24 @@ local function computeStrip()
   local space = index and index.space or hs.spaces.focusedSpace()
 
   local list = pwm.state.windowList(space)
+
+  -- Heal zombie columns (an app that quit left a dead window behind). Debounced
+  -- so a prune that can't fully clear one never thrashes; the column loop below
+  -- also skips any dead entry defensively, so the widget never renders or
+  -- measures one even before the prune lands.
+  if list then
+    for c = 1, #list do
+      if isDead(list[c] and list[c][1]) then
+        local now = hs.timer.secondsSinceEpoch()
+        if now - lastPrune > 3 then
+          lastPrune = now
+          M.pruneDead(space)
+          list = pwm.state.windowList(space) -- re-read the healed list
+        end
+        break
+      end
+    end
+  end
 
   -- width is measured against PaperWM's canvas, not the raw screen
   local screen = focused and focused:screen() or hs.screen.mainScreen()
@@ -45,19 +107,21 @@ local function computeStrip()
   local left, right
   if list then
     for col = 1, #list do
-      local wins = {}
-      for row = 1, #list[col] do wins[#wins + 1] = list[col][row] end
-      local first = wins[1]
-      local w = first and first:frame().w or 0
-      local vx = first and (xpos[first:id()] or first:frame().x) or 0
-      columns[#columns + 1] = {
-        wins = wins,
-        ratio = canvas.w > 0 and (w / canvas.w) or 0,
-        vx = vx,
-        px = w,
-      }
-      left = left and math.min(left, vx) or vx
-      right = right and math.max(right, vx + w) or (vx + w)
+      if not isDead(list[col][1]) then
+        local wins = {}
+        for row = 1, #list[col] do wins[#wins + 1] = list[col][row] end
+        local first = wins[1]
+        local w = first and first:frame().w or 0
+        local vx = first and (xpos[first:id()] or first:frame().x) or 0
+        columns[#columns + 1] = {
+          wins = wins,
+          ratio = canvas.w > 0 and (w / canvas.w) or 0,
+          vx = vx,
+          px = w,
+        }
+        left = left and math.min(left, vx) or vx
+        right = right and math.max(right, vx + w) or (vx + w)
+      end
     end
   end
 
