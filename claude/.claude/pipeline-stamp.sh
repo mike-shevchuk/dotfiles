@@ -102,27 +102,37 @@ case "$cmd" in
       echo "refresh-pr: gh not found — skipped" >&2; exit 0
     fi
     rp_cwd="${2:-$PWD}"
-    pr_number=""; pr_state=""; pr_isdraft=""; pr_mirror=""; pr_bugbot=""
-    pr_json=$(cd "$rp_cwd" && gh pr view --json number,state,isDraft 2>/dev/null || true)
+    pr_number=""; pr_state=""; pr_isdraft=""; pr_mirror=""; pr_bugbot=""; pr_bugsha=""; pr_bugurl=""; pr_nwo=""; pr_mergeable=""
+    pr_json=$(cd "$rp_cwd" && gh pr view --json number,state,isDraft,mergeable 2>/dev/null || true)
     if [ -z "$pr_json" ]; then
       rb=$(cd "$rp_cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
-      [ -n "$rb" ] && pr_json=$(cd "$rp_cwd" && gh pr view "$rb" --json number,state,isDraft 2>/dev/null || true)
+      [ -n "$rb" ] && pr_json=$(cd "$rp_cwd" && gh pr view "$rb" --json number,state,isDraft,mergeable 2>/dev/null || true)
     fi
     if [ -n "$pr_json" ]; then
       pr_number=$(echo "$pr_json" | jq -r '.number // ""')
       pr_state=$(echo "$pr_json" | jq -r '.state // ""')
       pr_isdraft=$(echo "$pr_json" | jq -r '.isDraft // false')
+      pr_mergeable=$(echo "$pr_json" | jq -r '.mergeable // ""')
       if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+        pr_nwo=$(cd "$rp_cwd" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
+        _nwo="$pr_nwo"
         _mt=$(cd "$rp_cwd" && gh pr view $((pr_number + 1)) --json title --jq '.title' 2>/dev/null || true)
         case "$_mt" in REVIEW:*) pr_mirror=$((pr_number + 1)) ;; esac
         if [ -n "$pr_mirror" ]; then
-          _nwo=$(cd "$rp_cwd" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
-          [ -n "$_nwo" ] && pr_bugbot=$(cd "$rp_cwd" && gh api graphql -f query="query{repository(owner:\"${_nwo%/*}\",name:\"${_nwo#*/}\"){pullRequest(number:${pr_mirror}){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{reactions(first:20){nodes{user{login}}}}}}}}}}" \
-            --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)|select([.comments.nodes[0].reactions.nodes[]?.user.login]|index("mike-shevchuk")|not)]|length' 2>/dev/null || true)
+          if [ -n "$_nwo" ]; then
+            # count of unresolved+un-reacted threads AND the newest one's commit sha
+            _bb=$(cd "$rp_cwd" && gh api graphql -f query="query{repository(owner:\"${_nwo%/*}\",name:\"${_nwo#*/}\"){pullRequest(number:${pr_mirror}){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{originalCommit{abbreviatedOid} reactions(first:20){nodes{user{login}}}}}}}}}}" \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)|select([.comments.nodes[0].reactions.nodes[]?.user.login]|index("mike-shevchuk")|not)|(.comments.nodes[0].originalCommit.abbreviatedOid // "")]' 2>/dev/null || true)
+            if [ -n "$_bb" ]; then
+              pr_bugbot=$(echo "$_bb" | jq 'length' 2>/dev/null || true)
+              pr_bugsha=$(echo "$_bb" | jq -r '.[-1] // ""' 2>/dev/null || true)
+            fi
+            [ -n "$pr_bugbot" ] && [ "$pr_bugbot" -gt 0 ] 2>/dev/null && pr_bugurl="https://github.com/${_nwo}/pull/${pr_mirror}"
+          fi
         fi
       fi
     fi
-    line="${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}"
+    line="${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}|${pr_bugsha}|${pr_bugurl}|${pr_nwo}|${pr_mergeable}"
     # Write the cache for this cwd AND every existing subdir cache under it, so a
     # session sitting in any subdirectory of the worktree sees the fresh value too.
     canon=$(cd "$rp_cwd" 2>/dev/null && pwd -P || echo "$rp_cwd")
