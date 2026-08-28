@@ -278,6 +278,14 @@ alias jgl='just -g --list'      # grouped list of every global recipe
 alias jd='just --dry-run'
 alias jv='just --verbose'
 alias 'jq-'='just --quiet'
+# jgc / jc — нативний `--choose` (fzf), але ДУБЛЮЄ обрану команду в лог банером
+#   `━━━ just ━━━  <resolved>` (стиль nested-just-visible) перш ніж запустити.
+#   jgc = глобальний (just -g --choose);  jc = локальний justfile (just --choose).
+#   Esc у fzf → exit 130 → just чемно скасовує.
+#   NB: поряд є jj/jjg (_just_pick) — той самий «вибери+залогуй», але через
+#   --list+eval; jgc/jc свідомо на native --choose (показує сигнатури/залежності).
+alias jgc='just -g --choose --chooser '\''fzf --height=60% --border | { IFS= read -r _r || exit 130; printf "━━━ just ━━━  jg %s\n" "$_r" >&2; printf "%s\n" "$_r"; }'\'''
+alias jc='just --choose --chooser '\''fzf --height=60% --border | { IFS= read -r _r || exit 130; printf "━━━ just ━━━  just %s\n" "$_r" >&2; printf "%s\n" "$_r"; }'\'''
 
 # cheat — fuzzy-browse every cheatsheet on the machine (README + zettelkasten).
 #   cheat            → fzf over all sheets, bat preview, Enter opens full
