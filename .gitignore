@@ -9,7 +9,11 @@ zsh/.zshrc.secure
 *.backup
 *~
 *.bak.gsd-*
+*.bak-*
 lz/.config/LazyVIM/lazy-lock.json
+
+# Transient tool/MCP artifacts
+.playwright-mcp/
 
 # Hammerspoon secrets
 hammerspoon/.hammerspoon/.env
