@@ -69,10 +69,22 @@ tui:
     [ ${#names[@]} -eq 0 ] && { echo "→ nothing selected" >&2; exit 0; }
     action="$(printf '%s\n' start stop restart status logs attach enable disable remove \
       | gum choose --header "Action → ${names[*]}")" || exit 0
+    # menu shows human labels; some differ from recipe names (start→up, stop→down)
     case "$action" in
-      logs|attach)          just --justfile "$JF" "$action" "${names[0]}" ;;
-      enable|disable|remove) for n in "${names[@]}"; do just --justfile "$JF" "$action" "$n"; done ;;
-      *)                    just --justfile "$JF" "$action" "${names[@]}" ;;
+      start) recipe=up ;;
+      stop)  recipe=down ;;
+      *)     recipe="$action" ;;
+    esac
+    if ! just --justfile "$JF" --show "$recipe" >/dev/null 2>&1; then
+      echo "✗ action '$action' maps to recipe '$recipe', which does not exist in $JF" >&2
+      echo "  → menu/recipe drift: fix the label→recipe map in the tui dispatch" >&2
+      exit 1
+    fi
+    echo "→ $action → just $recipe ${names[*]}" >&2
+    case "$action" in
+      logs|attach)           just --justfile "$JF" "$recipe" "${names[0]}" ;;
+      enable|disable|remove) for n in "${names[@]}"; do just --justfile "$JF" "$recipe" "$n"; done ;;
+      *)                     just --justfile "$JF" "$recipe" "${names[@]}" ;;
     esac
 
 # ─── fleet actions ──────────────────────────────────────────────────────────
@@ -90,6 +102,7 @@ up *names:
       if [ -z "${names// /}" ]; then echo "→ nothing selected" >&2; exit 0; fi
     fi
     set -f                                    # names are literals, never globs
+    echo "━━━ just ━━━  just _do start ${names:-<all enabled>}" >&2
     exec just --justfile "$JF" _do "start" $names
 
 # Start every ENABLED project without prompting (used by login/auto-start)
@@ -141,11 +154,14 @@ _do action *names:
       elif [ "{{action}}" = start ] && [ "$enabled" != 1 ]; then
         continue
       fi
-      echo "→ {{action}} $name" >&2
-      if [ "${DRY:-0}" = 1 ]; then echo "   DRY: (cd $dir && just {{action}})" >&2; continue; fi
-      if [ ! -d "$dir" ]; then echo "  FAIL (missing dir: $dir)" >&2; rc=1; continue; fi
-      if ( cd "$dir" && just {{action}} </dev/null ); then echo "  OK ({{action}} $name)" >&2
-      else echo "  FAIL ({{action}} $name, exit $?)" >&2; rc=1; fi
+      act="{{action}}"
+      if [ ! -d "$dir" ]; then echo "→ $act $name" >&2; echo "  FAIL (missing dir: $dir)" >&2; rc=1; continue; fi
+      # prefer proj_<action> (project's own start/stop may mean something else); fall back to <action>
+      recipe="$act"; ( cd "$dir" && just --summary 2>/dev/null | tr ' ' '\n' | grep -qx "proj_$act" ) && recipe="proj_$act"
+      echo "→ $act $name  (just $recipe)" >&2
+      if [ "${DRY:-0}" = 1 ]; then echo "   DRY: (cd $dir && just $recipe)" >&2; continue; fi
+      if ( cd "$dir" && just "$recipe" </dev/null ); then echo "  OK ($act $name)" >&2
+      else echo "  FAIL ($act $name, exit $?)" >&2; rc=1; fi
     done < "{{_conf}}"
     if [ -n "$want" ]; then
       for w in $want; do
@@ -208,7 +224,7 @@ _ensure-recipes dir session port run:
       have="$(just --justfile "$jf" --summary 2>/dev/null || true)"
       missing=""
       for r in start stop restart status logs; do
-        case " $have " in *" $r "*) : ;; *) missing="$missing $r" ;; esac
+        case " $have " in *" $r "*|*" proj_$r "*) : ;; *) missing="$missing $r" ;; esac
       done
       if [ -z "${missing// /}" ]; then
         echo "  ✓ standard recipes present ($jf)" >&2
@@ -286,7 +302,8 @@ status:
       [ "$enabled" = 1 ] && a="yes" || a="no"
       IFS='|' read -r gb ga gbh gd <<<"$(just --justfile "$JF" _git-one "$dir")"
       if [ "$gb" = "-" ]; then git="-"; else [ "$gd" = yes ] && m="*" || m=""; git="↑${ga}↓${gbh}${m}"; fi
-      printf '%-10s %-8s %-5s %-7s %-9s %s\n' "$name" "$s" "$a" "${port:+:$port}" "$git" "$dir"
+      set -- $port; pd=""; [ -n "${1:-}" ] && { [ $# -gt 1 ] && pd=":$1+$(($#-1))" || pd=":$1"; }  # compact multi-port → :8000+3
+      printf '%-10s %-8s %-5s %-7s %-9s %s\n' "$name" "$s" "$a" "$pd" "$git" "$dir"
     done
 
 # Show the registry (with on/off auto-start marker)
@@ -379,7 +396,10 @@ _one action name:
       case "$name" in ''|\#*) continue ;; esac
       [ "$name" = "{{name}}" ] || continue
       dir="${dir/#\~/$HOME}"
-      exec bash -c "cd '$dir' && just {{action}}"
+      act="{{action}}"; recipe="$act"        # prefer proj_<action>, fall back to <action>
+      ( cd "$dir" && just --summary 2>/dev/null | tr ' ' '\n' | grep -qx "proj_$act" ) && recipe="proj_$act"
+      echo "━━━ just ━━━  cd $dir && just $recipe" >&2
+      exec bash -c "cd '$dir' && just '$recipe'"
     done < "{{_conf}}"
     echo "unknown project: {{name}}" >&2; exit 1
 
@@ -438,11 +458,11 @@ _status-one target:
         echo "  state:     ○ stopped"
       fi
       if [ -n "$port" ]; then
-        if lsof -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
-          echo "  port:      :$port LISTEN"
-        else
-          echo "  port:      :$port (not listening)"
-        fi
+        pline=""                                  # port field may hold several space-separated ports
+        for p in $port; do
+          if lsof -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1; then pline="$pline  :$p ●"; else pline="$pline  :$p ○"; fi
+        done
+        echo "  ports:    $pline"
       fi
       for e in $extra; do
         if tmux has-session -t "$e" 2>/dev/null; then echo "  extra:     $e ●"; else echo "  extra:     $e ○"; fi

@@ -123,7 +123,7 @@ health:
     check "npx"               npx          required  "runs hook scripts"          "comes with node"
     check "jq"                jq           required  "statusline JSON parsing"    "brew/apt/pacman install jq"
     check "gh"                gh           optional  "statusline PR info"         "brew/apt/pacman install gh"
-    check "curl"              curl         required  "statusline usage API"       "brew/apt/pacman install curl"
+    check "xh"                xh           required  "statusline usage API + HTTP recipes"  "brew install xh / cargo install xh"
 
     # Codex deps
     check "codex"             codex        optional  "Codex CLI"                  "brew install --cask codex"
