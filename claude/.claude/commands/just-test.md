@@ -164,7 +164,7 @@ $ <command>
 
 ```console
 $ just --justfile <file> <recipe> <args>
-<recipe's own banner + curl line + timing + HTTP code, ANSI-stripped>
+<recipe's own ━━━ xh ━━━ banner + timing + HTTP code, ANSI-stripped>
 ```
 
 **Request**
@@ -295,7 +295,7 @@ BODY=/tmp/just-test-PR<n>-comment.md
 grep -cE '^\$ .*(<[a-zA-Z_]+>|…)' "$BODY"     # placeholder/ellipsis in a COMMAND -> 0
 grep -c 'copy the\|copying the' "$BODY"       # admits a manual step             -> 0
 grep -c '<topic>-smoke' "$BODY"               # orchestrator is present          -> >=1
-grep -c '^  xh '        "$BODY"               # resolved xh commands shown       -> >=1 per HTTP step
+grep -cE '(^  |━━━ xh ━━━  )xh ' "$BODY"   # resolved xh commands shown       -> >=1 per HTTP step
 grep -c 'aws logs\|aws dynamodb' "$BODY"      # resolved aws commands shown      -> >=1 if logs/DDB cited
 
 # ADVISORY — angle-bracket tokens inside fenced blocks, HTML excluded by construction

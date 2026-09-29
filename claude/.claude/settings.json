@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/dotfiles/tmux/scripts/agent-state.sh working"
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh working || true"
           }
         ]
       }
@@ -33,7 +33,7 @@
           },
           {
             "type": "command",
-            "command": "~/dotfiles/tmux/scripts/agent-state.sh waiting"
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh waiting || true"
           }
         ]
       }
@@ -52,7 +52,7 @@
           },
           {
             "type": "command",
-            "command": "~/dotfiles/tmux/scripts/agent-state.sh done"
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh done || true"
           }
         ]
       }
@@ -85,7 +85,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash '/Users/mikeshevchuk/.claude/hooks/herdr-agent-state.sh' session",
+            "command": "f=~/.claude/hooks/herdr-agent-state.sh; [ -f \"$f\" ] && bash \"$f\" session || true",
             "timeout": 10
           }
         ]
@@ -97,7 +97,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "~/dotfiles/tmux/scripts/agent-state.sh working"
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh working || true"
           }
         ]
       }
@@ -172,5 +172,6 @@
       "**Org-specific CLIs**: None configured"
     ]
   },
-  "voiceEnabled": true
+  "voiceEnabled": true,
+  "model": "claude-sonnet-5"
 }
