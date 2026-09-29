@@ -115,15 +115,22 @@ numbers or standards by name — the principle in plain language, not the citati
 - If there are real bugs or the branch needs rebase → verdict 🔄 Request Changes
 - If fixes from a previous review were applied → acknowledge each one with ✅
 
-### Show draft, then post (GATED — never auto-post)
+### Show draft, then post (GATED by default — `--auto` skips the wait)
 
 1. Read ALL existing bot comments (Cursor Bugbot, Gemini) FIRST and give each a
    verdict + score before writing your own findings.
 2. Render the FULL review body in the terminal. Do NOT post yet.
 3. Wait for an explicit affirmative ("go", "post", "пости"). Re-invoking the
    command is NOT approval. Anything else = stay stopped.
-4. On go — pick the posting method (GitHub posts are ALWAYS English — translate
-   the draft first if it was rendered in another language):
+   - **Exception:** if `$ARGUMENTS` contains the literal flag `--auto` (or
+     `--yes`), skip this wait — still render the draft first (step 2), then
+     go straight to step 4 in the same turn. This flag is an explicit,
+     per-invocation opt-in the user types themselves; it is never inferred
+     from phrasing like "post it" or "go ahead", and re-running the command
+     without the flag does not carry it over.
+4. On go (or immediately, when `--auto`/`--yes` was passed) — pick the posting
+   method (GitHub posts are ALWAYS English — translate the draft first if it
+   was rendered in another language):
    - **Mike's own PR** → `gh pr comment $ARGUMENTS --body-file <tmp>` — never
      `--approve`/`--request-changes` on self-PRs (GitHub blocks self-review anyway).
    - **Someone else's PR** → `gh pr review $ARGUMENTS --{approve|request-changes} --body-file <tmp>`.
