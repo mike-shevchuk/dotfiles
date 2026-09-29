@@ -59,7 +59,6 @@ return {
         weeklies = base .. "/weekly",
         monthlies = base .. "/monthly",
         templates = tpl,
-        template_new_note = tpl .. "/daily.md",
         template_new_daily = tpl .. "/daily.md",
         template_new_weekly = tpl .. "/weekly.md",
         template_new_monthly = tpl .. "/monthly.md",

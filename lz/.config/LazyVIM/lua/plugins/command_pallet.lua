@@ -99,7 +99,11 @@ vim.api.nvim_create_user_command("PrDiff", function(o)
     return
   end
   vim.notify(("PrDiff: fetching %s + %s …"):format(data.baseRefName, data.headRefName))
-  vim.fn.system({ "git", "fetch", "origin", data.baseRefName, data.headRefName })
+  local fetch = vim.fn.system({ "git", "fetch", "origin", data.baseRefName, data.headRefName })
+  if vim.v.shell_error ~= 0 then -- fork PR / offline → refs missing or stale; don't diff silently
+    vim.notify("git fetch failed (fork PR or offline?):\n" .. fetch, vim.log.levels.ERROR)
+    return
+  end
   vim.cmd(("DiffviewOpen origin/%s...origin/%s"):format(data.baseRefName, data.headRefName))
 end, {
   nargs = "?",
@@ -323,7 +327,6 @@ local git_review_palette = {
   -- ───── 🐍 Python ─────────────────────────────────────────────────────────
   -- Fuzzy hint: "python" / "venv"
   { cmd = "VenvSelect",                                desc = "Python · select venv (fix pyright imports)" },
-  { cmd = "VenvSelectCached",                          desc = "Python · use cached venv for this dir" },
   { cmd = "lua vim.lsp.buf.format()",                  desc = "Python · format buffer (ruff)" },
   { cmd = "lua vim.lsp.buf.code_action()",             desc = "Python · code action (auto-import / quick-fix)" },
   { cmd = "lua vim.lsp.buf.references()",              desc = "Python · find references (where used)" },

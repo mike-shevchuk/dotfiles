@@ -13,10 +13,11 @@ return {
   },
   ft = "python",
   -- cmd-тригери: виклик із палітри працює в будь-якому буфері, не лише .py
-  cmd = { "VenvSelect", "VenvSelectCached" },
+  -- VenvSelectCached існує лише при cached_venv_automatic_activation=false;
+  -- дефолт (true) і так активує кешований venv сам → команда не потрібна.
+  cmd = { "VenvSelect" },
   keys = {
     { "<leader>vs", "<cmd>VenvSelect<cr>", desc = "Python: select venv", mode = "n" },
-    { "<leader>vc", "<cmd>VenvSelectCached<cr>", desc = "Python: use cached venv", mode = "n" },
   },
   opts = {
     settings = {
