@@ -198,6 +198,38 @@ is a commit, so the ago-count reflects when the check actually ran.
 Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps done
 — include the Bugbot mirror PR in parens when it exists), then:
 
+0. **Progress in percent, then the work items.** Always both, in this order —
+   the bar answers "how far in", the table answers "far in what". Percent is
+   `done / total` of *execution units*, not of pipeline steps: if a plan splits
+   a task (6a/6b), each half is its own unit, and a task in flight counts as
+   done only when it is committed AND its review came back clean.
+
+   ```
+     █████████████████████████░░░░░░░░░░░░░░░  60%   9/15 units
+
+     PR 1  ████████████████████████████████████████ 100%  8/8  MERGED
+     PR 2  ██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  17%  1/6
+   ```
+
+   Render one bar per slice/PR when the plan ships in slices, plus the overall
+   bar. 40 cells wide, `█` filled and `░` empty, so bars stay comparable
+   between runs. If there is no plan with numbered tasks, skip the bars and say
+   so — never invent a denominator.
+
+   Then the work-item table, one row per unit, in plan order:
+
+   `# | Task | Status | Created | Done | Duration | Commits`
+
+   - **Created** = when work on it started: the dispatch line in the SDD ledger
+     if there is one, else the first commit that touches it. Local time,
+     `YYYY-MM-DD HH:MM`.
+   - **Done** = the timestamp of the commit that completed it (`git log
+     --format='%ad' --date=format:'%Y-%m-%d %H:%M'`), or `—` while it is open.
+   - **Duration** = Done − Created in minutes, `—` when either end is missing.
+     **Measured only.** Never estimate a duration for a task with no commit;
+     a forecast belongs in "What's left", clearly labelled as extrapolation.
+   - Status: ✅ done · 🔄 in flight · ⏳ todo · ❌ blocked · 🩹 in fix round R/5.
+
 1. **Recent git** — the summarised reflog list + commits-ahead + dirty count.
 2. **Pipeline checklist table**: `Step | Status | Commits ago | Evidence`. Use
    ✅ done / ⏳ pending / ⏭ n-a. "Commits ago" = `git rev-list --count
@@ -215,6 +247,21 @@ Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps don
    `CR✓-3` means "3 unreviewed commits — re-run /code-review". Same logic for JT.
 6. **What's left** — 1–3 bullets of the next concrete actions (the pending
    steps + stale re-runs).
+
+7. **Timeline** — the branch's own history as measured wall-clock, so the
+   cost of the work is visible next to its state:
+
+   ```
+     spec        2026-09-02 10:45
+     plan        2026-09-02 11:14   +29m
+     first task  2026-09-02 12:18   +64m
+     last commit 2026-09-02 15:21   +183m
+     ────────────────────────────────────
+     elapsed     4h 07m · 8 tasks · 3 fix rounds
+   ```
+
+   Include fix rounds and review cycles in the count — on a real branch they
+   dominate the elapsed time, and hiding them makes every future estimate wrong.
 
 End with a Summary block (3–7 bullets, lead with the most important number),
 per the analysis-summary rule.

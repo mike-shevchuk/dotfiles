@@ -241,8 +241,10 @@ Then **prove the file is reachable before you hand over the URL** — its path u
 the hub root IS the URL path:
 
 ```bash
-REL="${OUT#*/zettelkasten/claude_code/}<file>"   # path relative to the hub root
-curl -s -o /dev/null -w "%{http_code}\n" "http://$(ipconfig getifaddr en0):8890/$REL"
+REL="${OUT%/}/<file>"; REL="${REL#*/zettelkasten/claude_code/}"   # path relative to the hub root
+URL="http://$(ipconfig getifaddr en0):8890/$REL"
+echo "━━━ xh ━━━  xh -h HEAD $URL" >&2
+xh -h HEAD "$URL" | head -1        # expect: HTTP/1.1 200 OK
 ```
 
 Anything but `200` means stop and diagnose — usually the file isn't under the hub

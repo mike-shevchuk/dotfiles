@@ -1,9 +1,7 @@
 {
-  "model": "claude-fable-5[1m]",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
-  "teammateMode": "tmux",
   "hooks": {
     "PreToolUse": [
       {
@@ -12,6 +10,15 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh working || true"
           }
         ]
       }
@@ -23,6 +30,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/notification.ts --notify"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh waiting || true"
           }
         ]
       }
@@ -38,6 +49,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/cost-logger.ts"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh done || true"
           }
         ]
       }
@@ -63,12 +78,36 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=~/.claude/hooks/herdr-agent-state.sh; [ -f \"$f\" ] && bash \"$f\" session || true",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh working || true"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",
-    "padding": 2
+    "padding": 2,
+    "refreshInterval": 30
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
@@ -76,12 +115,16 @@
     "code-simplifier@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "huggingface-skills@claude-plugins-official": true,
+    "huggingface-skills@claude-plugins-official": false,
     "claude-md-management@claude-plugins-official": true,
-    "telegram@claude-plugins-official": true,
+    "telegram@claude-plugins-official": false,
     "linear@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
-    "ralph-skills@ralph-marketplace": true
+    "ralph-skills@ralph-marketplace": false,
+    "ponytail@ponytail": true,
+    "hookify@claude-plugins-official": true,
+    "agent-sdk-dev@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "ralph-marketplace": {
@@ -89,9 +132,19 @@
         "source": "github",
         "repo": "snarktank/ralph"
       }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
     }
   },
   "effortLevel": "high",
+  "tui": "fullscreen",
   "theme": "dark",
-  "voiceEnabled": true
+  "teammateMode": "tmux",
+  "agentPushNotifEnabled": true,
+  "voiceEnabled": true,
+  "model": "claude-sonnet-5"
 }
