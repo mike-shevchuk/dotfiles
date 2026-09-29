@@ -154,8 +154,24 @@ return {
     },
 
     config = function()
+      local tsl = require("telescope.actions.layout")
       require("telescope").setup({
         defaults = {
+          -- «Resize» будь-якого telescope-вікна (вкл. commander/legendary):
+          -- <M-r> — наступний layout, <M-R> — попередній, <M-p> — прев'ю.
+          cycle_layout_list = { "vertical", "horizontal", "flex", "center" },
+          mappings = {
+            i = {
+              ["<M-r>"] = tsl.cycle_layout_next,
+              ["<M-R>"] = tsl.cycle_layout_prev,
+              ["<M-p>"] = tsl.toggle_preview,
+            },
+            n = {
+              ["<M-r>"] = tsl.cycle_layout_next,
+              ["<M-R>"] = tsl.cycle_layout_prev,
+              ["<M-p>"] = tsl.toggle_preview,
+            },
+          },
           vimgrep_arguments = {
             "rg",
             "--color=never",

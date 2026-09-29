@@ -28,3 +28,14 @@ vim.api.nvim_create_autocmd("ColorScheme", {
   callback = diffview_comfort_hl,
 })
 diffview_comfort_hl() -- apply now (colorscheme is already set at this point)
+
+-- Non-standard justfile names → `just` filetype so treesitter (just.so) highlights
+-- them: justfile.v2 (the main console) + .just_dir_2/<topic>.just topic files.
+vim.filetype.add({
+  filename = {
+    ["justfile.v2"] = "just",
+  },
+  pattern = {
+    [".*%.just"] = "just",
+  },
+})

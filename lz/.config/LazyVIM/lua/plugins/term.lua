@@ -1,3 +1,24 @@
+-- Dedicated, reusable toggle terminals (cached across presses → real toggle,
+-- not a fresh terminal each time). `zsh -ic` loads the interactive rc so SHELL
+-- FUNCTIONS (claude, jb2b) resolve.
+local named_terms = {}
+local function toggle_named(key, cmd, name)
+  if not named_terms[key] then
+    named_terms[key] = require("toggleterm.terminal").Terminal:new({
+      cmd = cmd,
+      direction = "float",
+      hidden = true,
+      display_name = name,
+      -- big float so fzf lists + recipe output fit (was cramped)
+      float_opts = {
+        width = function() return math.floor(vim.o.columns * 0.9) end,
+        height = function() return math.floor(vim.o.lines * 0.9) end,
+      },
+    })
+  end
+  named_terms[key]:toggle()
+end
+
 local tterm = {
   "akinsho/nvim-toggleterm.lua",
   branch = "main",
@@ -13,6 +34,24 @@ local tterm = {
     { "<leader>tv", "<cmd>ToggleTerm direction=vertical<CR>", desc = "terminal vertical" },
     { "<leader>th", "<cmd>ToggleTerm direction=horizontal<CR>", desc = "terminal horizontal" },
     { "<leader>tw", "<cmd>ToggleTerm direction=tab<CR>", desc = "terminal tab" },
+    -- Dedicated agent / console terminals (toggle: open once, hide/show after)
+    {
+      "<leader>tc",
+      function() toggle_named("claude", "zsh -ic claude", "claude") end,
+      desc = "Terminal: Claude agent",
+    },
+    -- Run a justfile recipe from nvim WITH args: jrun fzf-picks (params shown),
+    -- prompts for args, then runs jb2b <recipe> <args> with the nested-just banner.
+    {
+      "<leader>tj",
+      function() toggle_named("jb2b_run", "zsh -ic jrun", "jb2b run") end,
+      desc = "Terminal: jb2b run recipe (+args)",
+    },
+    {
+      "<leader>tJ",
+      function() toggle_named("jb2b_list", "zsh -ic 'jb2b --list; exec zsh'", "jb2b list") end,
+      desc = "Terminal: jb2b list recipes",
+    },
   },
 }
 
