@@ -25,11 +25,18 @@ function M.invalidate() stripCacheAt = 0 end
 -- A window whose app has quit abruptly can linger in PaperWM's list: its id no
 -- longer resolves to a live window. It surfaces as a phantom "0%" column you
 -- cannot focus, and touching its dead Accessibility element can stall — a real
--- source of the sluggishness. Detect purely by id (no AX call).
-local function isDead(w)
+-- source of the sluggishness. Detect purely by id against ONE snapshot of live
+-- ids per pass: hs.window.get(id) re-scans every app's windows on each call.
+local function liveIds()
+  local set = {}
+  for _, w in ipairs(hs.window.allWindows()) do set[w:id()] = w end
+  return set
+end
+
+local function isDead(w, live)
   if not w then return true end
   local id = w:id()
-  return not id or hs.window.get(id) == nil
+  return not id or not live[id]
 end
 
 -- Prune dead windows from PaperWM's own state so the phantom column disappears
@@ -44,20 +51,22 @@ function M.pruneDead(space)
   if not pwm then return false end
   space = space or hs.spaces.focusedSpace()
   local removed = false
+  local live = liveIds()
   for _ = 1, 12 do
     local list = pwm.state.windowList(space)
     if not list then break end
     local target, tcol, trow
     for c = 1, #list do
       for r = 1, #list[c] do
-        if isDead(list[c][r]) then target, tcol, trow = list[c][r], c, r; break end
+        if isDead(list[c][r], live) then target, tcol, trow = list[c][r], c, r; break end
       end
       if target then break end
     end
     if not target then break end
     pwm.state.windowIndex(target, true)                 -- drop from the id index (by id)
-    table.remove(list[tcol], trow)                      -- drop from the nested list
-    if #list[tcol] == 0 then table.remove(list, tcol) end -- drop the now-empty column
+    -- through the column proxy: its __newindex drops an emptied column and
+    -- re-runs update_index, so the surviving rows keep correct indices
+    table.remove(pwm.state.windowList(space, tcol), trow)
     pcall(function() pwm.state.xPositions(space)[target:id()] = nil end)
     pcall(function() pwm.state.uiWatcherDelete(target:id()) end)
     removed = true
@@ -81,9 +90,10 @@ local function computeStrip()
   -- so a prune that can't fully clear one never thrashes; the column loop below
   -- also skips any dead entry defensively, so the widget never renders or
   -- measures one even before the prune lands.
+  local live = liveIds()
   if list then
     for c = 1, #list do
-      if isDead(list[c] and list[c][1]) then
+      if isDead(list[c] and list[c][1], live) then
         local now = hs.timer.secondsSinceEpoch()
         if now - lastPrune > 3 then
           lastPrune = now
@@ -104,10 +114,12 @@ local function computeStrip()
   -- That is what lets the map show what is off-screen.
   local xpos = pwm.state.xPositions(space)
   local columns = {}
+  local stripOf = {} -- PaperWM column -> strip column (they differ past a dead one)
   local left, right
   if list then
     for col = 1, #list do
-      if not isDead(list[col][1]) then
+      if not isDead(list[col][1], live) then
+        stripOf[col] = #columns + 1
         local wins = {}
         for row = 1, #list[col] do wins[#wins + 1] = list[col][row] end
         local first = wins[1]
@@ -118,6 +130,7 @@ local function computeStrip()
           ratio = canvas.w > 0 and (w / canvas.w) or 0,
           vx = vx,
           px = w,
+          pcol = col,
         }
         left = left and math.min(left, vx) or vx
         right = right and math.max(right, vx + w) or (vx + w)
@@ -129,7 +142,7 @@ local function computeStrip()
   -- hard to get back — surface them next to it
   local floating = {}
   for id, _ in pairs(pwm.state.is_floating) do
-    local w = hs.window.get(id)
+    local w = live[id]
     if w and w:isVisible() and (hs.spaces.windowSpaces(w) or {})[1] == space then
       floating[#floating + 1] = w
     end
@@ -141,7 +154,7 @@ local function computeStrip()
   -- macOS intermittently reports no focused window (notably right after a
   -- click on an overlay). Fall back to the last column we knew about, so the
   -- map keeps its chips and chevrons instead of going blank.
-  local col = index and index.col or nil
+  local col = index and stripOf[index.col] or nil
   if col then
     M.lastCol = col
   elseif M.lastCol and M.lastCol <= #columns then
@@ -218,24 +231,8 @@ function M.setWidth(win, ratio)
   afterChange()
 end
 
--- PaperWM's own full_width action reads hs.window.focusedWindow(), which is
--- intermittently nil right after a click on an overlay — keep our own memory
--- of the previous width instead so the widget never depends on focus
-local prevRatio = {}
-
-function M.fullWidth(win)
-  local pwm = paperwm.pwm
-  if not (pwm and win) then return end
-  local canvas = pwm.windows.getCanvas(win:screen())
-  local cur = win:frame().w / canvas.w
-  if cur > 0.97 and prevRatio[win:id()] then
-    M.setWidth(win, prevRatio[win:id()])
-    prevRatio[win:id()] = nil
-  else
-    prevRatio[win:id()] = cur
-    M.setWidth(win, 1.0)
-  end
-end
+-- widget chip / menu: same toggle (and same memory) as the hotkey
+function M.fullWidth(win) M.toggleFullWidth(win) end
 
 -- Some apps refuse to shrink past a hard minimum (Chromium stops at ~500px).
 -- On a narrow display that can be 40%+ of the screen, so a width you pick below
@@ -318,6 +315,11 @@ end
 function M.moveColumn(space, from, to)
   local pwm = paperwm.pwm
   if not pwm or from == to then return end
+  -- callers pass strip indices; translate to PaperWM's (dead columns are skipped)
+  local s = M.strip()
+  local a, b = s and s.columns[from], s and s.columns[to]
+  if not (a and b) then return end
+  from, to = a.pcol, b.pcol
   local list = pwm.state.windowList(space)
   if not (list and list[from] and list[to]) then return end
   local column = table.remove(list, from)
@@ -370,11 +372,11 @@ end
 -- looked dead. Setting the intent directly has no race at all.
 M.beforeFull = {}
 
-function M.toggleFullWidth()
+function M.toggleFullWidth(win)
   local pwm = paperwm.pwm
   if not pwm then return end
 
-  local win = hs.window.focusedWindow()
+  win = win or hs.window.focusedWindow()
   if not win then
     local cur = M.strip()
     local e = cur and cur.col and cur.columns[cur.col]
@@ -418,16 +420,30 @@ function M.toggleFullscreen()
 
   if prev then
     M.zoomed[id] = nil
+    if prev.floating then
+      -- it floated before the zoom: stay floating, just give the frame back
+      win:setFrame(prev.frame)
+      afterChange()
+      hs.alert.show("⤢ back", 0.8)
+      return
+    end
     if pwm.floating.isFloating(win) then pwm.floating.toggleFloating(win) end
-    if prev.ratio then paperwmfit.setDesired(win, prev.ratio) end
-    paperwmfit.refit()
-    afterChange()
+    -- setWidth, not setDesired+refit: refit is a no-op while fit mode is off,
+    -- and the window rejoins the row at its full-screen frame. Wait for the
+    -- retile toggleFloating kicks off, as the zoom path does.
+    hs.timer.doAfter(hs.window.animationDuration + 0.08, function()
+      M.setWidth(win, prev.ratio or 0.5)
+    end)
     hs.alert.show("⤢ back to the row", 0.8)
     return
   end
 
   local canvas = pwm.windows.getCanvas(win:screen())
-  M.zoomed[id] = { ratio = canvas.w > 0 and (win:frame().w / canvas.w) or nil }
+  M.zoomed[id] = {
+    ratio = canvas.w > 0 and (win:frame().w / canvas.w) or nil,
+    floating = pwm.floating.isFloating(win),
+    frame = win:frame(),
+  }
 
   if not pwm.floating.isFloating(win) then pwm.floating.toggleFloating(win) end
   -- toggleFloating retiles the space, so fill the screen once that has settled
