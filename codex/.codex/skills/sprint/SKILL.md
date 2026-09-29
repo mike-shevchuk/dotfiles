@@ -94,8 +94,8 @@ Run all of these simultaneously:
 **2a. Todoist — Back2Back project tasks**
 ```bash
 source ~/dotfiles/.env
-curl -s "https://api.todoist.com/api/v1/tasks" \
-  -H "Authorization: Bearer $TODOIST_TOKEN" | \
+xh -b --ignore-stdin GET "https://api.todoist.com/api/v1/tasks" \
+  "Authorization:Bearer $TODOIST_TOKEN" | \
 python3 -c "
 import json, sys
 obj = json.load(sys.stdin)
@@ -118,10 +118,9 @@ for t in tasks:
 **Updating Todoist descriptions** — after codebase analysis (Step 3), for each Todoist task being worked this sprint, optionally PATCH the description with key findings:
 ```bash
 source ~/dotfiles/.env
-curl -s -X POST "https://api.todoist.com/api/v1/tasks/{TASK_ID}" \
-  -H "Authorization: Bearer $TODOIST_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"description\": \"<codebase findings, file:line, next step>\"}"
+xh -b --ignore-stdin POST "https://api.todoist.com/api/v1/tasks/{TASK_ID}" \
+  "Authorization:Bearer $TODOIST_TOKEN" \
+  description="<codebase findings, file:line, next step>"
 ```
 Only update if the codebase analysis adds meaningful context not already in the description. Keep it short (3–5 lines max).
 

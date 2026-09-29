@@ -21,3 +21,8 @@
     done
     unset _repo
 }
+
+# The && chain above returns false when auto-pull is off (the default), so `source`
+# sees a non-zero status and the loader misreports a clean no-op as "Failed to load".
+# Force a 0 exit so a deliberate no-op isn't flagged as a failure.
+:

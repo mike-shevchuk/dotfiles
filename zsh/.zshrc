@@ -82,7 +82,24 @@ zinit cdreplay -q   # replay completion definitions captured by zinit
 # fzf-tab styling (plugin loads in .zsh_zinit; without these it's barely useful)
 zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'   # case-insensitive
 zstyle ':completion:*:descriptions' format '[%d]'
-zstyle ':fzf-tab:complete:cd:*' fzf-preview 'ls --color=auto -1 $realpath'
+# cd → directory contents (eza)
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always --group-directories-first $realpath 2>/dev/null || ls -1 $realpath'
+# git — diff for staging, log for switching, show for history subcommands
+zstyle ':fzf-tab:complete:git-(add|restore|diff|stage):*' fzf-preview 'git diff --color=always -- $word'
+zstyle ':fzf-tab:complete:git-(checkout|switch):*' fzf-preview 'git log --color=always --oneline -30 $word 2>/dev/null'
+zstyle ':fzf-tab:complete:git-(show|log|revert|cherry-pick|rebase|reset):*' fzf-preview 'git show --color=always $word 2>/dev/null'
+# docker — matching containers/images
+zstyle ':fzf-tab:complete:docker-(run|exec|start|stop|restart|rm|kill|logs|inspect|attach):*' fzf-preview 'docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | grep -i -- $word'
+# systemctl units (Linux)
+zstyle ':fzf-tab:complete:systemctl-*:*' fzf-preview 'SYSTEMD_COLORS=1 systemctl status -- $word 2>/dev/null'
+# processes for kill/ps
+zstyle ':fzf-tab:complete:(kill|ps):*' fzf-preview 'ps -p $word -o pid,pcpu,pmem,comm,args 2>/dev/null'
+# env var / parameter value
+zstyle ':fzf-tab:complete:(-command-|-parameter-|-brace-parameter-|export|unset|expand):*' fzf-preview 'echo ${(P)word}'
+# man pages
+zstyle ':fzf-tab:complete:(\\|*/|)man:*' fzf-preview 'man $word 2>/dev/null | col -bx | bat -l man -p --color=always 2>/dev/null || man $word 2>/dev/null'
+# generic fallback — bat for files, eza for dirs
+zstyle ':fzf-tab:complete:*:*' fzf-preview '[[ -d $realpath ]] && eza -1 --color=always $realpath 2>/dev/null || bat --style=numbers --color=always --line-range=:200 $realpath 2>/dev/null'
 zstyle ':fzf-tab:*' switch-group ',' '.'
 
 # fzf shell integration: CTRL-R history, CTRL-T files, ALT-C cd
@@ -100,6 +117,17 @@ fi
 # zoxide — smarter cd (z <dir>, zi = interactive fzf picker); replaces rupa/z
 if command -v zoxide >/dev/null 2>&1; then
     eval "$(zoxide init zsh)"
+    # z-prune — drop DB entries whose directory no longer exists (stale worktrees,
+    # deleted branches). Those dead-but-high-ranked paths are why `z <query>` jumps
+    # wrong. When `z` still guesses badly among LIVE dirs, use `zi <query>` (fzf picker)
+    # or add a keyword: `z b2b fast` instead of `z fast`.
+    z-prune() {
+        local p n=0
+        while IFS= read -r p; do
+            [[ -d "$p" ]] || { zoxide remove "$p" && (( ++n )) }
+        done < <(zoxide query --list)
+        echo "z-prune: removed $n stale entr$([[ $n == 1 ]] && echo y || echo ies)"
+    }
 fi
 
 # Initialize pyenv (after zinit to avoid conflicts).
@@ -324,6 +352,17 @@ alias gd='git diff'
 alias gco='git checkout'
 alias gb='git branch'
 alias git_dog="git log --all --decorate --oneline --graph"
+
+# forgit — interactive git via fzf. `gi` prefix = "git interactive"; none of these
+# collide with the g* aliases above. (plugin loads in .zsh_zinit; FORGIT_NO_ALIASES=1)
+alias gia='forgit::add'          # stage files (multi-select + diff preview)
+alias gid='forgit::diff'         # browse a diff
+alias gil='forgit::log'          # browse the log
+alias gico='forgit::checkout::file'   # discard changes in picked files
+alias gib='forgit::switch::branch'    # switch branch
+alias gis='forgit::stash::show'  # browse stashes
+alias gifx='forgit::fixup'       # pick the commit to --fixup into
+alias giwt='forgit::worktree'    # worktree picker (rescue-serverless uses worktrees)
 
 # Python
 alias pip_freeze="pip list --not-required --format freeze"
@@ -846,5 +885,6 @@ if [ -d "$HOME/.bun" ]; then
   [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
 fi
 
-# Added by Antigravity IDE
-export PATH="/Users/mikeshevchuk/.antigravity-ide/antigravity-ide/bin:$PATH"
+# Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
+# PATH entry on the Orange Pi, which shares this file via stow)
+[[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"

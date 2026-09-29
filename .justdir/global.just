@@ -10,8 +10,8 @@
 # CONVENTIONS (per ~/CLAUDE.md justfile visibility rules)
 # ═══════════════════════════════════════════════════════
 # Every recipe echoes progress to stderr — `→ doing X` before work,
-# `OK`/`FAIL` after. Recipes that hit the network show the curl command
-# inside a `━━━ curl ... ━━━` banner so it's copy-pasteable.
+# `OK`/`FAIL` after. Recipes that hit the network show the xh command
+# inside a `━━━ xh ... ━━━` banner so it's copy-pasteable.
 #
 # ZSH SHORTCUTS (defined in zsh/.zshrc)
 # ═════════════════════════════════════
@@ -26,6 +26,197 @@
 # quoted/spaced args and empty positionals. (Only affects top-level $@ in recipe
 # bodies; awk $1 and shell-function args are unaffected.)
 set positional-arguments
+
+# Browse every HTML report under ~/zettelkasten/claude_code and open one.
+# Serves the whole tree once (dir listing = "see all"), fzf-picks one to open.
+[group('reports')]
+reports filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    root="$HOME/zettelkasten/claude_code"
+    [ -d "$root" ] || { echo "  FAIL: $root not found" >&2; exit 1; }
+    echo "→ [1/3] picking a free port..." >&2
+    PORT=""
+    for P in 8899 8898 8897 8896 8895 8894; do
+        lsof -nP -iTCP:$P -sTCP:LISTEN >/dev/null 2>&1 || { PORT=$P; break; }
+    done
+    [ -n "$PORT" ] || { echo "  FAIL: no free port 8894-8899" >&2; exit 1; }
+    echo "→ [2/3] serving $root in tmux (session 'reports', port $PORT)..." >&2
+    tmux has-session -t reports 2>/dev/null && tmux kill-session -t reports 2>/dev/null || true
+    tmux new-session -d -s reports -c "$root" "python3 -m http.server $PORT --bind 0.0.0.0"
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)
+    echo "  OK — index: http://$ip:$PORT/   (dir listing of ALL reports)" >&2
+    echo "→ [3/3] pick a page to open (fzf)..." >&2
+    rel=""
+    if command -v fzf >/dev/null && command -v fd >/dev/null; then
+        rel=$(fd -e html {{filter}} "$root" 2>/dev/null | sed "s#$root/##"               | fzf --prompt="report > " --height=70% --reverse                     --preview "echo http://$ip:$PORT/{}") || true
+    fi
+    if [ -n "$rel" ]; then
+        url="http://$ip:$PORT/$rel"
+    else
+        url="http://$ip:$PORT/"
+        echo "  (no pick — opening the index listing)" >&2
+    fi
+    echo "  → open $url" >&2
+    echo "━━━ open '$url' ━━━" >&2
+    open "$url" 2>/dev/null || echo "  (open failed — paste the URL in a browser)" >&2
+    echo "  stop later: tmux kill-session -t reports" >&2
+
+# bun ↔ justfile: this recipe body IS a TypeScript program run by bun (just runs
+# shebang recipes in any language). THE hub for your notes tree — it regenerates the
+# curated index (pin/rename/preview/search, via _hub.py if present) then serves the
+# tree on fixed :8890 with LIVE-RELOAD. Native Bun.serve, 0 npm deps, survives a
+# worktree. Replaces the old manual `python _hub.py; python -m http.server`.
+#   jg hub        -> regenerate + serve ~/zettelkasten/claude_code on :8890
+#   jg hub 8891   -> other port    ·    /_all = flat listing of every file
+#   :8890 busy?   -> jg hub-fix    (frees the port + restarts)
+[group('reports')]
+hub port="8890" root="~/zettelkasten/claude_code":
+    #!/usr/bin/env bun
+    import { watch, existsSync } from "node:fs";
+    import { readdir, stat } from "node:fs/promises";
+    import { networkInterfaces } from "node:os";
+    import { join, extname, relative } from "node:path";
+
+    const PORT = Number("{{port}}");
+    const HOME = process.env.HOME!;
+    const ROOT = "{{root}}".replace(/^~/, HOME);
+    const lanIP = Object.values(networkInterfaces()).flat()
+      .find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
+
+    // 1) refresh the curated index.html (the rich pin/rename/preview hub) via its
+    //    generator, if present — keeps the landing page current with new articles.
+    const gen = join(ROOT, "_hub.py");
+    if (existsSync(gen)) {
+      console.error("→ regenerating index.html via _hub.py …");
+      const r = Bun.spawnSync(["python3", gen], { cwd: ROOT, stderr: "inherit" });
+      if (!r.success) console.error("  (_hub.py failed — serving the existing index.html)");
+    }
+
+    const RELOAD = `<script>new EventSource("/__reload").onmessage=()=>location.reload()</script>`;
+    const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
+    const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+    const clients = new Set<ReadableStreamDefaultController>();
+    try { watch(ROOT, { recursive: true }, () => { for (const c of clients) { try { c.enqueue("data: change\n\n"); } catch {} } }); } catch {}
+
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    function md(s: string): string {
+      s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => `<pre><code>${esc(c)}</code></pre>`);
+      s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>");
+      s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+      s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+      s = s.replace(/^[-*] (.*)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
+      return s.split(/\n\n+/).map(p => /^\s*<(h|ul|pre)/.test(p) ? p : `<p>${p}</p>`).join("\n");
+    }
+
+    async function walk(dir: string): Promise<string[]> {
+      const out: string[] = [];
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); } catch { return out; }
+      for (const e of entries) {
+        if (e.name.startsWith(".")) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...await walk(p));
+        else if (/\.(html?|md)$/i.test(e.name)) out.push(p);
+      }
+      return out;
+    }
+
+    // Flat listing of every html/md under a dir — the fallback for a folder with no
+    // index.html, and the /_all "see everything" view (catches files not in the
+    // curated hub yet).
+    async function dirListing(dir: string): Promise<string> {
+      const files = (await walk(dir)).sort();
+      const items = files.map(f => `<li><a href="/${relative(ROOT, f)}">${relative(ROOT, f)}</a></li>`).join("\n");
+      const label = relative(ROOT, dir) || "all files";
+      return `<!doctype html><meta charset=utf-8><title>hub — ${label}</title>${DARK}${RELOAD}<h1>🗂️ ${label} <span class=d>${files.length} files · ${ROOT.replace(HOME, "~")}</span></h1><ul>${items}</ul>`;
+    }
+
+    console.error(`→ serving ${ROOT.replace(HOME, "~")} on 0.0.0.0:${PORT} (bun, live-reload)`);
+    Bun.serve({
+      port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
+      async fetch(req) {
+        const p = new URL(req.url).pathname;
+        if (p === "/__reload") {
+          let self: ReadableStreamDefaultController;
+          return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
+            { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "connection": "keep-alive" } });
+        }
+        if (p === "/_all") return html(await dirListing(ROOT));
+        const rel = decodeURIComponent(p).replace(/^\/+/, "");
+        const path = rel === "" ? ROOT : join(ROOT, rel);
+        if (path !== ROOT && !path.startsWith(ROOT + "/")) return new Response("forbidden", { status: 403 });
+        let st;
+        try { st = await stat(path); } catch { return new Response("not found", { status: 404 }); }
+        if (st.isDirectory()) {
+          const idx = join(path, "index.html");     // the curated hub page at / (or a folder's own index.html)
+          try { if ((await stat(idx)).isFile()) return html((await Bun.file(idx).text()) + RELOAD); } catch {}
+          return html(await dirListing(path));
+        }
+        const ext = extname(path).toLowerCase();
+        if (ext === ".md") return html(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}` + md(await Bun.file(path).text()));
+        if (ext === ".html" || ext === ".htm") return html((await Bun.file(path).text()) + RELOAD);
+        return new Response(Bun.file(path));
+      },
+    });
+    const url = `http://${lanIP}:${PORT}/`;
+    console.error(`  OK — LAN index (curated): ${url}   ·   all files: ${url}_all`);
+    console.error(`━━━ hub ━━━  ${url}   (Ctrl-C to stop)`);
+
+# Bring the hub UP as a persistent detached tmux session (survives this shell).
+# `jg hub` = foreground with live logs; `jg hub-up` = background, keeps running.
+[group('reports')]
+hub-up port="8890":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmux kill-session -t hub 2>/dev/null || true
+    echo "━━━ just ━━━  tmux new -d -s hub  just -g hub {{port}}" >&2
+    tmux new-session -d -s hub "just -g hub {{port}}"
+    url=""
+    for _ in $(seq 1 15); do
+        url=$(tmux capture-pane -t hub -p 2>/dev/null | grep -oE 'http://[0-9.]+:[0-9]+/' | head -1)
+        [ -n "$url" ] && break
+        sleep 0.2
+    done
+    echo "  OK — hub in tmux session 'hub': ${url:-starting… (tmux attach -t hub)}" >&2
+    echo "  watch:  tmux attach -t hub   (detach = Ctrl-b d)" >&2
+    echo "  stop:   jg hub-down" >&2
+
+# Stop the detached hub session.
+[group('reports')]
+hub-down:
+    #!/usr/bin/env bash
+    if tmux kill-session -t hub 2>/dev/null; then echo "  OK — hub stopped" >&2; else echo "  hub was not running" >&2; fi
+
+# Fix a stuck hub: free the port (kill WHATEVER squats it — a stray `python -m
+# http.server`, an old articles-hub, a zombie bun), clear stale tmux sessions, then
+# start the merged hub fresh. Use whenever :8890 is held by the wrong thing.
+[group('reports')]
+hub-fix port="8890":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ [1/3] checking :{{port}} …" >&2
+    pids=$(lsof -nP -tiTCP:{{port}} -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            cmd=$(ps -p "$pid" -o comm= 2>/dev/null | xargs || true)
+            echo "   :{{port}} held by PID $pid ($cmd) — killing" >&2
+            kill "$pid" 2>/dev/null || true
+        done
+        sleep 0.6
+        pids=$(lsof -nP -tiTCP:{{port}} -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pids" ]; then echo "   still up — forcing (kill -9)" >&2; for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done; sleep 0.3; fi
+    else
+        echo "   :{{port}} already free" >&2
+    fi
+    echo "→ [2/3] clearing stale tmux sessions (hub, articles-hub) …" >&2
+    tmux kill-session -t hub 2>/dev/null || true
+    tmux kill-session -t articles-hub 2>/dev/null || true
+    echo "→ [3/3] starting the merged hub …" >&2
+    echo "━━━ just ━━━  just -g hub-up {{port}}" >&2
+    just -g hub-up {{port}}
 
 # Default: pop the chooser (use `jjg` from zsh for the grouped preview view)
 default:
@@ -183,7 +374,10 @@ git-status-all:
 # Delegates to ~/code/projctl (stowed) so its registry.conf + self-calls resolve.
 [group('projects')]
 proj *args:
-    @cd ~/code/projctl && just "$@"
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "━━━ projctl ━━━  cd ~/code/projctl && just ${*:-tui}" >&2
+    cd ~/code/projctl && exec just "$@"
 
 # --- Reddit daily digest ----------------------------------------------------
 
@@ -317,8 +511,8 @@ cron-list:
 [group('system')]
 ip:
     #!/usr/bin/env bash
-    echo "━━━ curl -s https://ifconfig.me ━━━" >&2
-    curl -s https://ifconfig.me && echo ""
+    echo "━━━ xh -b --ignore-stdin GET https://ifconfig.me/ip ━━━" >&2
+    xh -b --ignore-stdin GET https://ifconfig.me/ip && echo ""
 
 # Local weather, optional CITY arg (multi-word OK: `weather "New York"`)
 [group('system')]
@@ -327,8 +521,8 @@ weather city="":
     # URL-encode the city so spaces / non-ASCII work
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?format=3"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"; echo
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"; echo
 
 # Multi-day ASCII forecast from wttr.in. days=1|2|3 (wttr max is 3).
 [group('system')]
@@ -337,8 +531,8 @@ forecast city="" days="3":
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     # ?{{days}} limits days; F=hide follow line, M=metric wind, q=no header
     url="https://wttr.in/${city_enc}?{{days}}FMq"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Compact wttr.in view — morning/noon/evening/night summary table, narrower
 [group('system')]
@@ -346,8 +540,8 @@ forecast-narrow city="":
     #!/usr/bin/env bash
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?nFMq"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Resolve a city (or auto-detect via ip-api) → lat<TAB>lon<TAB>name on stdout
 [group('system')]
@@ -357,13 +551,13 @@ _resolve-location city="":
     set -uo pipefail
     if [ -z "{{city}}" ]; then
         geo_url="http://ip-api.com/json/?fields=city,lat,lon"
-        echo "━━━ curl -s '$geo_url' ━━━" >&2
-        curl -s "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        xh -b --ignore-stdin GET "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
     else
         city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
         geo_url="https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}"
-        echo "━━━ curl -s '$geo_url' ━━━" >&2
-        out=$(curl -s "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        out=$(xh -b --ignore-stdin GET "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
         [ -z "$out" ] && { echo "  FAIL — city '{{city}}' not found" >&2; exit 1; }
         printf '%s\n' "$out"
     fi
@@ -378,8 +572,8 @@ forecast-chart city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching 24h forecast for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    fc=$(curl -s "$url")
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$url")
     NAME="$name" JSON="$fc" python3 - <<'PY'
     import json, sys, os, math
     data = json.loads(os.environ['JSON'])
@@ -466,8 +660,8 @@ forecast-graph city="":
     #!/usr/bin/env bash
     city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
     url="https://wttr.in/${city_enc}?format=v2"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
 
 # Hourly numeric table for next 24h via Open-Meteo
 [group('system')]
@@ -479,8 +673,8 @@ forecast-hourly city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching next 24h for $name..." >&2
     url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
-    echo "━━━ curl -s '$url' ━━━" >&2
-    curl -s "$url" | jq -r '
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url" | jq -r '
         .hourly as $h
         | "  time              temp    precip   p(%)   wind",
           "  ──────────────────────────────────────────────────",
@@ -498,8 +692,8 @@ forecast-week city="":
     [ -z "$lat" ] && exit 1
     echo "[2/2] fetching 7-day forecast for $name (lat=$lat lon=$lon)..." >&2
     fc_url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=auto&forecast_days=7"
-    echo "━━━ curl -s '$fc_url' ━━━" >&2
-    fc=$(curl -s "$fc_url")
+    echo "━━━ xh -b --ignore-stdin GET '$fc_url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$fc_url")
     echo "$fc" | jq -r '
         def wmo(c):
             {"0":"☀️  clear","1":"🌤️  mostly clear","2":"⛅️ partly cloudy","3":"☁️  overcast",
@@ -729,17 +923,19 @@ todo-today:
     if [ -z "${TODOIST_TOKEN:-}" ]; then
         echo "TODOIST_TOKEN not set — add it to ~/dotfiles/.env" >&2; exit 1
     fi
-    echo "━━━ curl -s -G 'https://api.todoist.com/api/v1/tasks' --data-urlencode 'filter=today' -H 'Authorization: Bearer \$TODOIST_TOKEN' ━━━" >&2
-    curl -s -G "https://api.todoist.com/api/v1/tasks" \
-        --data-urlencode "filter=today" \
-        -H "Authorization: Bearer $TODOIST_TOKEN" \
+    echo "━━━ xh -b --ignore-stdin GET 'https://api.todoist.com/api/v1/tasks' filter==today 'Authorization:Bearer \$TODOIST_TOKEN' ━━━" >&2
+    xh -b --ignore-stdin GET "https://api.todoist.com/api/v1/tasks" \
+        filter==today \
+        "Authorization:Bearer $TODOIST_TOKEN" \
         | jq -r '.results[]? | "  • \(.content)   [\(.id)]"' 2>/dev/null \
         || echo "  (no tasks or jq missing)"
 
 # Forward to the project-local Claude statusline tokens recipe
 [group('claude/todoist')]
 tokens:
-    @cd ~/dotfiles && just tokens
+    #!/usr/bin/env bash
+    echo "━━━ just ━━━  cd ~/dotfiles && just tokens" >&2
+    cd ~/dotfiles && exec just tokens
 
 # --- Search / FS helpers ----------------------------------------------------
 
