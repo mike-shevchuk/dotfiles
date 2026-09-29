@@ -98,7 +98,7 @@ set -g @fingers-key 'u'
 #   * refresh-pane    — driven by focus/select HOOKS only (sets @pane_git …)
 # See the "Status refresh" hook block below.
 
-set -g status 2 #!important
+set -g status 3 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
 set -g status-interval 5 #!important
@@ -107,25 +107,40 @@ set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 # Left (row 0): mode badge (recolors by prefix/copy/zoom) + session name + count.
 # The trailing #() runs refresh-global once per interval (empty output).
 set -g status-left-length 50 #!important
-set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
+set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)#(~/dotfiles/tmux/scripts/fleet-sync.sh)' #!important
 
-# Right (row 0): python | claude | cpu | ram | AWS | kubectl | time | date.
+# Right (row 2): python | claude | cpu | ram | AWS | kubectl | time | date.
 # All segments read cached user-options (no subprocess).
 set -g status-right-length 200 #!important
 set -g status-right '#[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}#[fg=#cba6f7]#{?#{@claude},󰚩 #{@claude} ,}#[fg=#94e2d5] #{@cpu} #[fg=#74c7ec] #{@ram} #[fg=#f9e2af]#{?#{@aws},  #{@aws} ,}#[fg=#a6e3a1]#{?#{@kube}, 󱃾 #{@kube} ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
-# Row 1 (bottom of the 2-row status bar) — Variant C: active-pane context.
-# Left-filled: git branch · PR (gh, cached) · compact path · python of the
-# focused pane. Updated by the refresh-pane hooks, not every redraw.
-set -g status-format[1] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}' #!important
+# Window list spans rows 0+1 so long names (emoji + worktree) stay readable.
+# Split: windows 1..ceil(N/2) on row 0, the rest on row 1 (renumber-windows
+# keeps indexes contiguous). Items mirror tmux's default status-format[0]
+# (range=window → clickable, window-status-*-style colours, list=focus).
+set -g @win_split '#{e|+:#{e|/:#{e|+:#{session_windows},1},2},#{e|-:#{base-index},1}}'
+set -g @win_item '#[range=window|#{window_index} #{E:window-status-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-format}#[pop-default]#[norange default]'
+set -g @win_item_cur '#[range=window|#{window_index} list=focus #{E:window-status-style} #{E:window-status-current-style}#{?#{&&:#{window_last_flag},#{!=:#{E:window-status-last-style},default}}, #{E:window-status-last-style},}#{?#{&&:#{window_bell_flag},#{!=:#{E:window-status-bell-style},default}}, #{E:window-status-bell-style},#{?#{&&:#{||:#{window_activity_flag},#{window_silence_flag}},#{!=:#{E:window-status-activity-style},default}}, #{E:window-status-activity-style},}}]#[push-default]#{T:window-status-current-format}#[pop-default]#[norange list=on default]'
+# Row 0: status-left + first half of windows.
+set -g status-format[0] '#[align=left range=left #{E:status-left-style}]#[push-default]#{T;=/#{status-left-length}:status-left}#[pop-default]#[norange default]#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#{?#{e|<=:#{window_index},#{E:@win_split}},#{E:@win_item}#{?#{==:#{window_index},#{E:@win_split}},,#{E:window-status-separator}},},#{?#{e|<=:#{window_index},#{E:@win_split}},#{E:@win_item_cur}#{?#{==:#{window_index},#{E:@win_split}},,#{E:window-status-separator}},}}' #!important
+# Row 1: second half of windows.
+set -g status-format[1] '#[list=on align=#{status-justify}]#[list=left-marker]<#[list=right-marker]>#[list=on]#{W:#{?#{e|>:#{window_index},#{E:@win_split}},#{E:@win_item}#{?loop_last_flag,,#{E:window-status-separator}},},#{?#{e|>:#{window_index},#{E:@win_split}},#{E:@win_item_cur}#{?loop_last_flag,,#{E:window-status-separator}},}}' #!important
 
-# Window tabs — active tab is underlined (no bg block) so the gap with
-# inactive tabs is clearly visible; separator inherits window-status-style
-# which has no underline, so the underline doesn't run across the whole bar.
+# Row 2 — Variant C: active-pane context (left) + status-right (right, moved
+# off row 0 to give the window list room). Left-filled: git branch · PR (gh,
+# cached) · compact path of the focused pane (python lives in status-right). Updated by the
+# refresh-pane hooks, not every redraw.
+set -g status-format[2] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]' #!important
+
+# Badges: 🙋 (red) = fleet.json need_mike (scripts/fleet-sync.sh sets
+# @need_mike); ⏳/✋/✅ = @agent_state from Claude hooks (scripts/agent-state.sh).
+# Window tabs — active tab is a filled block in the window's OWN colour
+# (window-status-style fg + reverse) with ▶ ◀ markers; no fg switch inside
+# the current format, or the block would change colour mid-tab.
 set -g window-status-style 'fg=#6c7086' #!important
-set -g window-status-current-style 'fg=#89b4fa,bold,underscore' #!important
-set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
-set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-current-style 'bold,reverse' #!important
+set -g window-status-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},✋ ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ' #!important
+set -g window-status-current-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}▶ #{?#{==:#{pane_current_command},claude},󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},✋ ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ◀ ' #!important
 set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
 # -- Mode colors (native formats, no plugin) -----------------------------------
@@ -229,6 +244,18 @@ bind S display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
 # prefix + j → session switcher (fzf list + live preview: windows/panes/git/claude)
 bind j display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/session-switch.sh"
 
+# prefix + n → window switcher, CURRENT session (fzf + live pane snapshot)
+# prefix + N → window switcher, ALL sessions. hjkl left for panes.
+# Fleet (data: ~/.claude/fleet-board/fleet.json, owned by the lead session).
+# prefix 0 → lead window · prefix a → ⌨️mike window · prefix F → fleet board
+# (F was fpp, not installed). Name-based: renumber-windows shifts indexes.
+bind 0 select-window -t ':=lead'
+bind a select-window -t ':*mike'
+bind F display-popup -E -w 90% -h 70% "~/dotfiles/tmux/scripts/fleet-board.sh"
+
+bind n display-popup -E -w 85% -h 75% "~/dotfiles/tmux/scripts/window-switch.sh"
+bind N display-popup -E -w 85% -h 75% "~/dotfiles/tmux/scripts/window-switch.sh --all"
+
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
 
@@ -260,8 +287,8 @@ bind C-v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tm
 # prefix + M → delta side-by-side pager vs picked branch (fallback if delta missing)
 bind M display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh delta"
 
-# prefix + N → difftastic semantic diff vs picked branch (fallback if difft missing)
-bind N display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh difftastic"
+# prefix + X → difftastic semantic diff vs picked branch (fallback if difft missing; moved off N)
+bind X display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh difftastic"
 
 # prefix + O → pick branch → fzf list of changed files → open picked file in DiffView
 bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh files"
@@ -338,6 +365,23 @@ bind -n S-Down     if -F '#{alternate_on}' { send-keys S-Down }     { if -F '#{p
 bind -n M-Up       if -F '#{alternate_on}' { send-keys M-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
 bind -n M-Down     if -F '#{alternate_on}' { send-keys M-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
 
+
+# ── Seamless nvim <-> tmux pane nav (smart-splits.nvim aware) ────────────────
+# C-hjkl moves between panes with NO prefix. If the focused pane runs (n)vim/fzf
+# the key is forwarded so nvim's smart-splits handles it (move split, or cross
+# back into tmux). In a plain/claude pane it moves the pane directly. This is
+# the "fast switch nvim <-> Claude Code" — editor one side, claude the other.
+is_vim="ps -o state= -o comm= -t '#{pane_tty}' 2>/dev/null | grep -iqE '^[^TXZ ]+ +(\\S+\\/)?g?(view|l?n?vim?x?|fzf)(diff)?$'"
+bind -n C-h if-shell "$is_vim" 'send-keys C-h' 'select-pane -L'
+bind -n C-j if-shell "$is_vim" 'send-keys C-j' 'select-pane -D'
+bind -n C-k if-shell "$is_vim" 'send-keys C-k' 'select-pane -U'
+bind -n C-l if-shell "$is_vim" 'send-keys C-l' 'select-pane -R'
+# bare C-l used to clear-history; it's now pane-nav. Clear moved to prefix+C-l.
+# (next-window is still on the default prefix+n.)
+bind C-l send-keys C-l \; run 'sleep 0.2' \; clear-history
+
+# ── prefix+w: pick a git worktree → new window [ nvim │ claude ] in it ────────
+bind w display-popup -E -w 85% -h 75% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/wt-agent.sh"
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
