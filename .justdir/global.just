@@ -937,6 +937,182 @@ tokens:
     echo "━━━ just ━━━  cd ~/dotfiles && just tokens" >&2
     cd ~/dotfiles && exec just tokens
 
+# --- Claude Code profiles (окремі теки через CLAUDE_CONFIG_DIR) --------------
+#
+# default        = живий ~/.claude (не копіюється, stow як є)
+# <name>         = самодостатня копія у ~/.claude-profiles/<name>
+# активний стан  = ~/.claude-active (1 слово; відсутній → default)
+# zsh-обгортка   = zsh/.zsh_spaces/claude/claude-space.zsh задає
+#                  CLAUDE_CONFIG_DIR при запуску `claude`.
+#
+# Перемикання діє з НАСТУПНОГО запуску `claude`, не в живій сесії.
+# setup/save зберігають конфіг + plugins/ + .claude.json (MCP/trust; логін на macOS — Keychain),
+# але ВИКЛЮЧАЮТЬ рантайм-логи (jobs/ projects/ sessions/ ...) — новий
+# профіль наростить свої. Правила копіювання — одні, у _c-sync.
+#
+#   jg c-list            усі профілі + активний
+#   jg c-setup <name>    створити новий зі знімка активного (fail якщо є)
+#   jg c-save <name>     оновити знімок активного → <name>
+#   jg c-switch <name>   зробити активним (default = живий ~/.claude)
+#   jg c-delete <name>   видалити (gum confirm; не default, не активний)
+
+# Список профілів + активний (● = активний)
+[group('claude/profiles')]
+c-list:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    green='\033[32m'; cyan='\033[36m'; dim='\033[2m'; yellow='\033[33m'; reset='\033[0m'
+    profiles="$HOME/.claude-profiles"
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    printf "\n  ${cyan}%-3s%-14s %-8s %s${reset}\n" "" "PROFILE" "SIZE" "PATH"
+    mark=" "; [ "$active" = default ] && mark="●"
+    # default = живий ~/.claude (2ГБ+ рантайму) — не du-имо його заради колонки
+    printf "  ${green}%s${reset}  %-14s %-8s ${dim}%s${reset}\n" "$mark" "default" "live" "$HOME/.claude"
+    if [ -d "$profiles" ]; then
+        for d in "$profiles"/*/; do
+            [ -d "$d" ] || continue
+            name=$(basename "$d")
+            mark=" "; [ "$active" = "$name" ] && mark="●"
+            sz=$(du -sh "$d" 2>/dev/null | cut -f1)
+            printf "  ${green}%s${reset}  %-14s %-8s ${dim}%s${reset}\n" "$mark" "$name" "${sz:-?}" "$d"
+        done
+    fi
+    printf "\n  ${dim}активний:${reset} ${yellow}%s${reset}  ${dim}(діє з наступного запуску claude)${reset}\n\n" "$active"
+
+# Створити новий профіль зі знімка поточного активного (fail якщо існує)
+[group('claude/profiles')]
+c-setup name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ && "$name" != default ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-], не 'default' (блокує . .. / → \$HOME)" >&2; exit 1; }
+    dst="$HOME/.claude-profiles/$name"
+    [ -e "$dst" ] && { echo "  профіль '$name' вже існує — онови через: jg c-save $name" >&2; exit 1; }
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-dir \"$active\"" >&2; src=$(just -g _c-dir "$active")
+    echo "→ setup '$name' зі знімка '$active'..." >&2
+    echo "━━━ just ━━━  just -g _c-sync \"$src\" \"$dst\"" >&2
+    if ! just -g _c-sync "$src" "$dst"; then
+        echo "  ✗ setup провалився — прибираю частковий $dst" >&2
+        rm -rf "$dst"
+        exit 1
+    fi
+    echo "  OK — профіль '$name' створено. Активувати: jg c-switch $name" >&2
+
+# Оновити знімок поточного активного → <name> (rsync mirror; створює за потреби)
+[group('claude/profiles')]
+c-save name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ && "$name" != default ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-], не 'default' (блокує . .. / → \$HOME)" >&2; exit 1; }
+    dst="$HOME/.claude-profiles/$name"
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-dir \"$active\"" >&2; src=$(just -g _c-dir "$active")
+    [ "$src" = "$dst" ] && { echo "  '$name' зараз активний — він уже живий, зміни вже там" >&2; exit 1; }
+    echo "→ save '$active' → '$name'..." >&2
+    echo "━━━ just ━━━  just -g _c-sync \"$src\" \"$dst\"" >&2
+    just -g _c-sync "$src" "$dst"
+    echo "  OK — знімок збережено у '$name'" >&2
+
+# Зробити профіль активним (default = живий ~/.claude)
+[group('claude/profiles')]
+c-switch name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-]" >&2; exit 1; }
+    if [ "$name" != default ] && [ ! -d "$HOME/.claude-profiles/$name" ]; then
+        echo "  профіль '$name' не існує — створи: jg c-setup $name" >&2
+        exit 1
+    fi
+    echo "$name" > "$HOME/.claude-active"
+    echo "→ активний профіль: $name" >&2
+    echo "  ⚠ діє з НАСТУПНОГО запуску \`claude\` (не в поточній сесії)" >&2
+
+# Видалити профіль (заборонено default + активний; gum confirm)
+[group('claude/profiles')]
+c-delete name:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    name="$1"
+    [ "$name" = default ] && { echo "  'default' видалити не можна — це живий ~/.claude" >&2; exit 1; }
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-] (блокує ../ поза ~/.claude-profiles)" >&2; exit 1; }
+    dst="$HOME/.claude-profiles/$name"
+    [ -d "$dst" ] || { echo "  профіль '$name' не існує" >&2; exit 1; }
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    [ "$active" = "$name" ] && { echo "  '$name' зараз активний — спершу: jg c-switch default" >&2; exit 1; }
+    sz=$(du -sh "$dst" 2>/dev/null | cut -f1)
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Видалити профіль '$name' (${sz})?" || { echo "  скасовано" >&2; exit 0; }
+    else
+        printf "  Видалити профіль '%s' (%s)? [y/N] " "$name" "$sz" >&2; read -r ans
+        [ "$ans" = y ] || { echo "  скасовано" >&2; exit 0; }
+    fi
+    echo "→ rm -rf $dst" >&2
+    rm -rf "$dst"
+    echo "  OK — профіль '$name' видалено" >&2
+
+# Приватне: активний профіль (default, якщо файл відсутній/порожній). Єдине
+# джерело правди для читання ~/.claude-active (дзеркалиться в claude-space.zsh).
+[private]
+[group('claude/profiles')]
+_c-active:
+    #!/usr/bin/env bash
+    a=default; [ -f "$HOME/.claude-active" ] && a=$(cat "$HOME/.claude-active")
+    [ -z "$a" ] && a=default
+    printf '%s\n' "$a"
+
+# Приватне: конфіг-тека профілю (default → живий ~/.claude, інакше profiles/<name>).
+# Єдине джерело правди для мапи назва→тека.
+[private]
+[group('claude/profiles')]
+_c-dir name:
+    #!/usr/bin/env bash
+    [ "{{name}}" = default ] && printf '%s\n' "$HOME/.claude" || printf '%s\n' "$HOME/.claude-profiles/{{name}}"
+
+# Приватне: rsync конфіга src→dst, розіменовуючи stow-симлінки, виключаючи
+# рантайм-логи. Єдине джерело правди для правил копіювання (setup + save).
+[private]
+[group('claude/profiles')]
+_c-sync src dst:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="{{src}}"; dst="{{dst}}"
+    [ -d "$src" ] || { echo "  джерело не існує: $src" >&2; exit 1; }
+    # Рантайм-стан → якоримо на КОРІНЬ (ведучий /), щоб не зачепити однойменні
+    # теки в plugins/ (напр. plugins/*/cache). Патерни без / (*.sock, *.bak) —
+    # на будь-якій глибині. Масив = єдине джерело + резолвлений банер нижче.
+    excludes=(
+        --exclude '/jobs/' --exclude '/projects/' --exclude '/file-history/'
+        --exclude '/sessions/' --exclude '/shell-snapshots/' --exclude '/telemetry/'
+        --exclude '/cache/' --exclude '/paste-cache/' --exclude '/daemon/'
+        --exclude '/worktrees/' --exclude '/backups/' --exclude '/debug/'
+        --exclude '/chrome/' --exclude '/downloads/' --exclude '/ide/'
+        --exclude '/tasks/' --exclude '/channels/' --exclude '/session-env/'
+        --exclude '/history.jsonl' --exclude '/cost-log.jsonl' --exclude '/session-costs.log'
+        --exclude '/daemon.log' --exclude '/daemon.lock' --exclude '/daemon-*'
+        --exclude '/daemon.status.json'
+        --exclude '/gh-pr-status-cache.json' --exclude '/stats-cache.json'
+        --exclude '/.last-*'
+        --exclude '*.sock' --exclude '.DS_Store'
+        --exclude '*.bak' --exclude '*.bak.*' --exclude '*.bak-*'
+    )
+    mkdir -p "$dst"
+    echo "━━━ rsync ━━━  rsync -aL --delete ${excludes[*]} $src/ $dst/" >&2
+    # rc=24 (файли зникли під час копії живого ~/.claude) — доброякісний, не падаємо.
+    rc=0; rsync -aL --delete "${excludes[@]}" "$src/" "$dst/" || rc=$?
+    if [ "$rc" -ne 0 ] && [ "$rc" -ne 24 ]; then
+        echo "  ✗ rsync впав (rc=$rc)" >&2; exit "$rc"
+    fi
+    # default тримає стан (MCP, trust, onboarding) у ~/.claude.json — ПОЗА ~/.claude;
+    # профіль з CLAUDE_CONFIG_DIR читає $dst/.claude.json. Логін на macOS — у Keychain.
+    if [ "$src" = "$HOME/.claude" ] && [ -f "$HOME/.claude.json" ]; then
+        echo "  + ~/.claude.json → $dst/.claude.json" >&2; cp "$HOME/.claude.json" "$dst/.claude.json"
+    fi
+    sz=$(du -sh "$dst" 2>/dev/null | cut -f1)
+    echo "  OK — $dst (${sz})" >&2
+
 # --- Search / FS helpers ----------------------------------------------------
 
 # Fuzzy-pick a directory under ~ via fd + fzf, print path

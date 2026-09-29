@@ -29,6 +29,11 @@ purple='\033[38;2;190;130;255m'
 dim='\033[2m'
 reset='\033[0m'
 
+# Wrap a label in an OSC 8 hyperlink (clickable / copyable in supporting
+# terminals). Emits literal \033..\a so it composes into line2 and is decoded by
+# the final `printf %b`, same as the colour vars. One home for the escape format.
+osc8_link() { printf '\\033]8;;%s\\a%s\\033]8;;\\a' "$1" "$2"; }
+
 # Format token counts (e.g., 50k / 200k)
 format_tokens() {
   local num=$1
@@ -310,10 +315,12 @@ line2=""
 line2+="🤖 ${blue}${model_name}${reset}"
 
 # PR number + state from git remote (cached to avoid slowdown).
-# Cache line format: "number|state|isDraft|mirror|bugbot" (state = OPEN/MERGED/
-# CLOSED; mirror = Cursor Bugbot duplicate PR number, usually N+1 titled
-# "REVIEW: ..."; bugbot = count of UNRESOLVED review threads on the mirror —
-# i.e. open Bugbot findings NOT yet triaged by us; resolved OR reacted (+1/-1 by mike-shevchuk) threads don't count).
+# Cache line format: "number|state|isDraft|mirror|bugbot|bugsha|bugurl" (state =
+# OPEN/MERGED/CLOSED; mirror = Cursor Bugbot duplicate PR number, usually N+1
+# titled "REVIEW: ..."; bugbot = count of UNRESOLVED review threads on the mirror
+# — i.e. open Bugbot findings NOT yet triaged by us; resolved OR reacted (+1/-1 by
+# mike-shevchuk) threads don't count. bugsha = newest unresolved finding's commit
+# (abbrev); bugurl = mirror-PR link for the OSC 8 hyperlink on the 🐛 badge).
 pr_cache_file="/tmp/claude/pr-cache-${cwd//\//-}.txt"
 mkdir -p /tmp/claude
 pr_cache_max_age=120
@@ -323,53 +330,106 @@ pr_state=""
 pr_isdraft=""
 pr_mirror=""
 pr_bugbot=""
+pr_bugsha=""
+pr_bugurl=""
+pr_nwo=""
 if [ -f "$pr_cache_file" ]; then
   pr_cache_mtime=$(stat -c %Y "$pr_cache_file" 2>/dev/null || stat -f %m "$pr_cache_file" 2>/dev/null)
   pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
-    IFS='|' read -r pr_number pr_state pr_isdraft pr_mirror pr_bugbot < "$pr_cache_file"
+    IFS='|' read -r pr_number pr_state pr_isdraft pr_mirror pr_bugbot pr_bugsha pr_bugurl pr_nwo pr_mergeable < "$pr_cache_file"
   fi
 fi
 if $needs_pr_refresh && [ -n "$cwd" ]; then
   if command -v gh >/dev/null 2>&1; then
-    pr_json=$(cd "$cwd" && gh pr view --json number,state,isDraft 2>/dev/null || true)
+    pr_json=$(cd "$cwd" && gh pr view --json number,state,isDraft,mergeable 2>/dev/null || true)
     if [ -z "$pr_json" ]; then
       pr_remote_branch=$(cd "$cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
       if [ -n "$pr_remote_branch" ]; then
-        pr_json=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number,state,isDraft 2>/dev/null || true)
+        pr_json=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number,state,isDraft,mergeable 2>/dev/null || true)
       fi
     fi
     if [ -n "$pr_json" ]; then
       pr_number=$(echo "$pr_json" | jq -r '.number // ""')
       pr_state=$(echo "$pr_json" | jq -r '.state // ""')
       pr_isdraft=$(echo "$pr_json" | jq -r '.isDraft // false')
+      pr_mergeable=$(echo "$pr_json" | jq -r '.mergeable // ""')
       # Cursor Bugbot mirror: PR N+1 with a "REVIEW:" title.
       if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+        # owner/repo once — powers the OSC 8 links on PR#, (+mirror) and 🐛.
+        pr_nwo=$(cd "$cwd" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
+        _nwo="$pr_nwo"
         _mirror_title=$(cd "$cwd" && gh pr view $((pr_number + 1)) --json title --jq '.title' 2>/dev/null || true)
         case "$_mirror_title" in
           REVIEW:*) pr_mirror=$((pr_number + 1)) ;;
         esac
         # Open Bugbot findings = unresolved review threads on the mirror PR.
+        # Also capture the newest unresolved finding's commit SHA + a link to the
+        # mirror PR, so the badge can show @sha(-N) and be click/copy-able.
         if [ -n "$pr_mirror" ]; then
-          _nwo=$(cd "$cwd" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
           if [ -n "$_nwo" ]; then
-            pr_bugbot=$(cd "$cwd" && gh api graphql -f query="query{repository(owner:\"${_nwo%/*}\",name:\"${_nwo#*/}\"){pullRequest(number:${pr_mirror}){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{reactions(first:20){nodes{user{login}}}}}}}}}}" \
-              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)|select([.comments.nodes[0].reactions.nodes[]?.user.login]|index("mike-shevchuk")|not)]|length' 2>/dev/null || true)
+            _bb_json=$(cd "$cwd" && gh api graphql -f query="query{repository(owner:\"${_nwo%/*}\",name:\"${_nwo#*/}\"){pullRequest(number:${pr_mirror}){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{originalCommit{abbreviatedOid} reactions(first:20){nodes{user{login}}}}}}}}}}" \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)|select([.comments.nodes[0].reactions.nodes[]?.user.login]|index("mike-shevchuk")|not)|(.comments.nodes[0].originalCommit.abbreviatedOid // "")]' 2>/dev/null || true)
+            if [ -n "$_bb_json" ]; then
+              pr_bugbot=$(echo "$_bb_json" | jq 'length' 2>/dev/null || true)
+              pr_bugsha=$(echo "$_bb_json" | jq -r '.[-1] // ""' 2>/dev/null || true)
+            fi
+            [ -n "$pr_bugbot" ] && [ "$pr_bugbot" -gt 0 ] 2>/dev/null && pr_bugurl="https://github.com/${_nwo}/pull/${pr_mirror}"
           fi
         fi
       fi
     fi
-    echo "${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}" > "$pr_cache_file"
+    echo "${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}|${pr_bugsha}|${pr_bugurl}|${pr_nwo}|${pr_mergeable}" > "$pr_cache_file"
   fi
 fi
 if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   line2+="${sep}"
-  line2+="🔀 ${orange}PR#${pr_number}${reset}"
-  [ -n "$pr_mirror" ] && line2+="${dim}(+${pr_mirror})${reset}"
+  # PR# and (+mirror) are OSC 8 hyperlinks to their GitHub PRs when owner/repo is
+  # known — click to open, or copy the link. Plain text otherwise.
+  if [ -n "$pr_nwo" ]; then
+    line2+="🔀 ${orange}$(osc8_link "https://github.com/${pr_nwo}/pull/${pr_number}" "PR#${pr_number}")${reset}"
+    [ -n "$pr_mirror" ] && line2+="${dim}$(osc8_link "https://github.com/${pr_nwo}/pull/${pr_mirror}" "(+${pr_mirror})")${reset}"
+  else
+    line2+="🔀 ${orange}PR#${pr_number}${reset}"
+    [ -n "$pr_mirror" ] && line2+="${dim}(+${pr_mirror})${reset}"
+  fi
+  # Merge conflict against the base branch → loud red ⚠ badge. GitHub's
+  # mergeable is CONFLICTING (branch diverged), MERGEABLE (clean), or UNKNOWN
+  # (still computing). Only CONFLICTING is worth a warning.
+  if [ "$pr_mergeable" = "CONFLICTING" ]; then
+    line2+=" ${red}⚠conflict${reset}"
+  fi
   # 🐛N = open (unresolved) Bugbot findings; silence when clean.
+  # Shows @sha(-M): the newest unresolved finding's commit and how many commits
+  # behind HEAD it is. COLOUR encodes whether we've addressed it:
+  #   -0 (finding still on HEAD)  → RED   — not fixed yet, live.
+  #   -M, M>0 (finding behind HEAD) → YELLOW — later commits exist; they MAY
+  #        have fixed it (commit count proves nothing), re-review pending.
+  #   (rebased) — sha no longer in HEAD's history → RED, age unknown.
+  # Unknown age (no sha) stays red — can't prove it's fixed. The whole badge is
+  # an OSC 8 hyperlink to the mirror PR — click to open, or copy the link.
   if [ -n "$pr_bugbot" ] && [ "$pr_bugbot" -gt 0 ] 2>/dev/null; then
-    line2+=" ${red}🐛${pr_bugbot}${reset}"
+    _bug_label="🐛${pr_bugbot}"
+    _bug_colour="$red"   # default: unfixed / unknown
+    if [ -n "$pr_bugsha" ]; then
+      # Only meaningful if the finding's commit is still in HEAD's history —
+      # after a rebase/force-push sha..HEAD counts the whole rewritten branch.
+      if (cd "$cwd" && git merge-base --is-ancestor "$pr_bugsha" HEAD 2>/dev/null); then
+        _bug_ago=$(cd "$cwd" && git rev-list --count "${pr_bugsha}..HEAD" 2>/dev/null || true)
+        _bug_label="🐛${pr_bugbot} @${pr_bugsha}(-${_bug_ago})"
+        # later commits exist, but that doesn't prove they fixed it → yellow, not green
+        [ "${_bug_ago:-0}" -gt 0 ] 2>/dev/null && _bug_colour="$yellow"
+      else
+        _bug_label="🐛${pr_bugbot} @${pr_bugsha}(rebased)"
+      fi
+    fi
+    if [ -n "$pr_bugurl" ]; then
+      # OSC 8: ESC ] 8 ; ; URL BEL  <label>  ESC ] 8 ; ; BEL
+      line2+=" ${_bug_colour}$(osc8_link "${pr_bugurl}" "${_bug_label}")${reset}"
+    else
+      line2+=" ${_bug_colour}${_bug_label}${reset}"
+    fi
   fi
 
   # PR state badge: open / draft / merged / closed

@@ -32,3 +32,8 @@ __pycache__/
 projctl/code/projctl/registry.conf
 projctl/code/projctl/projctl.log
 *.projctl-bak
+
+# Local scratch: env backups (secrets!), LGTM review state, Playwright MCP logs
+.env.bak*
+.lgtm/
+.playwright-mcp/
