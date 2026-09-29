@@ -47,16 +47,7 @@ local barbar = {
   version = "^1.0.0", -- optional: only update when a new 1.x version is released
 }
 
-local hop = {
-  "phaazon/hop.nvim",
-  enable = true,
-  keys = {
-    { "<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1" },
-  },
-  config = function()
-    require("hop").setup({ keys = "etovxqpdygfblzhckisuran" })
-  end,
-}
+-- hop.nvim is declared once below (inside `other`); the duplicate spec here was removed.
 
 -- local rngr = {
 --   "kevinhwang91/rnvimr",
@@ -175,9 +166,13 @@ local flog = {
 local bat = {
   "justinhj/battery.nvim",
   config = function()
-    require("battery").setup({
-      battery = "BAT0", -- or "BAT1" depending on your system
-    })
+    -- `battery = "BATx"` is a Linux/sysfs concept. On macOS battery.nvim
+    -- auto-detects via pmset, so only pin a device on Linux.
+    local opts = {}
+    if vim.fn.has("linux") == 1 then
+      opts.battery = "BAT0"
+    end
+    require("battery").setup(opts)
   end,
 }
 
@@ -196,7 +191,6 @@ return {
   -- Good fold plugins
   fold_preview,
   tail_fold,
-  hop,
   overseer,
   bat,
   git_conf,

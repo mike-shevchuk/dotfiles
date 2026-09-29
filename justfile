@@ -1,18 +1,40 @@
 import '.justdir/stow.just'
 import '.justdir/health.just'
 import '.justdir/mise.just'
+import '.justdir/claude.just'
+import '.justdir/codex.just'
+import '.justdir/sync.just'
 
+# Default recipe: launch the fzf-powered recipe picker (`just help`)
 default:
-    @just --list
+    @just help
 
 # Setup core packages on a new system
-setup: install-deps claude zsh tmux kitty lz yazi
+setup: install-deps claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
     @echo "Core packages stowed successfully"
 
 # Install stow if missing
 install-deps:
     @command -v stow >/dev/null 2>&1 || just _install-stow
     @echo "Dependencies ready"
+
+# Symlink .justdir/global.just → ~/.config/just/justfile so `just -g` works everywhere
+install-global:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    src="$HOME/dotfiles/.justdir/global.just"
+    dst="$HOME/.config/just/justfile"
+    echo "→ linking $dst → $src" >&2
+    mkdir -p "$(dirname "$dst")"
+    if [ -L "$dst" ]; then
+        echo "  removing existing symlink" >&2
+        rm "$dst"
+    elif [ -f "$dst" ]; then
+        echo "  backing up existing file to $dst.bak" >&2
+        mv "$dst" "$dst.bak"
+    fi
+    ln -s "$src" "$dst"
+    echo "  OK — try: jj   (or: just -g --list)" >&2
 
 # --- Migration ---
 
@@ -21,6 +43,10 @@ migrate:
     #!/usr/bin/env bash
     set -euo pipefail
     dotfiles_dir="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+    # destructive (mass rm of symlinks) — gum confirm when available
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Видалити ВСІ ручні symlinks у \$HOME, що вказують у dotfiles?" || { echo "скасовано"; exit 0; }
+    fi
     echo "Removing manual symlinks pointing into dotfiles..."
     count=0
     while IFS= read -r -d '' link; do

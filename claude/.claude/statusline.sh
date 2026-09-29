@@ -1,6 +1,13 @@
 #!/bin/bash
 set -f # disable globbing
 
+# Force C numeric locale so awk printf uses '.' (not ',') as the decimal
+# separator. Under uk_UA.UTF-8, "%.2f" emits "84,00", which then breaks any
+# awk expression it is interpolated into (ep = 84,00 → syntax error) and the
+# pace/speed indicator collapses to a bare "~x". LC_NUMERIC only affects number
+# formatting — LC_CTYPE stays UTF-8 so emoji still render.
+export LC_NUMERIC=C
+
 input=$(cat)
 
 if [ -z "$input" ]; then
@@ -18,6 +25,7 @@ cyan='\033[38;2;46;149;153m'
 red='\033[38;2;255;85;85m'
 yellow='\033[38;2;230;200;0m'
 white='\033[38;2;220;220;220m'
+purple='\033[38;2;190;130;255m'
 dim='\033[2m'
 reset='\033[0m'
 
@@ -167,22 +175,28 @@ if [ -n "$cwd" ]; then
   if [ -n "$local_branch" ]; then
     line1+=" 🌿 ${green}${local_branch}${reset}"
   fi
-  # Remote: truncate when same as local, full when different, dim dash when not pushed
+  # Remote: same-named upstream collapses to "→ origin" (no branch-name repeat);
+  # full name only when the upstream branch DIFFERS; dim dash when not pushed.
   if [ -n "$remote_branch" ]; then
     remote_name="${remote_branch%%/*}"
     remote_branch_name="${remote_branch#*/}"
-    if [ "$remote_branch_name" = "$local_branch" ] && [ ${#remote_branch} -gt 30 ]; then
-      prefix="${remote_name}/${remote_branch_name:0:8}"
-      suffix="${remote_branch_name: -8}"
-      line1+=" ${dim}→${reset} ${cyan}${prefix}…${suffix}${reset}"
+    if [ "$remote_branch_name" = "$local_branch" ]; then
+      line1+=" ${dim}→ ${remote_name}${reset}"
     else
       line1+=" ${dim}→${reset} ${cyan}${remote_branch}${reset}"
     fi
   else
     line1+=" ${dim}→ --${reset}"
   fi
-  # Worktree label
-  line1+=" ${dim}[wt:${reset}${orange}${worktree_label}${dim}]${reset}"
+  # Worktree label: silent in the main repo; bare [wt] when the worktree is
+  # named after the branch (no third repeat); full name only when it differs.
+  if [ "$worktree_label" != "-" ]; then
+    if [ "$worktree_label" = "$local_branch" ]; then
+      line1+=" ${dim}[wt]${reset}"
+    else
+      line1+=" ${dim}[wt:${reset}${orange}${worktree_label}${dim}]${reset}"
+    fi
+  fi
 
   # Git dirty indicator
   dirty_count=$(git -C "${cwd}" --no-optional-locks status --porcelain 2>/dev/null | wc -l | tr -d ' ')
@@ -231,8 +245,22 @@ cat > "$_tokens_script" <<'PYEOF'
 import json, os, glob
 from datetime import datetime, timezone, timedelta
 now = datetime.now(timezone.utc)
-cut5h  = now - timedelta(hours=5)
-cut7d  = now - timedelta(days=7)
+cut5h = now - timedelta(hours=5)
+cut7d = now - timedelta(days=7)
+# Sync with API window boundaries when available (written by statusline after OAuth fetch)
+try:
+    wf = '/tmp/claude/tokens-windows.txt'
+    if os.path.exists(wf):
+        wlines = open(wf).read().strip().splitlines()
+        if len(wlines) >= 2 and wlines[0] and wlines[1]:
+            r5h = datetime.fromisoformat(wlines[0].replace('Z', '+00:00'))
+            r7d = datetime.fromisoformat(wlines[1].replace('Z', '+00:00'))
+            if r5h > now:   # window hasn't reset yet — use its start as cutoff
+                cut5h = r5h - timedelta(hours=5)
+            if r7d > now:
+                cut7d = r7d - timedelta(days=7)
+except Exception:
+    pass
 t5h, t7d, seen = 0, 0, set()
 for path in glob.glob(os.path.expanduser('~/.claude/projects/**/*.jsonl'), recursive=True):
     try:
@@ -281,62 +309,275 @@ refresh_tokens_usage
 line2=""
 line2+="🤖 ${blue}${model_name}${reset}"
 
-# PR number from git remote (cached to avoid slowdown)
+# PR number + state from git remote (cached to avoid slowdown).
+# Cache line format: "number|state|isDraft|mirror|bugbot" (state = OPEN/MERGED/
+# CLOSED; mirror = Cursor Bugbot duplicate PR number, usually N+1 titled
+# "REVIEW: ..."; bugbot = count of UNRESOLVED review threads on the mirror —
+# i.e. open Bugbot findings NOT yet triaged by us; resolved OR reacted (+1/-1 by mike-shevchuk) threads don't count).
 pr_cache_file="/tmp/claude/pr-cache-${cwd//\//-}.txt"
 mkdir -p /tmp/claude
 pr_cache_max_age=120
 needs_pr_refresh=true
 pr_number=""
+pr_state=""
+pr_isdraft=""
+pr_mirror=""
+pr_bugbot=""
 if [ -f "$pr_cache_file" ]; then
   pr_cache_mtime=$(stat -c %Y "$pr_cache_file" 2>/dev/null || stat -f %m "$pr_cache_file" 2>/dev/null)
   pr_cache_age=$((now_epoch - pr_cache_mtime))
   if [ "$pr_cache_age" -lt "$pr_cache_max_age" ]; then
     needs_pr_refresh=false
-    pr_number=$(cat "$pr_cache_file" 2>/dev/null)
+    IFS='|' read -r pr_number pr_state pr_isdraft pr_mirror pr_bugbot < "$pr_cache_file"
   fi
 fi
 if $needs_pr_refresh && [ -n "$cwd" ]; then
   if command -v gh >/dev/null 2>&1; then
-    pr_number=$(cd "$cwd" && gh pr view --json number -q '.number' 2>/dev/null || true)
-    if [ -z "$pr_number" ] || [ "$pr_number" = "null" ]; then
+    pr_json=$(cd "$cwd" && gh pr view --json number,state,isDraft 2>/dev/null || true)
+    if [ -z "$pr_json" ]; then
       pr_remote_branch=$(cd "$cwd" && git branch -r --points-at HEAD 2>/dev/null | grep -v '/HEAD' | sed 's|^ *origin/||' | head -1)
       if [ -n "$pr_remote_branch" ]; then
-        pr_number=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number -q '.number' 2>/dev/null || true)
+        pr_json=$(cd "$cwd" && gh pr view "$pr_remote_branch" --json number,state,isDraft 2>/dev/null || true)
       fi
     fi
-    echo "${pr_number}" > "$pr_cache_file"
+    if [ -n "$pr_json" ]; then
+      pr_number=$(echo "$pr_json" | jq -r '.number // ""')
+      pr_state=$(echo "$pr_json" | jq -r '.state // ""')
+      pr_isdraft=$(echo "$pr_json" | jq -r '.isDraft // false')
+      # Cursor Bugbot mirror: PR N+1 with a "REVIEW:" title.
+      if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
+        _mirror_title=$(cd "$cwd" && gh pr view $((pr_number + 1)) --json title --jq '.title' 2>/dev/null || true)
+        case "$_mirror_title" in
+          REVIEW:*) pr_mirror=$((pr_number + 1)) ;;
+        esac
+        # Open Bugbot findings = unresolved review threads on the mirror PR.
+        if [ -n "$pr_mirror" ]; then
+          _nwo=$(cd "$cwd" && gh repo view --json nameWithOwner --jq .nameWithOwner 2>/dev/null || true)
+          if [ -n "$_nwo" ]; then
+            pr_bugbot=$(cd "$cwd" && gh api graphql -f query="query{repository(owner:\"${_nwo%/*}\",name:\"${_nwo#*/}\"){pullRequest(number:${pr_mirror}){reviewThreads(first:100){nodes{isResolved comments(first:1){nodes{reactions(first:20){nodes{user{login}}}}}}}}}}" \
+              --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)|select([.comments.nodes[0].reactions.nodes[]?.user.login]|index("mike-shevchuk")|not)]|length' 2>/dev/null || true)
+          fi
+        fi
+      fi
+    fi
+    echo "${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}" > "$pr_cache_file"
   fi
 fi
 if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   line2+="${sep}"
   line2+="🔀 ${orange}PR#${pr_number}${reset}"
+  [ -n "$pr_mirror" ] && line2+="${dim}(+${pr_mirror})${reset}"
+  # 🐛N = open (unresolved) Bugbot findings; silence when clean.
+  if [ -n "$pr_bugbot" ] && [ "$pr_bugbot" -gt 0 ] 2>/dev/null; then
+    line2+=" ${red}🐛${pr_bugbot}${reset}"
+  fi
+
+  # PR state badge: open / draft / merged / closed
+  case "$pr_state" in
+    OPEN)
+      if [ "$pr_isdraft" = "true" ]; then
+        line2+=" 📝 ${dim}draft${reset}"
+      else
+        line2+=" 🟢 ${green}open${reset}"
+      fi
+      ;;
+    MERGED) line2+=" 🟣 ${purple}merged${reset}" ;;
+    CLOSED) line2+=" 🔴 ${red}closed${reset}" ;;
+  esac
+
+  # ===== PR deploy status (async background refresh, throttled 30s) =====
+  # Classify the PR's deploy-* checks into one state word, cached to a file so
+  # the statusline render stays fast (gh call happens in the background).
+  _deploy_cache="/tmp/claude/pr-deploy-${pr_number}.txt"
+  _deploy_stamp="/tmp/claude/pr-deploy-${pr_number}.stamp"
+  _dnow=$(date +%s)
+  _dage=999999
+  [ -f "$_deploy_stamp" ] && _dage=$(( _dnow - $(cat "$_deploy_stamp" 2>/dev/null || echo 0) ))
+  if [ "$_dage" -gt 30 ] && command -v gh >/dev/null 2>&1 && [ -n "$cwd" ]; then
+    echo "$_dnow" > "$_deploy_stamp"
+    (
+      # Use ALL check-runs for the head SHA, not `gh pr checks` (which keeps only
+      # the LATEST run per check name). The deploy workflow serialises through a
+      # concurrency group, so a duplicate queued run gets cancelled and becomes
+      # "latest" even when an earlier run of the same check deployed successfully
+      # — that made a healthy deploy render as "failed".
+      # SHA must be the PR's *pushed* head, not local HEAD: with unpushed commits
+      # `git rev-parse HEAD` points at a SHA GitHub has no runs for, so a real
+      # deploy renders as "none". @{u} is the pushed upstream tip (the PR head);
+      # fall back to the PR's headRefOid if there is no upstream ref.
+      _dsha=$(cd "$cwd" && git rev-parse '@{u}' 2>/dev/null)
+      [ -n "$_dsha" ] || _dsha=$(cd "$cwd" && gh pr view "$pr_number" --json headRefOid --jq .headRefOid 2>/dev/null)
+      _c=$(cd "$cwd" && gh api "repos/{owner}/{repo}/commits/${_dsha}/check-runs" \
+             --jq '[.check_runs[] | {name: .name, bucket: (.conclusion // .status)}]' 2>/dev/null)
+      _st=$(jq -r '[.[] | select(.name | test("deploy"; "i"))] |
+        if length == 0 then "none"
+        elif any(.[]; .bucket == "in_progress" or .bucket == "queued" or .bucket == "pending") then "deploying"
+        elif any(.[]; .bucket == "failure" or .bucket == "timed_out") then "failed"
+        elif any(.[]; .bucket == "success") then "deployed"
+        elif any(.[]; .bucket == "cancelled") then "failed"
+        else "skipped" end' <<<"${_c:-[]}" 2>/dev/null)
+      # While deploying, grab the in-progress deploy run's start time so the
+      # render can draw a live elapsed-based progress bar between refreshes.
+      _start=""
+      if [ "$_st" = "deploying" ]; then
+        _start=$(cd "$cwd" && gh run list --limit 8 --json status,startedAt,name,workflowName 2>/dev/null \
+          | jq -r 'first(.[] | select(.status == "in_progress" and (((.name // "") + (.workflowName // "")) | test("deploy"; "i")))) | .startedAt // empty')
+      fi
+      echo "${_st:-none}|${_start}" > "${_deploy_cache}.tmp" && mv "${_deploy_cache}.tmp" "$_deploy_cache"
+    ) &
+    disown $!
+  fi
+  if [ -f "$_deploy_cache" ]; then
+    IFS='|' read -r _dstate _dstart < "$_deploy_cache"
+    case "$_dstate" in
+      deploying)
+        line2+=" 🟡 ${yellow}deploying${reset}"
+        # Live elapsed-based progress bar (baseline ~280s = a typical deploy).
+        _sepoch=""
+        [ -n "$_dstart" ] && _sepoch=$(iso_to_epoch "$_dstart")
+        if [ -n "$_sepoch" ]; then
+          _dpct=$(( (now_epoch - _sepoch) * 100 / 280 ))
+          [ "$_dpct" -gt 99 ] && _dpct=99
+          [ "$_dpct" -lt 0 ] && _dpct=0
+          _bw=8; _bf=$(( _dpct * _bw / 100 )); _be=$(( _bw - _bf ))
+          _fill=""; _emp=""
+          for ((i = 0; i < _bf; i++)); do _fill+="●"; done
+          for ((i = 0; i < _be; i++)); do _emp+="○"; done
+          line2+=" ${cyan}${_fill}${dim}${_emp}${reset} ${yellow}${_dpct}%${reset}"
+        fi
+        ;;
+      deployed)  line2+=" 🟢 ${green}deployed${reset}" ;;
+      failed)    line2+=" 🔴 ${red}deploy failed${reset}" ;;
+      skipped)   line2+=" ⚪ ${dim}deploy skipped${reset}" ;;
+    esac
+  fi
+fi
+
+# ===== GSD phase slot (context-aware — Phase A) =====
+# When a GSD project is active (.planning/STATE.md) AND there is no open PR, the
+# pipeline slot shows GSD lifecycle progress *instead of* the PR badges (the two
+# axes never render together — see /pr-state for full detail). Cached + background-
+# refreshed (45s) like the PR/deploy blocks so the render stays in the hot path.
+# Slot: 🛠 <STEP> <done>/<total>  — STEP = next action of the current (first non-
+# Complete) phase, derived from gsd-sdk's phase status.
+_gsd_mode=""
+if [ -z "$pr_number" ] && [ -n "$cwd" ] && [ -f "$cwd/.planning/STATE.md" ]; then
+  _gsd_mode=1
+  _gsd_cache="/tmp/claude/gsd-${cwd//\//-}.txt"
+  _gsd_stamp="/tmp/claude/gsd-${cwd//\//-}.stamp"
+  _gnow=$(date +%s); _gage=999999
+  [ -f "$_gsd_stamp" ] && _gage=$(( _gnow - $(cat "$_gsd_stamp" 2>/dev/null || echo 0) ))
+  if [ "$_gage" -gt 45 ] && [ -n "$cwd" ]; then
+    echo "$_gnow" > "$_gsd_stamp"
+    (
+      # gsd-sdk is a node CLI; the statusline's PATH may lack node/~/.local/bin.
+      export PATH="$HOME/.local/bin:$HOME/.local/share/mise/shims:$PATH"
+      command -v gsd-sdk >/dev/null 2>&1 || exit 0
+      _gj=$(cd "$cwd" && gsd-sdk query progress 2>/dev/null) || exit 0
+      printf '%s' "$_gj" | jq -r '
+        (.phases // []) as $p
+        | ($p | map(select(.status == "Complete")) | length) as $done
+        | ($p | length) as $total
+        | (first($p[] | select(.status != "Complete")) // null) as $cur
+        | (if $cur == null then "SHP"
+           else {"Pending":"PLN","Planned":"EXE","In Progress":"EXE",
+                 "Executed":"VER","Needs Review":"RVW","Complete":"SHP"}[$cur.status] // "EXE"
+           end) as $abbr
+        | "\($abbr)|\($done)|\($total)|\(.percent // 0)"
+      ' > "${_gsd_cache}.tmp" 2>/dev/null && mv "${_gsd_cache}.tmp" "$_gsd_cache"
+    ) &
+    disown $!
+  fi
+  if [ -f "$_gsd_cache" ]; then
+    IFS='|' read -r _gstep _gdone _gtotal _gpct < "$_gsd_cache"
+    if [ -n "${_gtotal:-}" ] && [ "$_gtotal" -gt 0 ] 2>/dev/null; then
+      line2+="${sep}🛠 ${cyan}${_gstep}${reset} ${dim}${_gdone}/${_gtotal}${reset}"
+    fi
+  fi
+fi
+
+# ===== Pipeline progress badges (read-only) =====
+# Renders the per-branch state file that `/pr-state` + the stamping skills write
+# (~/.claude/pipeline-stamp.sh). Each stamp carries an anchor commit (`head`);
+# we show how many commits landed AFTER the check ran (staleness).
+# Glyph per step: green ✓ = done & fresh, yellow ✓-N = done N commits ago,
+# dim · = pending. Order: CR SMP RPR JT.
+# Skipped in GSD mode (_gsd_mode=1) — the 🛠 GSD slot above takes the slot instead.
+if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
+  _pl_file="/tmp/claude/pipeline-${local_branch//\//-}.json"
+  if [ -f "$_pl_file" ]; then
+    # One line per badge step: "<done 1/0> <anchor-sha or ->"
+    _pl_steps=$(jq -r '
+      ["code-review","simplify","review-pr","just-test"][] as $k
+      | [ (if .steps[$k].done == true then "1" else "0" end),
+          (.steps[$k].head // "-") ] | join(" ")' "$_pl_file" 2>/dev/null)
+    _pl=""
+    _pl_labels=(CR SMP RPR JT)
+    _pl_i=0
+    _pl_next=""   # first step needing attention (stale or pending) = next action
+    while read -r _pf _ph; do
+      _plabel="${_pl_labels[$_pl_i]:-?}"; _pl_i=$((_pl_i + 1))
+      if [ "$_pf" = "1" ]; then
+        _ago=""
+        if [ "$_ph" != "-" ] && [ -n "$cwd" ]; then
+          _ago=$(git -C "$cwd" --no-optional-locks rev-list --count "${_ph}..HEAD" 2>/dev/null || true)
+        fi
+        if [ -n "$_ago" ] && [ "$_ago" -gt 0 ] 2>/dev/null; then
+          _pl+=" ${yellow}${_plabel}✓-${_ago}${reset}"   # done, but N commits behind
+          [ -z "$_pl_next" ] && _pl_next="$_plabel"
+        else
+          _pl+=" ${green}${_plabel}✓${reset}"            # done & fresh (or no anchor)
+        fi
+      else
+        _pl+=" ${dim}${_plabel}·${reset}"
+        [ -z "$_pl_next" ] && _pl_next="$_plabel"
+      fi
+    done <<< "$_pl_steps"
+    line2+="${sep}🧭${_pl}"
+    # Next-action chip: the one step to do next (stale re-run or first pending).
+    [ -n "$_pl_next" ] && line2+=" ${dim}➜${reset}${white}${_pl_next}${reset}"
+  fi
 fi
 
 line2+="${sep}"
 line2+="🪙 ${orange}${used_tokens}/${total_tokens}${reset}"
 
-# 5h + 7d session token counts (from async Python cache)
+# 5h + 7d session token counts (from async Python cache) — rendered on line3
+# next to their usage bars (same domain), keeping line2 to work-state only.
+_tok_5h=""
+_tok_7d=""
 if [ -f "$_tokens_cache" ]; then
-  _l2_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
-  _l2_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
-  [ -n "$_l2_5h" ] && line2+="${sep}⏱ ${yellow}5h: ${_l2_5h}${reset}"
-  [ -n "$_l2_7d" ] && line2+="${sep}📅 ${yellow}7d: ${_l2_7d}${reset}"
+  _tok_5h=$(sed -n '1p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
+  _tok_7d=$(sed -n '2p' "$_tokens_cache" 2>/dev/null | tr -d '[:space:]')
 fi
 
-# Subscription renewal countdown
-renewal_date="2026-04-10"
+# Subscription renewal countdown — auto-rolls to the next billing day each month
+# (always current; no hardcoded date to go stale). Set your billing day-of-month:
+renewal_day=10
+today_day=$((10#$(date +%d)))
+if [ "$today_day" -le "$renewal_day" ]; then
+  # billing day is still ahead (or is today) this month
+  ry=$(date +%Y); rm=$(date +%m)
+else
+  # billing day passed — roll to the 1st of next month, take its year/month
+  ry=$(date -v1d -v+1m +%Y 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%Y)
+  rm=$(date -v1d -v+1m +%m 2>/dev/null || date -d "$(date +%Y-%m-01) +1 month" +%m)
+fi
+renewal_date=$(printf "%04d-%02d-%02d" "$((10#$ry))" "$((10#$rm))" "$renewal_day")
 renewal_epoch=$(date -d "$renewal_date" +%s 2>/dev/null || \
   date -j -f "%Y-%m-%d" "$renewal_date" +%s 2>/dev/null)
+# Rendered at the end of line3 (usage domain), not line2.
+_renewal_seg=""
 if [ -n "$renewal_epoch" ]; then
   days_left=$(( (renewal_epoch - now_epoch) / 86400 ))
   if [ "$days_left" -le 0 ]; then
-    line2+="${sep}💳 ${red}renew today!${reset}"
+    _renewal_seg="${sep}💳 ${red}renew today!${reset}"
   elif [ "$days_left" -le 3 ]; then
-    line2+="${sep}💳 ${red}${days_left}d left${reset}"
+    _renewal_seg="${sep}💳 ${red}${days_left}d${reset}"
   elif [ "$days_left" -le 7 ]; then
-    line2+="${sep}💳 ${yellow}${days_left}d left${reset}"
+    _renewal_seg="${sep}💳 ${yellow}${days_left}d${reset}"
   else
-    line2+="${sep}💳 ${dim}${days_left}d left${reset}"
+    _renewal_seg="${sep}💳 ${dim}${days_left}d${reset}"
   fi
 fi
 
@@ -385,6 +626,34 @@ get_oauth_token() {
   echo ""
 }
 
+# ===== Usage snapshot history (for recent pace) =====
+# Defined here (before the usage-data fetch below) because that fetch calls
+# record_usage_snapshot on both cache-hit and API-refresh paths.
+history_file="/tmp/claude/statusline-usage-history.txt"
+
+# Append a snapshot; prune entries older than 24h
+# Deduplicates: skip if last entry has same values and is < 60s old
+record_usage_snapshot() {
+  local five_pct=$1 seven_pct=$2
+  if [ -f "$history_file" ]; then
+    local last_line
+    last_line=$(tail -1 "$history_file")
+    local last_epoch last_five last_seven
+    last_epoch=$(echo "$last_line" | cut -d: -f1)
+    last_five=$(echo "$last_line" | cut -d: -f2)
+    last_seven=$(echo "$last_line" | cut -d: -f3)
+    # Skip if same values and less than 60s ago
+    if [ "$last_five" = "$five_pct" ] && [ "$last_seven" = "$seven_pct" ] && \
+       [ -n "$last_epoch" ] && [ $((now_epoch - last_epoch)) -lt 60 ]; then
+      return
+    fi
+  fi
+  echo "${now_epoch}:${five_pct}:${seven_pct}" >> "$history_file"
+  local cutoff=$((now_epoch - 86400))
+  awk -F: -v c="$cutoff" '$1 >= c' "$history_file" > "${history_file}.tmp" && \
+    mv "${history_file}.tmp" "$history_file"
+}
+
 # ===== Usage data (cached) =====
 cache_file="/tmp/claude/statusline-usage-cache.json"
 cache_max_age=180
@@ -419,13 +688,13 @@ fi
 if $needs_refresh; then
   token=$(get_oauth_token)
   if [ -n "$token" ] && [ "$token" != "null" ]; then
-    response=$(curl -s --max-time 10 \
-      -H "Accept: application/json" \
-      -H "Content-Type: application/json" \
-      -H "Authorization: Bearer $token" \
-      -H "anthropic-beta: oauth-2025-04-20" \
-      -H "User-Agent: claude-code/2.1.34" \
-      "https://api.anthropic.com/api/oauth/usage" 2>/dev/null)
+    response=$(xh -b --ignore-stdin --timeout 10 GET "https://api.anthropic.com/api/oauth/usage" \
+      Accept:application/json \
+      Content-Type:application/json \
+      "Authorization:Bearer $token" \
+      anthropic-beta:oauth-2025-04-20 \
+      User-Agent:claude-code/2.1.34 \
+      2>/dev/null)
     # Only accept the response if it is valid JSON and does NOT contain an error field
     if [ -n "$response" ] && echo "$response" | jq -e 'has("error") | not' >/dev/null 2>&1; then
       usage_data="$response"
@@ -469,30 +738,9 @@ format_reset_time() {
 }
 
 # ===== Usage snapshot history (for recent pace) =====
-history_file="/tmp/claude/statusline-usage-history.txt"
-
-# Append a snapshot; prune entries older than 24h
-# Deduplicates: skip if last entry has same values and is < 60s old
-record_usage_snapshot() {
-  local five_pct=$1 seven_pct=$2
-  if [ -f "$history_file" ]; then
-    local last_line
-    last_line=$(tail -1 "$history_file")
-    local last_epoch last_five last_seven
-    last_epoch=$(echo "$last_line" | cut -d: -f1)
-    last_five=$(echo "$last_line" | cut -d: -f2)
-    last_seven=$(echo "$last_line" | cut -d: -f3)
-    # Skip if same values and less than 60s ago
-    if [ "$last_five" = "$five_pct" ] && [ "$last_seven" = "$seven_pct" ] && \
-       [ -n "$last_epoch" ] && [ $((now_epoch - last_epoch)) -lt 60 ]; then
-      return
-    fi
-  fi
-  echo "${now_epoch}:${five_pct}:${seven_pct}" >> "$history_file"
-  local cutoff=$((now_epoch - 86400))
-  awk -F: -v c="$cutoff" '$1 >= c' "$history_file" > "${history_file}.tmp" && \
-    mv "${history_file}.tmp" "$history_file"
-}
+# record_usage_snapshot + history_file are defined ABOVE, before the usage-data
+# fetch that calls them (bash needs the function defined before the call site).
+# history_file stays a global, referenced by calc_recent_pace below.
 
 # Recent pace over a lookback window
 # Usage: calc_recent_pace <current_pct> <window_secs> <lookback_secs> <col>
@@ -702,7 +950,9 @@ if $use_oauth; then
     five_recent=$(calc_recent_pace "$five_hour_pct" 18000 1800 2)
     five_pace_fmt=$(format_pace "$five_pace" "$five_remaining" "$five_recent")
 
-    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
+    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset}"
+    [ -n "$_tok_5h" ] && line3+=" ${yellow}${_tok_5h}${reset}"
+    line3+=" ${five_pace_fmt}"
     [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
 
     # Suggest throttling when recent 5h pace is very high
@@ -720,6 +970,12 @@ if $use_oauth; then
   seven_day_pct=$(echo "$usage_data" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
   seven_day_reset_iso=$(echo "$usage_data" | jq -r '.seven_day.resets_at // empty')
 
+  # Write API window boundaries so token scanner can align to same windows
+  if [ -n "$five_hour_reset_iso" ] && [ "$five_hour_reset_iso" != "null" ] && \
+     [ -n "$seven_day_reset_iso" ] && [ "$seven_day_reset_iso" != "null" ]; then
+    printf "%s\n%s\n" "$five_hour_reset_iso" "$seven_day_reset_iso" > "/tmp/claude/tokens-windows.txt"
+  fi
+
   if is_reset_past "$seven_day_reset_iso"; then
     seven_day_bar=$(build_bar 0 "$bar_width")
     line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${dim}↻${reset}"
@@ -732,7 +988,9 @@ if $use_oauth; then
     seven_recent=$(calc_recent_pace "$seven_day_pct" 604800 60480 3)
     seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining" "$seven_recent")
 
-    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
+    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset}"
+    [ -n "$_tok_7d" ] && line3+=" ${yellow}${_tok_7d}${reset}"
+    line3+=" ${seven_pace_fmt}"
     [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
   fi
 
@@ -767,7 +1025,9 @@ elif $use_stdin_limits; then
     five_recent=$(calc_recent_pace "$five_hour_pct" 18000 1800 2)
     five_pace_fmt=$(format_pace "$five_pace" "$five_remaining" "$five_recent")
 
-    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset} ${five_pace_fmt}"
+    line3+="⏱ ${white}5h${reset} ${five_hour_bar} ${cyan}${five_hour_pct}%${reset}"
+    [ -n "$_tok_5h" ] && line3+=" ${yellow}${_tok_5h}${reset}"
+    line3+=" ${five_pace_fmt}"
     [ -n "$five_hour_reset" ] && line3+=" ${dim}@${five_hour_reset}${reset}"
   fi
 
@@ -788,10 +1048,26 @@ elif $use_stdin_limits; then
     seven_recent=$(calc_recent_pace "$seven_day_pct" 604800 60480 3)
     seven_pace_fmt=$(format_pace "$seven_pace" "$seven_remaining" "$seven_recent")
 
-    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset} ${seven_pace_fmt}"
+    line3+="${sep}📅 ${white}7d${reset} ${seven_day_bar} ${cyan}${seven_day_pct}%${reset}"
+    [ -n "$_tok_7d" ] && line3+=" ${yellow}${_tok_7d}${reset}"
+    line3+=" ${seven_pace_fmt}"
     [ -n "$seven_day_reset" ] && line3+=" ${dim}@${seven_day_reset}${reset}"
   fi
 fi
+
+# Subscription renewal lives with the rest of the usage info.
+[ -n "$line3" ] && line3+="${_renewal_seg}"
+
+# ---- Kanban dashboard indicator (claude-code-kanban) ----
+# Instant bash /dev/tcp probe (builtin: no process spawn, no real network I/O)
+# → when the dashboard is up, show its LAN address so any device can open it.
+kanban_seg=""
+if (exec 3<>/dev/tcp/127.0.0.1/3541) 2>/dev/null; then
+  exec 3>&- 3<&- 2>/dev/null
+  kanban_lan=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null)
+  kanban_seg=" ${dim}·${reset} ${green}📋${reset} ${cyan}${kanban_lan:-localhost}:3541${reset}"
+fi
+line1+="$kanban_seg"
 
 # Output three lines
 printf "%b\n%b\n%b" "$line1" "$line2" "$line3"

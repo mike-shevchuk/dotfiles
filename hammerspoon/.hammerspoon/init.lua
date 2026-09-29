@@ -11,6 +11,10 @@ local audio       = require("modules.audio")
 local clipboard   = require("modules.clipboard")
 local system      = require("modules.system")
 local sidecar     = require("modules.sidecar")
+local mirror      = require("modules.mirror")
+local palette     = require("modules.palette")
+local keyboard    = require("modules.keyboard")
+local cheatsheets = require("modules.cheatsheets")
 local mousefinder = require("modules.mousefinder")
 local scratchpad  = require("modules.scratchpad")
 local brightness  = require("modules.brightness")
@@ -28,7 +32,6 @@ local paperwm     = require("modules.paperwm")
 local paperwmui   = require("modules.paperwmui")
 local focusborder = require("modules.focusborder")
 local paperwmfit  = require("modules.paperwmfit")
-local winjump     = require("modules.winjump")
 
 -- `hs -c "..."` CLI (binary comes from the hammerspoon brew formula)
 require("hs.ipc")
@@ -81,10 +84,6 @@ guard.bind(hyper, "X", focusborder.toggle)
 -- Fit mode: squeeze the row to fit the screen instead of clipping at the edge
 paperwmfit.start()
 
--- ctrl+alt+cmd+Space = jump to any window by app or tab name
--- (mirrors alt+shift+Space, which is the app launcher)
-guard.bind({ "ctrl", "alt", "cmd" }, "Space", winjump.show)
-
 -- ctrl+alt+cmd+F = full WIDTH (stays in the row), and back to previous width
 guard.bind({ "ctrl", "alt", "cmd" }, "F", paperwmui.toggleFullWidth)
 
@@ -112,6 +111,36 @@ guard.bind(hyper, "P", system.togglePinchZoom)
 -- N = toggle mirror <-> extended display
 guard.bind(hyper, "I", sidecar.showDisplayChooser)
 guard.bind(hyper, "N", sidecar.toggleMirror)
+
+-- hyper2 (ctrl+alt+shift), because every hyper letter is already spoken for:
+--   M = mirror this screen onto the iPad and back (wireless Sidecar, so the
+--       iPad can be in another room); P = pick any offered device instead
+-- Menubar: 📱 idle / 🪞 attached / ⏳ connecting, click for mirror/extend/disconnect
+guard.bind(hyper2, "M", function() mirror.toggleDefault("mirror") end)
+guard.bind(hyper2, "P", mirror.showChooser)
+mirror.startWidget()
+
+-- ─── Command palette / cheatsheet ───────────────────────────────
+--
+-- ONE key to remember. Everything else in this file is reachable through it —
+-- by category, or by typing a name, a chord or a module — so nothing has to be
+-- memorised twice. Space, to join the other two pickers: alt+shift+Space is the
+-- app launcher and ctrl+alt+cmd+Space jumps to a window, so the thumb stays put
+-- and only the modifier says which list you want.
+--
+-- ctrl+alt+shift+Space = every command there is, and the cheatsheet for them
+-- ctrl+alt+shift+F     = click anything by keyboard (needs to be instant, so it
+--                        keeps its own chord instead of living in the palette)
+guard.bind(hyper2, "Space", palette.open)
+guard.bind(hyper2, "F", keyboard.clickHints)
+
+-- ctrl+alt+cmd+Space opens the palette too. It used to be the window jumper,
+-- which the Windows tab now covers — so the chord keeps meaning "show me a
+-- list", and there is one list instead of two.
+guard.bind({ "ctrl", "alt", "cmd" }, "Space", palette.open)
+-- ctrl+alt+shift+H     = open any cheatsheet — README sections, zettelkasten
+--                        sheets, and a generated one for the palette itself
+guard.bind(hyper2, "H", cheatsheets.show)
 
 -- ─── Mouse Finder ───────────────────────────────────────────────
 -- F = flash crosshair at mouse position
@@ -197,23 +226,9 @@ guard.addHotkey(hs.hotkey.bind({ "shift" }, "delete", function()
   hs.eventtap.keyStroke({}, "forwarddelete", 0)
 end))
 
-hs.alert.show("🔨 Hammerspoon loaded", 1.5)
-
--- ─── Command palette ────────────────────────────────────────────
--- ctrl+alt+shift+Space = every command there is, by category
--- ctrl+alt+shift+F     = click anything by keyboard
--- ctrl+alt+shift+H     = open any cheatsheet
-local palette     = require("modules.palette")
-local keyboard    = require("modules.keyboard")
-local cheatsheets = require("modules.cheatsheets")
-guard.bind({ "ctrl", "alt", "shift" }, "Space", palette.open)
-guard.bind({ "ctrl", "alt", "shift" }, "F", keyboard.clickHints)
-guard.bind({ "ctrl", "alt", "shift" }, "H", cheatsheets.show)
-
--- ctrl+alt+cmd+Space opens the palette too: it used to be the window jumper,
--- which the Windows tab (⌥3) now covers. Binding it last wins over the earlier
--- one, and the earlier one is disabled outright so nothing lingers.
-for _, hk in ipairs(hs.hotkey.getHotkeys()) do
-  if tostring(hk.msg or ""):find("⌘⌃⌥SPACE") and hk.disable then hk:disable() end
+-- Stop watchers cleanly before config reload to avoid stale callbacks
+hs.shutdownCallback = function()
+  audio.stop()
 end
-guard.bind({ "ctrl", "alt", "cmd" }, "Space", palette.open)
+
+hs.alert.show("🔨 Hammerspoon loaded", 1.5)

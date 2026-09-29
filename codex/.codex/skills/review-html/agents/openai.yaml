@@ -1,0 +1,4 @@
+interface:
+  display_name: "review html"
+  short_description: "Run the review html workflow"
+  default_prompt: "Use $review-html for this task."

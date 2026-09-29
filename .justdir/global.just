@@ -1,0 +1,1194 @@
+# =============================================================================
+# global.just — shared recipes available from anywhere via `just -g <recipe>`
+# =============================================================================
+#
+# This file is symlinked from ~/.config/just/justfile — the path that
+# `just --global-justfile` (alias `-g`) resolves to. After running
+# `just install-global` from ~/dotfiles, `just -g <recipe>` works from
+# any directory on the machine.
+#
+# CONVENTIONS (per ~/CLAUDE.md justfile visibility rules)
+# ═══════════════════════════════════════════════════════
+# Every recipe echoes progress to stderr — `→ doing X` before work,
+# `OK`/`FAIL` after. Recipes that hit the network show the xh command
+# inside a `━━━ xh ... ━━━` banner so it's copy-pasteable.
+#
+# ZSH SHORTCUTS (defined in zsh/.zshrc)
+# ═════════════════════════════════════
+#   jj   = grouped fzf chooser → echoes the chosen `just -g <recipe>`,
+#          then runs it (prompts for args if the recipe takes any)
+#   jd   = `just -g --dry-run` (print commands without running)
+#   jv   = `just -g --verbose` (echo each shell command before running)
+#   jq-  = `just -g --quiet`   (suppress recipe banners — `jq` is taken)
+# =============================================================================
+
+# Forward recipe args faithfully to wrappers (e.g. `proj`) as "$@" — preserves
+# quoted/spaced args and empty positionals. (Only affects top-level $@ in recipe
+# bodies; awk $1 and shell-function args are unaffected.)
+set positional-arguments
+
+# Browse every HTML report under ~/zettelkasten/claude_code and open one.
+# Serves the whole tree once (dir listing = "see all"), fzf-picks one to open.
+[group('reports')]
+reports filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    root="$HOME/zettelkasten/claude_code"
+    [ -d "$root" ] || { echo "  FAIL: $root not found" >&2; exit 1; }
+    echo "→ [1/3] picking a free port..." >&2
+    PORT=""
+    for P in 8899 8898 8897 8896 8895 8894; do
+        lsof -nP -iTCP:$P -sTCP:LISTEN >/dev/null 2>&1 || { PORT=$P; break; }
+    done
+    [ -n "$PORT" ] || { echo "  FAIL: no free port 8894-8899" >&2; exit 1; }
+    echo "→ [2/3] serving $root in tmux (session 'reports', port $PORT)..." >&2
+    tmux has-session -t reports 2>/dev/null && tmux kill-session -t reports 2>/dev/null || true
+    tmux new-session -d -s reports -c "$root" "python3 -m http.server $PORT --bind 0.0.0.0"
+    ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo 127.0.0.1)
+    echo "  OK — index: http://$ip:$PORT/   (dir listing of ALL reports)" >&2
+    echo "→ [3/3] pick a page to open (fzf)..." >&2
+    rel=""
+    if command -v fzf >/dev/null && command -v fd >/dev/null; then
+        rel=$(fd -e html {{filter}} "$root" 2>/dev/null | sed "s#$root/##"               | fzf --prompt="report > " --height=70% --reverse                     --preview "echo http://$ip:$PORT/{}") || true
+    fi
+    if [ -n "$rel" ]; then
+        url="http://$ip:$PORT/$rel"
+    else
+        url="http://$ip:$PORT/"
+        echo "  (no pick — opening the index listing)" >&2
+    fi
+    echo "  → open $url" >&2
+    echo "━━━ open '$url' ━━━" >&2
+    open "$url" 2>/dev/null || echo "  (open failed — paste the URL in a browser)" >&2
+    echo "  stop later: tmux kill-session -t reports" >&2
+
+# bun ↔ justfile: this recipe body IS a TypeScript program run by bun (just runs
+# shebang recipes in any language). THE hub for your notes tree — it regenerates the
+# curated index (pin/rename/preview/search, via _hub.py if present) then serves the
+# tree on fixed :8890 with LIVE-RELOAD. Native Bun.serve, 0 npm deps, survives a
+# worktree. Replaces the old manual `python _hub.py; python -m http.server`.
+#   jg hub        -> regenerate + serve ~/zettelkasten/claude_code on :8890
+#   jg hub 8891   -> other port    ·    /_all = flat listing of every file
+#   :8890 busy?   -> jg hub-fix    (frees the port + restarts)
+[group('reports')]
+hub port="8890" root="~/zettelkasten/claude_code":
+    #!/usr/bin/env bun
+    import { watch, existsSync } from "node:fs";
+    import { readdir, stat } from "node:fs/promises";
+    import { networkInterfaces } from "node:os";
+    import { join, extname, relative } from "node:path";
+
+    const PORT = Number("{{port}}");
+    const HOME = process.env.HOME!;
+    const ROOT = "{{root}}".replace(/^~/, HOME);
+    const lanIP = Object.values(networkInterfaces()).flat()
+      .find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
+
+    // 1) refresh the curated index.html (the rich pin/rename/preview hub) via its
+    //    generator, if present — keeps the landing page current with new articles.
+    const gen = join(ROOT, "_hub.py");
+    if (existsSync(gen)) {
+      console.error("→ regenerating index.html via _hub.py …");
+      const r = Bun.spawnSync(["python3", gen], { cwd: ROOT, stderr: "inherit" });
+      if (!r.success) console.error("  (_hub.py failed — serving the existing index.html)");
+    }
+
+    const RELOAD = `<script>new EventSource("/__reload").onmessage=()=>location.reload()</script>`;
+    const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
+    const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
+
+    const clients = new Set<ReadableStreamDefaultController>();
+    try { watch(ROOT, { recursive: true }, () => { for (const c of clients) { try { c.enqueue("data: change\n\n"); } catch {} } }); } catch {}
+
+    const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
+    function md(s: string): string {
+      s = s.replace(/```(\w*)\n([\s\S]*?)```/g, (_, l, c) => `<pre><code>${esc(c)}</code></pre>`);
+      s = s.replace(/^### (.*)$/gm, "<h3>$1</h3>").replace(/^## (.*)$/gm, "<h2>$1</h2>").replace(/^# (.*)$/gm, "<h1>$1</h1>");
+      s = s.replace(/`([^`]+)`/g, (_, c) => `<code>${esc(c)}</code>`);
+      s = s.replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>");
+      s = s.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+      s = s.replace(/^[-*] (.*)$/gm, "<li>$1</li>").replace(/(<li>[\s\S]*?<\/li>)/g, "<ul>$1</ul>");
+      return s.split(/\n\n+/).map(p => /^\s*<(h|ul|pre)/.test(p) ? p : `<p>${p}</p>`).join("\n");
+    }
+
+    async function walk(dir: string): Promise<string[]> {
+      const out: string[] = [];
+      let entries;
+      try { entries = await readdir(dir, { withFileTypes: true }); } catch { return out; }
+      for (const e of entries) {
+        if (e.name.startsWith(".")) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) out.push(...await walk(p));
+        else if (/\.(html?|md)$/i.test(e.name)) out.push(p);
+      }
+      return out;
+    }
+
+    // Flat listing of every html/md under a dir — the fallback for a folder with no
+    // index.html, and the /_all "see everything" view (catches files not in the
+    // curated hub yet).
+    async function dirListing(dir: string): Promise<string> {
+      const files = (await walk(dir)).sort();
+      const items = files.map(f => `<li><a href="/${relative(ROOT, f)}">${relative(ROOT, f)}</a></li>`).join("\n");
+      const label = relative(ROOT, dir) || "all files";
+      return `<!doctype html><meta charset=utf-8><title>hub — ${label}</title>${DARK}${RELOAD}<h1>🗂️ ${label} <span class=d>${files.length} files · ${ROOT.replace(HOME, "~")}</span></h1><ul>${items}</ul>`;
+    }
+
+    console.error(`→ serving ${ROOT.replace(HOME, "~")} on 0.0.0.0:${PORT} (bun, live-reload)`);
+    Bun.serve({
+      port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
+      async fetch(req) {
+        const p = new URL(req.url).pathname;
+        if (p === "/__reload") {
+          let self: ReadableStreamDefaultController;
+          return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
+            { headers: { "content-type": "text/event-stream", "cache-control": "no-cache", "connection": "keep-alive" } });
+        }
+        if (p === "/_all") return html(await dirListing(ROOT));
+        const rel = decodeURIComponent(p).replace(/^\/+/, "");
+        const path = rel === "" ? ROOT : join(ROOT, rel);
+        if (path !== ROOT && !path.startsWith(ROOT + "/")) return new Response("forbidden", { status: 403 });
+        let st;
+        try { st = await stat(path); } catch { return new Response("not found", { status: 404 }); }
+        if (st.isDirectory()) {
+          const idx = join(path, "index.html");     // the curated hub page at / (or a folder's own index.html)
+          try { if ((await stat(idx)).isFile()) return html((await Bun.file(idx).text()) + RELOAD); } catch {}
+          return html(await dirListing(path));
+        }
+        const ext = extname(path).toLowerCase();
+        if (ext === ".md") return html(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}` + md(await Bun.file(path).text()));
+        if (ext === ".html" || ext === ".htm") return html((await Bun.file(path).text()) + RELOAD);
+        return new Response(Bun.file(path));
+      },
+    });
+    const url = `http://${lanIP}:${PORT}/`;
+    console.error(`  OK — LAN index (curated): ${url}   ·   all files: ${url}_all`);
+    console.error(`━━━ hub ━━━  ${url}   (Ctrl-C to stop)`);
+
+# Bring the hub UP as a persistent detached tmux session (survives this shell).
+# `jg hub` = foreground with live logs; `jg hub-up` = background, keeps running.
+[group('reports')]
+hub-up port="8890":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tmux kill-session -t hub 2>/dev/null || true
+    echo "━━━ just ━━━  tmux new -d -s hub  just -g hub {{port}}" >&2
+    tmux new-session -d -s hub "just -g hub {{port}}"
+    url=""
+    for _ in $(seq 1 15); do
+        url=$(tmux capture-pane -t hub -p 2>/dev/null | grep -oE 'http://[0-9.]+:[0-9]+/' | head -1)
+        [ -n "$url" ] && break
+        sleep 0.2
+    done
+    echo "  OK — hub in tmux session 'hub': ${url:-starting… (tmux attach -t hub)}" >&2
+    echo "  watch:  tmux attach -t hub   (detach = Ctrl-b d)" >&2
+    echo "  stop:   jg hub-down" >&2
+
+# Stop the detached hub session.
+[group('reports')]
+hub-down:
+    #!/usr/bin/env bash
+    if tmux kill-session -t hub 2>/dev/null; then echo "  OK — hub stopped" >&2; else echo "  hub was not running" >&2; fi
+
+# Fix a stuck hub: free the port (kill WHATEVER squats it — a stray `python -m
+# http.server`, an old articles-hub, a zombie bun), clear stale tmux sessions, then
+# start the merged hub fresh. Use whenever :8890 is held by the wrong thing.
+[group('reports')]
+hub-fix port="8890":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ [1/3] checking :{{port}} …" >&2
+    pids=$(lsof -nP -tiTCP:{{port}} -sTCP:LISTEN 2>/dev/null || true)
+    if [ -n "$pids" ]; then
+        for pid in $pids; do
+            cmd=$(ps -p "$pid" -o comm= 2>/dev/null | xargs || true)
+            echo "   :{{port}} held by PID $pid ($cmd) — killing" >&2
+            kill "$pid" 2>/dev/null || true
+        done
+        sleep 0.6
+        pids=$(lsof -nP -tiTCP:{{port}} -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pids" ]; then echo "   still up — forcing (kill -9)" >&2; for pid in $pids; do kill -9 "$pid" 2>/dev/null || true; done; sleep 0.3; fi
+    else
+        echo "   :{{port}} already free" >&2
+    fi
+    echo "→ [2/3] clearing stale tmux sessions (hub, articles-hub) …" >&2
+    tmux kill-session -t hub 2>/dev/null || true
+    tmux kill-session -t articles-hub 2>/dev/null || true
+    echo "→ [3/3] starting the merged hub …" >&2
+    echo "━━━ just ━━━  just -g hub-up {{port}}" >&2
+    just -g hub-up {{port}}
+
+# Default: pop the chooser (use `jjg` from zsh for the grouped preview view)
+default:
+    @just -g --choose
+
+# --- Cheatsheets ------------------------------------------------------------
+#
+# ONE fuzzy entry point for every cheatsheet on the machine. Sources:
+#   1. ~/dotfiles/README.md   — each `## …` section, split into the cache
+#   2. ~/zettelkasten/IT/cheatsheet/**/*.md
+#   3. ~/zettelkasten/claude_code/**/*cheatsheet*.md
+# Nothing is moved: README sections are exploded into ~/.cache/cheat/readme/
+# only when README is newer than the cache. fzf shows "SOURCE  title",
+# previews with bat, Enter opens the full sheet in the pager.
+#
+#   just -g cheat            → browse everything
+#   just -g cheat tmux       → pre-filter the fzf query to "tmux"
+#   just -g cheat-list       → plain list of all sheets (no fzf, scriptable)
+# To add a sheet: drop any *.md into ~/zettelkasten/IT/cheatsheet/ — done.
+
+# Rebuild the README→sections cache (only when README changed). Emits the
+# full tab-delimited index "SOURCE\tTITLE\tPATH" to stdout. Private helper
+# shared by `cheat` and `cheat-list` so the glob/split logic lives once.
+[group('cheat')]
+[private]
+_cheat-index:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # NB: macOS system bash is 3.2 (no globstar) → use find for any-depth walks.
+    cache="$HOME/.cache/cheat/readme"
+    readme="$HOME/dotfiles/README.md"
+    zk="$HOME/zettelkasten"
+    mkdir -p "$cache"
+
+    marker="$cache/.src-mtime"
+    src_mtime=$(stat -f %m "$readme" 2>/dev/null || stat -c %Y "$readme" 2>/dev/null || echo 0)
+    if [ "$(cat "$marker" 2>/dev/null || echo 0)" != "$src_mtime" ]; then
+        echo "→ indexing README sections into $cache ..." >&2
+        rm -f "$cache"/*.md
+        awk -v dir="$cache" '
+            /^## / {
+                n++; title=$0; sub(/^## /,"",title)
+                slug=tolower(title); gsub(/[^a-z0-9]+/,"-",slug); gsub(/^-|-$/,"",slug)
+                cur=sprintf("%s/%02d-%s.md", dir, n, slug)
+            }
+            cur { print > cur }
+        ' "$readme"
+        echo "$src_mtime" > "$marker"
+    fi
+
+    # README sections (one file per `##` heading in the split cache)
+    find "$cache" -maxdepth 1 -name '*.md' 2>/dev/null | sort | while IFS= read -r f; do
+        printf 'README\t%s\t%s\n' "$(head -1 "$f" | sed 's/^#* *//')" "$f"
+    done
+
+    # Every cheatsheet under zettelkasten, any depth: files inside a
+    # `cheatsheet/` dir OR any file with "cheatsheet" in its name. Tag the
+    # SOURCE by top area (claude_code → claude, else zettel). Dedupe by path.
+    if [ -d "$zk" ]; then
+        # -not -path '*/.*/*' skips hidden dirs (.git, .claude/worktrees, .obsidian)
+        { find "$zk" -type f -name '*.md' -path '*/cheatsheet/*' -not -path '*/.*/*' 2>/dev/null
+          find "$zk" -type f -iname '*cheatsheet*.md' -not -path '*/.*/*' 2>/dev/null; } | sort -u | \
+        while IFS= read -r f; do
+            case "$f" in *"/claude_code/"*) src=claude ;; *) src=zettel ;; esac
+            label="$(basename "$(dirname "$f")")/$(basename "$f" .md)"
+            printf '%s\t%s\t%s\n' "$src" "$label" "$f"
+        done
+    fi
+
+# Fuzzy-browse every cheatsheet (README sections + zettelkasten notes)
+[group('cheat')]
+cheat query="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    index=$(just -g _cheat-index | sort -t"$(printf '\t')" -k1,2 -u)
+    if [ -z "$index" ]; then echo "  no cheatsheets found" >&2; exit 1; fi
+
+    # fzf: show "SOURCE  title" (fields 1-2), preview field 3 with bat.
+    pick=$(printf '%s\n' "$index" | \
+        fzf --query="{{query}}" --delimiter='\t' --with-nth=1,2 \
+            --prompt='cheat ❯ ' --height=90% --border --ansi \
+            --preview='bat --color=always --style=numbers,grid {3} 2>/dev/null || cat {3}' \
+            --preview-window='right,65%,wrap')
+    [ -z "$pick" ] && { echo "  (nothing selected)" >&2; exit 0; }
+
+    path=$(printf '%s' "$pick" | cut -f3)
+    bat --paging=always --style=full "$path" 2>/dev/null || less "$path"
+
+# Plain list of all cheatsheets — scriptable, no fzf (SOURCE + title)
+[group('cheat')]
+cheat-list:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    printf "\n  %-8s  %s\n  %-8s  %s\n" "SOURCE" "CHEATSHEET" "------" "----------"
+    just -g _cheat-index | sort -t"$(printf '\t')" -k1,2 -u | \
+        awk -F'\t' '{ printf "  %-8s  %s\n", $1, $2 }'
+    printf "\n"
+
+# --- Git / repo sync --------------------------------------------------------
+
+# Pull dotfiles, show status — used by night-job
+[group('git')]
+dotfiles-sync:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cd "$HOME/dotfiles"
+    echo "→ git -C ~/dotfiles pull --ff-only" >&2
+    git pull --ff-only 2>&1 | sed 's/^/  /' >&2 || echo "  FAIL — non-fast-forward" >&2
+    echo "→ git status --short" >&2
+    git status --short | sed 's/^/  /' >&2 || true
+
+# Pull zettelkasten, show status — used by night-job
+[group('git')]
+zettel-sync:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    zk="$HOME/zettelkasten"
+    if [ ! -d "$zk/.git" ]; then
+        echo "→ $zk is not a git repo — skipping" >&2; exit 0
+    fi
+    cd "$zk"
+    echo "→ git -C ~/zettelkasten pull --ff-only" >&2
+    git pull --ff-only 2>&1 | sed 's/^/  /' >&2 || echo "  FAIL — non-fast-forward" >&2
+    echo "→ git status --short" >&2
+    git status --short | sed 's/^/  /' >&2 || true
+
+# Show uncommitted changes across every git repo under ~/dotfiles, ~/zettelkasten, ~/code
+[group('git')]
+git-status-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ scanning git repos for uncommitted changes..." >&2
+    dirty_count=0
+    for root in "$HOME/dotfiles" "$HOME/zettelkasten" "$HOME/code"; do
+        [ -d "$root" ] || continue
+        while IFS= read -r dot; do
+            repo="$(dirname "$dot")"
+            dirty=$(git -C "$repo" status --short 2>/dev/null)
+            if [ -n "$dirty" ]; then
+                dirty_count=$((dirty_count + 1))
+                echo ""
+                echo "  ${repo/$HOME/~}:"
+                echo "$dirty" | sed 's/^/    /'
+            fi
+        done < <(find "$root" -maxdepth 3 -type d -name .git 2>/dev/null)
+    done
+    echo "  OK — $dirty_count repo(s) with uncommitted changes" >&2
+
+# --- Projects (projctl fleet launcher) --------------------------------------
+
+# projctl — start/stop/watch every tmux-based project from anywhere:
+#   just -g proj              → TUI dashboard
+#   just -g proj up|down|status|git|commits|list|tui
+#   just -g proj add <name> <dir> <session> [port] [extra] [run]
+# Delegates to ~/code/projctl (stowed) so its registry.conf + self-calls resolve.
+[group('projects')]
+proj *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "━━━ projctl ━━━  cd ~/code/projctl && just ${*:-tui}" >&2
+    cd ~/code/projctl && exec just "$@"
+
+# --- Reddit daily digest ----------------------------------------------------
+
+# Build today's Reddit digest (calls ~/code/reddit-digest/run.sh if present)
+[group('night')]
+reddit-digest:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    runner="$HOME/code/reddit-digest/run.sh"
+    if [ -x "$runner" ]; then
+        echo "→ $runner" >&2
+        "$runner"
+    else
+        echo "→ reddit-digest runner not found at $runner — stub" >&2
+        echo "  Create $runner and chmod +x to enable the nightly digest." >&2
+        echo "  Tracked in MEMORY.md → project_reddit_digest" >&2
+        exit 2   # exit-2 = SKIP (night-job differentiates SKIP from FAIL)
+    fi
+
+# --- Night job (the cron entry runs this) -----------------------------------
+
+# Run all nightly automation jobs in sequence; box-render summary to log
+[group('night')]
+night-job:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    cache="$HOME/.cache/night-jobs"
+    mkdir -p "$cache"
+    summary="$cache/summary.log"   # one boxed entry per run (rendered)
+    detail="$cache/detail.log"     # full stdout/stderr from every step
+
+    run_step() {
+        # $1=label  $2=just-target
+        local label="$1" target="$2" out status one
+        out=$(just -g "$target" 2>&1); status=$?
+        {
+            echo ""
+            echo "─── $(date '+%H:%M:%S')  $label ───────────────────────────"
+            echo "$out"
+        } >> "$detail"
+        one=$(echo "$out" | grep -v '^$' | tail -1 | sed 's/^[[:space:]]*//' | head -c 30)
+        case "$status" in
+            0) printf "OK   %s" "${one:-done}" ;;
+            2) printf "SKIP %s" "${one:-skipped}" ;;
+            *) printf "FAIL %s" "${one:-error}" ;;
+        esac
+    }
+
+    start_ts=$(date +%s)
+    label=$(date '+%Y-%m-%d %H:%M:%S')
+    s1=$(run_step "dotfiles-sync" "dotfiles-sync")
+    s2=$(run_step "zettel-sync"    "zettel-sync")
+    s3=$(run_step "reddit-digest"  "reddit-digest")
+    elapsed=$(( $(date +%s) - start_ts ))
+
+    {
+        printf "┌─ %s ─────────────────────────────────────┐\n" "$label"
+        printf "│ [1/3] dotfiles-sync          %-30s│\n" "$s1"
+        printf "│ [2/3] zettel-sync            %-30s│\n" "$s2"
+        printf "│ [3/3] reddit-digest          %-30s│\n" "$s3"
+        printf "│        elapsed: %-42ds│\n" "$elapsed"
+        printf "└────────────────────────────────────────────────────────────┘\n"
+    } | tee -a "$summary"
+
+# Tail the boxed summary log with status colours (default 4 most recent runs)
+[group('night')]
+night-log n="4":
+    #!/usr/bin/env bash
+    [[ "{{n}}" =~ ^[0-9]+$ ]] || { echo "FAIL — n must be a positive integer, got: {{n}}" >&2; exit 1; }
+    log="$HOME/.cache/night-jobs/summary.log"
+    if [ ! -f "$log" ]; then
+        echo "no log yet at $log — run: just -g night-job" >&2; exit 0
+    fi
+    # 6 lines per box → show last n*6 lines, then colourize OK/FAIL/SKIP
+    lines=$(( {{n}} * 6 ))
+    echo "→ tail -$lines $log (last {{n}} box(es))" >&2
+    tail -"$lines" "$log" \
+        | sed -E "s/OK  /$(printf '\033[32m')OK  $(printf '\033[0m')/g" \
+        | sed -E "s/FAIL/$(printf '\033[31m')FAIL$(printf '\033[0m')/g" \
+        | sed -E "s/SKIP/$(printf '\033[33m')SKIP$(printf '\033[0m')/g"
+
+# Tail the full detail log (per-step stdout/stderr) — default last 100 lines
+[group('night')]
+night-log-detail n="100":
+    #!/usr/bin/env bash
+    [[ "{{n}}" =~ ^[0-9]+$ ]] || { echo "FAIL — n must be a positive integer, got: {{n}}" >&2; exit 1; }
+    log="$HOME/.cache/night-jobs/detail.log"
+    if [ ! -f "$log" ]; then
+        echo "no detail log yet at $log — run: just -g night-job" >&2; exit 0
+    fi
+    echo "→ tail -{{n}} $log" >&2
+    tail -{{n}} "$log"
+
+# Install a cron entry that runs night-job at HOUR:00 daily (default 03:00)
+[group('night')]
+night-install hour="3":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    [[ "{{hour}}" =~ ^([0-9]|1[0-9]|2[0-3])$ ]] || { echo "FAIL — hour must be 0-23, got: {{hour}}" >&2; exit 1; }
+    just_bin=$(command -v just || echo /opt/homebrew/bin/just)
+    line="0 {{hour}} * * * $just_bin -g night-job >/dev/null 2>&1"
+    echo "→ proposed crontab entry:" >&2
+    echo "    $line" >&2
+    if crontab -l 2>/dev/null | grep -qF 'just -g night-job'; then
+        echo "  already installed — edit with: crontab -e" >&2; exit 0
+    fi
+    ( crontab -l 2>/dev/null; echo "$line" ) | crontab -
+    echo "  OK — installed. Inspect with: crontab -l" >&2
+
+# Remove the night-job cron entry
+[group('night')]
+night-uninstall:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! crontab -l 2>/dev/null | grep -qF 'just -g night-job'; then
+        echo "→ no night-job cron entry to remove" >&2; exit 0
+    fi
+    crontab -l 2>/dev/null | grep -vF 'just -g night-job' | crontab -
+    echo "  OK — removed." >&2
+
+# Show currently installed cron entries
+[group('night')]
+cron-list:
+    #!/usr/bin/env bash
+    echo "→ crontab -l" >&2
+    crontab -l 2>/dev/null || echo "  (no crontab installed)"
+
+# --- Network / system info --------------------------------------------------
+
+# Current public IP
+[group('system')]
+ip:
+    #!/usr/bin/env bash
+    echo "━━━ xh -b --ignore-stdin GET https://ifconfig.me/ip ━━━" >&2
+    xh -b --ignore-stdin GET https://ifconfig.me/ip && echo ""
+
+# Local weather, optional CITY arg (multi-word OK: `weather "New York"`)
+[group('system')]
+weather city="":
+    #!/usr/bin/env bash
+    # URL-encode the city so spaces / non-ASCII work
+    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+    url="https://wttr.in/${city_enc}?format=3"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"; echo
+
+# Multi-day ASCII forecast from wttr.in. days=1|2|3 (wttr max is 3).
+[group('system')]
+forecast city="" days="3":
+    #!/usr/bin/env bash
+    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+    # ?{{days}} limits days; F=hide follow line, M=metric wind, q=no header
+    url="https://wttr.in/${city_enc}?{{days}}FMq"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
+
+# Compact wttr.in view — morning/noon/evening/night summary table, narrower
+[group('system')]
+forecast-narrow city="":
+    #!/usr/bin/env bash
+    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+    url="https://wttr.in/${city_enc}?nFMq"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
+
+# Resolve a city (or auto-detect via ip-api) → lat<TAB>lon<TAB>name on stdout
+[group('system')]
+[private]
+_resolve-location city="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    if [ -z "{{city}}" ]; then
+        geo_url="http://ip-api.com/json/?fields=city,lat,lon"
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        xh -b --ignore-stdin GET "$geo_url" | jq -r '[.lat, .lon, .city] | @tsv'
+    else
+        city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+        geo_url="https://geocoding-api.open-meteo.com/v1/search?count=1&name=${city_enc}"
+        echo "━━━ xh -b --ignore-stdin GET '$geo_url' ━━━" >&2
+        out=$(xh -b --ignore-stdin GET "$geo_url" | jq -r ".results[0] // empty | [.latitude, .longitude, (.name // \"{{city}}\")] | @tsv")
+        [ -z "$out" ] && { echo "  FAIL — city '{{city}}' not found" >&2; exit 1; }
+        printf '%s\n' "$out"
+    fi
+
+# Pretty 24h chart: Unicode temp chart + rain/precip-prob/wind bars (Open-Meteo)
+[group('system')]
+forecast-chart city="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching 24h forecast for $name..." >&2
+    url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$url")
+    NAME="$name" JSON="$fc" python3 - <<'PY'
+    import json, sys, os, math
+    data = json.loads(os.environ['JSON'])
+    h = data['hourly']
+    N = min(24, len(h['time']))
+    times  = h['time'][:N]
+    temps  = h['temperature_2m'][:N]
+    precip = h['precipitation'][:N]
+    pprob  = h['precipitation_probability'][:N]
+    wind   = h['wind_speed_10m'][:N]
+    name   = os.environ.get('NAME', '')
+    W = 2  # column width (each hour spans W chars)
+    # ── temp chart bounds, snapped to multiples of 3°
+    tmin, tmax = min(temps), max(temps)
+    span = max(tmax - tmin, 3)
+    tmin_r = math.floor((tmin - span * 0.1) / 3) * 3
+    tmax_r = math.ceil ((tmax + span * 0.1) / 3) * 3
+    rows = 5
+    step = (tmax_r - tmin_r) / rows
+    blocks = ' ▁▂▃▄▅▆▇█'
+    GREEN = "\033[38;5;82m"; YELLOW = "\033[38;5;226m"; RED = "\033[38;5;203m"
+    BLUE  = "\033[38;5;39m"; GREY = "\033[38;5;244m"; RESET = "\033[0m"
+    def temp_color(t):
+        if t < 5:  return BLUE
+        if t < 15: return GREEN
+        if t < 25: return YELLOW
+        return RED
+    # build chart matrix
+    def temp_cell(t, r):
+        cell_bot = tmin_r + r * step
+        cell_top = tmin_r + (r + 1) * step
+        if t >= cell_top: return '█'
+        if t <= cell_bot: return ' '
+        frac = (t - cell_bot) / step
+        return blocks[min(8, max(1, round(frac * 8)))]
+    print()
+    header_pad = max(0, 52 - len(name) - len(" · next 24h "))
+    print(f"  ──── {GREY}{name}{RESET} · next 24h " + "─" * header_pad)
+    for r in range(rows - 1, -1, -1):
+        label = f"{int(tmin_r + (r + 1) * step):3d}°"
+        line = ''
+        for t in temps:
+            ch = temp_cell(t, r)
+            line += (temp_color(t) + ch + RESET) * W
+        print(f"  {label}┤{line}")
+    print(f"      └" + "─" * (N * W))
+    xax_chars = []
+    for i in range(N):
+        hh = int(times[i][11:13])
+        if i % 3 == 0:
+            xax_chars.append(f"{hh:02d}" + " " * (W * 3 - 2))
+    print("       " + "".join(xax_chars))
+    # ── bottom strips
+    def shaded_bar(vals, maxv):
+        out = ''
+        for v in vals:
+            f = min(1.0, v / maxv) if maxv > 0 else 0
+            if f < 0.01:   c = ' '
+            elif f < 0.25: c = '░'
+            elif f < 0.50: c = '▒'
+            elif f < 0.75: c = '▓'
+            else:          c = '█'
+            out += c * W
+        return out
+    def block_bar(vals, maxv):
+        out = ''
+        for v in vals:
+            f = min(1.0, v / maxv) if maxv > 0 else 0
+            ch = ' ' if f < 0.01 else blocks[min(8, max(1, round(f * 8)))]
+            out += ch * W
+        return out
+    print()
+    rain_max = max(precip) if precip else 0
+    wind_max = max(wind)   if wind   else 0
+    print(f"  rain  │{BLUE}{block_bar(precip, max(rain_max, 0.1))}{RESET}│ max {rain_max:.1f} mm")
+    print(f"  p(%)  │{BLUE}{shaded_bar(pprob, 100)}{RESET}│ peak {max(pprob)}%")
+    print(f"  wind  │{GREY}{block_bar(wind, max(wind_max, 1))}{RESET}│ {min(wind):.0f}–{wind_max:.0f} km/h")
+    print()
+    PY
+
+# wttr.in v2 — graph view: hourly temp curve, precip bars, wind arrows (3 days)
+[group('system')]
+forecast-graph city="":
+    #!/usr/bin/env bash
+    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+    url="https://wttr.in/${city_enc}?format=v2"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url"
+
+# Hourly numeric table for next 24h via Open-Meteo
+[group('system')]
+forecast-hourly city="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching next 24h for $name..." >&2
+    url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&hourly=temperature_2m,precipitation,precipitation_probability,wind_speed_10m&forecast_hours=24&timezone=auto"
+    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+    xh -b --ignore-stdin GET "$url" | jq -r '
+        .hourly as $h
+        | "  time              temp    precip   p(%)   wind",
+          "  ──────────────────────────────────────────────────",
+          (range(0; $h.time|length) as $k |
+            "  \($h.time[$k] | sub("T"; " "))   \($h.temperature_2m[$k])°    \($h.precipitation[$k])mm    \($h.precipitation_probability[$k])%    \($h.wind_speed_10m[$k]) km/h")
+    '
+
+# 7-day forecast via Open-Meteo (free, no key). Resolves city → lat/lon first.
+[group('system')]
+forecast-week city="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "[1/2] resolving location..." >&2
+    IFS=$'\t' read -r lat lon name < <(just -g _resolve-location "{{city}}")
+    [ -z "$lat" ] && exit 1
+    echo "[2/2] fetching 7-day forecast for $name (lat=$lat lon=$lon)..." >&2
+    fc_url="https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code&timezone=auto&forecast_days=7"
+    echo "━━━ xh -b --ignore-stdin GET '$fc_url' ━━━" >&2
+    fc=$(xh -b --ignore-stdin GET "$fc_url")
+    echo "$fc" | jq -r '
+        def wmo(c):
+            {"0":"☀️  clear","1":"🌤️  mostly clear","2":"⛅️ partly cloudy","3":"☁️  overcast",
+             "45":"🌫️  fog","48":"🌫️  rime fog","51":"🌦️  drizzle","53":"🌦️  drizzle","55":"🌦️  drizzle",
+             "61":"🌧️  rain","63":"🌧️  rain","65":"🌧️  heavy rain","71":"🌨️  snow","73":"🌨️  snow",
+             "75":"🌨️  heavy snow","80":"🌦️  showers","81":"🌦️  showers","82":"⛈️  violent showers",
+             "95":"⛈️  thunderstorm","96":"⛈️  thunder+hail","99":"⛈️  thunder+hail"}[c|tostring] // "  ?";
+        .daily as $d
+        | "  date          min   max   precip   weather",
+          "  ───────────────────────────────────────────────",
+          (range(0; $d.time|length) as $k |
+            "  \($d.time[$k])  \($d.temperature_2m_min[$k])°  \($d.temperature_2m_max[$k])°   \($d.precipitation_sum[$k])mm    \(wmo($d.weather_code[$k]))")
+    '
+
+# Listening TCP ports
+[group('system')]
+ports:
+    #!/usr/bin/env bash
+    echo "→ lsof -iTCP -sTCP:LISTEN -P -n" >&2
+    lsof -iTCP -sTCP:LISTEN -P -n 2>/dev/null | awk 'NR==1 || /LISTEN/'
+
+# --- Disk usage / cleanup (macOS) -------------------------------------------
+#
+# WHAT THIS IS — one console for "why is my disk full and how do I fix it".
+# CHECK recipes are read-only. CLEAN recipes are DRY-RUN by default and only
+# delete when you pass apply=1 (or, for snapshots/docker, run the named recipe).
+#
+#   just -g disk                  overview: free space + snapshots + top ~ dirs
+#   just -g disk-top DIR n        top-N biggest entries under DIR   (default: ~ , 15)
+#   just -g disk-hogs             ranked "usual suspects" (Docker.raw, caches, Xcode, node_modules, Trash)
+#   just -g disk-snapshots        list APFS local snapshots — the invisible eater
+#   just -g disk-clean [1]        SAFE cleanup — dry-run; add `1` to actually delete
+#   just -g disk-clean-snapshots  thin APFS local snapshots (reclaims "purgeable" GB, needs sudo)
+#   just -g disk-clean-docker     docker system prune -a --volumes (confirms first)
+
+# Cheat-sheet of the disk-* recipes
+[group('disk')]
+disk-help:
+    #!/usr/bin/env bash
+    cat >&2 <<'EOF'
+    disk-*  —  macOS disk check & cleanup
+
+    CHECK (read-only):
+      disk                overview: free space, snapshot count, top 15 dirs in ~
+      disk-top DIR n      top-N biggest entries under DIR (default ~ , 15)
+                          e.g.  just -g disk-top ~/Library 20
+      disk-hogs           ranked usual suspects (Docker.raw, caches, Xcode, node_modules…)
+      disk-snapshots      list APFS local Time Machine snapshots
+
+    CLEAN (dry-run unless told otherwise):
+      disk-clean          show what SAFE cleanup would free (Trash, caches, tmp)
+      disk-clean 1        actually delete those safe targets
+      disk-clean-snapshots   thin APFS snapshots — biggest single win, needs sudo
+      disk-clean-docker      docker system prune -a --volumes (asks first)
+
+    Typical fix when disk is 100%:
+      just -g disk-clean-snapshots   # frees the invisible "purgeable" GB
+      just -g disk-hogs              # find the real hog
+      just -g disk-clean 1           # wipe safe caches/Trash/tmp
+    EOF
+
+# Overview: free space + APFS snapshot count + top 15 dirs in $HOME
+[group('disk')]
+disk:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ disk overview" >&2
+    echo "── free space (Data volume) ──"
+    df -H /System/Volumes/Data
+    n=$(tmutil listlocalsnapshots / 2>/dev/null | grep -c 'com.apple') || n=0
+    echo ""
+    echo "── APFS local snapshots: ${n:-0}  (list: just -g disk-snapshots · reclaim: just -g disk-clean-snapshots) ──"
+    echo ""
+    echo "── top 15 dirs in \$HOME (incl. hidden dotdirs like ~/.docker) ──"
+    du -sh "$HOME"/* "$HOME"/.[!.]* 2>/dev/null | sort -rh | head -15 || true
+
+# Top-N biggest entries under a dir (params over variants). dir default ~, n default 15
+[group('disk')]
+disk-top dir="" n="15":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    d="{{dir}}"; [ -z "$d" ] && d="$HOME"
+    d="${d/#\~/$HOME}"                       # expand a leading ~
+    echo "→ du -sh top {{n}} under $d (incl. dotfiles)" >&2
+    du -sh "$d"/* "$d"/.[!.]* 2>/dev/null | sort -rh | head -{{n}} || true
+
+# Ranked scan of the usual macOS/dev disk hogs (Docker.raw, caches, Xcode, node_modules, Trash)
+[group('disk')]
+disk-hogs:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ scanning usual disk hogs (du can take ~30s)..." >&2
+    tmp=$(mktemp)
+    add() { [ -e "$2" ] && du -sh "$2" 2>/dev/null | awk -v l="$1" -F'\t' '{print $1"\t"l}' >> "$tmp"; }
+    add "Docker.raw"          "$HOME/Library/Containers/com.docker.docker/Data/vms/0/data/Docker.raw"
+    for f in "$HOME/Library/Containers/com.docker.docker/Data/"*.raw; do add "Docker.raw" "$f"; done
+    add "Library/Caches"      "$HOME/Library/Caches"
+    add "Homebrew cache"      "$HOME/Library/Caches/Homebrew"
+    add "Xcode DerivedData"   "$HOME/Library/Developer/Xcode/DerivedData"
+    add "iOS Simulators"      "$HOME/Library/Developer/CoreSimulator/Devices"
+    add "iOS DeviceSupport"   "$HOME/Library/Developer/Xcode/iOS DeviceSupport"
+    add "Trash"               "$HOME/.Trash"
+    add "npm cache"           "$HOME/.npm"
+    add "pip/uv cache"        "$HOME/.cache"
+    add "App Support"         "$HOME/Library/Application Support"
+    # node_modules across ~/code (summed) — often GBs spread over many repos
+    if [ -d "$HOME/code" ]; then
+        echo "  …summing node_modules under ~/code" >&2
+        nm=$(find "$HOME/code" -name node_modules -type d -prune 2>/dev/null \
+             | xargs -I{} du -sk {} 2>/dev/null | awk '{s+=$1} END{printf "%.1fG", s/1024/1024}')
+        [ -n "$nm" ] && printf '%s\t%s\n' "$nm" "node_modules (~/code, summed)" >> "$tmp"
+    fi
+    echo "" >&2
+    echo "── biggest hogs (top → bottom) ──"
+    sort -rh "$tmp" | awk -F'\t' '{printf "  %-8s  %s\n", $1, $2}'
+    rm -f "$tmp"
+    echo "" >&2
+    echo "  fix Docker.raw:  docker system prune -a --volumes   (or just -g disk-clean-docker)" >&2
+    echo "  fix caches/Trash: just -g disk-clean 1" >&2
+
+# List APFS local Time Machine snapshots (the space that du can't see)
+[group('disk')]
+disk-snapshots:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ tmutil listlocalsnapshots /" >&2
+    out=$(tmutil listlocalsnapshots / 2>/dev/null | grep 'com.apple' || true)
+    if [ -z "$out" ]; then
+        echo "  none — no local snapshots holding space" >&2
+    else
+        echo "$out"
+        echo "" >&2
+        echo "  reclaim all: just -g disk-clean-snapshots" >&2
+    fi
+
+# SAFE cleanup — Trash, user caches, Homebrew cache, npm, Claude tmp.
+# Always previews sizes first. apply=0 → dry-run (default); apply=1 → preview then gum-confirm then delete.
+[group('disk')]
+disk-clean apply="0":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    A="{{apply}}"
+    targets=(
+        "$HOME/.Trash"
+        "$HOME/Library/Caches"
+        "$HOME/Library/Caches/Homebrew"
+        "$HOME/.npm/_cacache"
+        "/private/tmp/claude-501"
+    )
+    # ── 1. preview: measure every present target + total ──
+    echo "→ disk-clean — the following would be deleted:" >&2
+    present=(); total_kb=0
+    for t in "${targets[@]}"; do
+        [ -e "$t" ] || { echo "  · skip (absent): $t" >&2; continue; }
+        sz=$(du -sh  "$t" 2>/dev/null | cut -f1); [ -z "$sz" ] && sz="0B"
+        kb=$(du -sk  "$t" 2>/dev/null | cut -f1); [ -z "$kb" ] && kb=0
+        printf "  ✗ %-7s  %s\n" "$sz" "$t/*" >&2
+        present+=("$t"); total_kb=$((total_kb + kb))
+    done
+    total_h=$(awk -v k="$total_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
+    echo "  ── total to reclaim: ~$total_h ──" >&2
+
+    # ── 2. dry-run stops here ──
+    if [ "$A" != "1" ]; then
+        echo "  (dry-run — nothing deleted. Run 'just -g disk-clean 1' to delete with confirmation.)" >&2
+        exit 0
+    fi
+
+    # ── 3. confirm (gum preferred, y/N fallback) ──
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Delete the ${#present[@]} targets above (~$total_h)?" || { echo "  aborted — nothing deleted." >&2; exit 0; }
+    else
+        printf "  Delete the %d targets above (~%s)? [y/N] " "${#present[@]}" "$total_h" >&2; read -r ans
+        [ "$ans" = "y" ] || { echo "  aborted — nothing deleted." >&2; exit 0; }
+    fi
+
+    # ── 4. delete ──
+    before=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    i=0; N=${#present[@]}
+    for t in "${present[@]}"; do
+        i=$((i+1))
+        echo "  [$i/$N] wiping $t ..." >&2
+        rm -rf "$t"/* 2>/dev/null && echo "      OK" >&2 || echo "      FAIL (in use / perms)" >&2
+    done
+    after=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    freed=$(( (after - before) / 1024 ))
+    echo "" >&2
+    echo "disk-clean: done — freed ~${freed} MiB · free now: $(df -H /System/Volumes/Data | awk 'END{print $4}')" >&2
+
+# Thin APFS local snapshots — reclaims "purgeable" space (needs sudo). Biggest single win
+[group('disk')]
+disk-clean-snapshots:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "→ thinning APFS local snapshots (needs sudo)" >&2
+    echo "  before: $(df -H /System/Volumes/Data | awk 'END{print $4}') free" >&2
+    sudo tmutil thinlocalsnapshots / 999999999999 4 || { echo "  FAIL" >&2; exit 1; }
+    echo "  after:  $(df -H /System/Volumes/Data | awk 'END{print $4}') free" >&2
+    echo "  OK" >&2
+
+# Reclaim Docker disk (prune unused images/containers/volumes/build cache). Asks first
+[group('disk')]
+disk-clean-docker:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v docker >/dev/null 2>&1 || { echo "  docker not installed — nothing to do" >&2; exit 0; }
+    echo "→ docker system df (current usage)" >&2
+    docker system df 2>/dev/null || { echo "  docker daemon not running — start Docker Desktop" >&2; exit 1; }
+    if command -v gum >/dev/null 2>&1; then
+        gum confirm "Run docker system prune -a --volumes ?" || { echo "  aborted" >&2; exit 0; }
+    else
+        printf "  Run docker system prune -a --volumes ? [y/N] " >&2; read -r ans
+        [ "$ans" = "y" ] || { echo "  aborted" >&2; exit 0; }
+    fi
+    echo "→ docker system prune -a --volumes -f" >&2
+    docker system prune -a --volumes -f
+    echo "  OK — note: Docker.raw only shrinks after Docker Desktop → Troubleshoot → Clean/Purge" >&2
+
+# --- Todoist / Claude quick refs --------------------------------------------
+
+# Today's Todoist tasks (uses $TODOIST_TOKEN from ~/dotfiles/.env)
+[group('claude/todoist')]
+todo-today:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    [ -f "$HOME/dotfiles/.env" ] && set -a && source "$HOME/dotfiles/.env" && set +a
+    if [ -z "${TODOIST_TOKEN:-}" ]; then
+        echo "TODOIST_TOKEN not set — add it to ~/dotfiles/.env" >&2; exit 1
+    fi
+    echo "━━━ xh -b --ignore-stdin GET 'https://api.todoist.com/api/v1/tasks' filter==today 'Authorization:Bearer \$TODOIST_TOKEN' ━━━" >&2
+    xh -b --ignore-stdin GET "https://api.todoist.com/api/v1/tasks" \
+        filter==today \
+        "Authorization:Bearer $TODOIST_TOKEN" \
+        | jq -r '.results[]? | "  • \(.content)   [\(.id)]"' 2>/dev/null \
+        || echo "  (no tasks or jq missing)"
+
+# Forward to the project-local Claude statusline tokens recipe
+[group('claude/todoist')]
+tokens:
+    #!/usr/bin/env bash
+    echo "━━━ just ━━━  cd ~/dotfiles && just tokens" >&2
+    cd ~/dotfiles && exec just tokens
+
+# --- Search / FS helpers ----------------------------------------------------
+
+# Fuzzy-pick a directory under ~ via fd + fzf, print path
+[group('search')]
+pickdir:
+    #!/usr/bin/env bash
+    echo "→ fd dirs under \$HOME → fzf..." >&2
+    fd --type d --hidden --exclude .git --exclude node_modules . "$HOME" \
+        | fzf --prompt="cd → " --height=50% --border --preview='ls -la {}'
+
+# ast-grep: structural (AST-aware) code search — matches SYNTAX, not text.
+# $CODE-patterns with metavariables: $X = one node, $$$ = any number of nodes.
+# Unlike rg, ніколи не спрацює на коментарі/рядку — тільки на реальному коді.
+[group('search')]
+astg pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} ━━━" >&2
+    ast-grep run -p '{{pattern}}' -l {{lang}} .
+
+# ast-grep interactive: results → fzf + bat preview, Enter = nvim at the line
+[group('search')]
+astgp pattern lang="python":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "━━━ ast-grep run -p '{{pattern}}' -l {{lang}} --json ━━━" >&2
+    pick=$(ast-grep run -p '{{pattern}}' -l {{lang}} --json=compact . \
+        | jq -r '.[] | "\(.file):\(.range.start.line + 1): \(.lines | split("\n")[0])"' \
+        | fzf --prompt='ast-grep → ' --height=70% --border --delimiter=: \
+              --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2') || exit 0
+    nvim "+$(echo "$pick" | cut -d: -f2)" "$(echo "$pick" | cut -d: -f1)"
+
+# ast-grep cheatsheet — house-rule hunts for rescue-serverless
+[group('search')]
+astg-help:
+    @echo 'ast-grep — структурний пошук по AST (не текст — синтаксис)'
+    @echo ''
+    @echo '  СУТЬ: $X = будь-який ОДИН вузол, $$$ = скільки завгодно вузлів.'
+    @echo '  rg знайде getattr і в коментарі/рядку — ast-grep тільки РЕАЛЬНИЙ виклик.'
+    @echo ''
+    @echo '  Полювання на house-rule порушення:'
+    @echo '    just -g astg "getattr($O, $A)"            # заборонений getattr'
+    @echo '    just -g astg "hasattr($O, $A)"            # заборонений hasattr'
+    @echo '    just -g astg "$T.scan($$$)"               # DynamoDB scan без дозволу'
+    @echo '    just -g astg "print($$$)"                 # debug-leftover print'
+    @echo '    just -g astg "except $E: pass"            # проковтнутий exception'
+    @echo ''
+    @echo '  Рефакторинг з заміною (spot-check перед --update-all):'
+    @echo '    ast-grep run -p "$X.format($$$)" -r "f-string тут" -l python .'
+    @echo ''
+    @echo '  Інтерактивно: just -g astgp "<pattern>"     # fzf+bat, Enter → nvim'
+    @echo '  Мови: -l python|ts|tsx|js|rust|go|lua ...'
+
+# rg + bat preview from the current dir
+[group('search')]
+rgp pattern:
+    #!/usr/bin/env bash
+    echo "→ rg '{{pattern}}' in $(pwd) → fzf+bat preview..." >&2
+    rg --color=always --line-number -- "{{pattern}}" \
+        | fzf --ansi --delimiter=: \
+              --preview='bat --color=always --style=numbers --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2'
+
+# П'ятнична stale-тріаж (self-review pro-note #1): кожен PR старший за
+# N днів без оновлень — merge / close / явний план. Мета: у п'ятницю 0 рядків.
+[group('git')]
+pr-stale days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ мої open PR, stale > {{days}}d (мета: порожньо)…" >&2
+    gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.createdAt | fromdateiso8601)) / 86400 | floor | tostring) + "d open"),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:55], .url] | @tsv' \
+        | { grep . || { echo "  ✅ 0 stale PR — тріаж чистий" >&2; exit 0; }; } \
+        | while IFS=$'\t' read -r n open stale title url; do
+            printf "  🔴 #%-5s %-9s %-10s %s\n     %s\n" "$n" "$open" "$stale" "$title" "$url"
+          done
+    echo "" >&2
+    echo "  Правило: merge / close / коментар-план — третього не дано." >&2
+
+# Інтерактивна тріаж stale PR-ів (gum): по кожному — merge / план / close / skip.
+# П'ятничний ритуал з pr-stale, але з діями замість списку. Merge = --merge
+# (конвенція репо — merge commits). Всі дії робиш ТИ — з confirm-ами.
+[group('git')]
+pr-stale-fix days="7":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    echo "→ інтерактивна тріаж stale > {{days}}d…" >&2
+    list=$(gh pr list --author "@me" --state open \
+        --json number,title,updatedAt,createdAt,url \
+        | jq -r --argjson d {{days}} '
+            .[] | select((now - (.updatedAt | fromdateiso8601)) / 86400 > $d)
+            | [(.number | tostring),
+               (((now - (.updatedAt | fromdateiso8601)) / 86400 | floor | tostring) + "d stale"),
+               .title[:60], .url] | @tsv')
+    if [ -z "$list" ]; then gum style --foreground 2 --bold "✅ 0 stale PR — тріаж чистий"; exit 0; fi
+    while IFS=$'\t' read -r n age title url; do
+        gum style --border rounded --padding "0 1" --border-foreground 3 "#$n · $age" "$title"
+        act=$(gum choose --header "Що робимо з #$n?" \
+            "🌐 відкрити в браузері" "✅ merge" "📝 план-коментар" "❌ close" "⏭ skip") || act="⏭ skip"
+        case "$act" in
+            🌐*) echo "  → open $url" >&2; open "$url" ;;
+            ✅*) gum confirm "Merge #$n (--merge)?" \
+                    && { echo "  ━━━ gh pr merge $n --merge ━━━" >&2; gh pr merge "$n" --merge; } ;;
+            📝*) plan=$(gum write --header "План по #$n (порожньо = скасувати)" \
+                        --placeholder "що і коли зробиш; це піде коментарем у PR") || plan=""
+                 if [ -n "$plan" ]; then
+                     echo "  ━━━ gh pr comment $n --body <план> ━━━" >&2
+                     gh pr comment "$n" --body "$plan" >/dev/null && echo "  OK — коментар запощено" >&2
+                 fi ;;
+            ❌*) gum confirm "Close #$n?" \
+                    && { echo "  ━━━ gh pr close $n ━━━" >&2; gh pr close "$n"; } ;;
+            *) echo "  ⏭ пропущено" >&2 ;;
+        esac
+    done <<< "$list"
+    echo "" >&2; just -g pr-stale {{days}}
+
+# gh-dash: TUI-дашборд усіх PR/issues (0 токенів — без Claude). Розділи й
+# фільтри — стандартний конфіг gh-dash (~/.config/gh-dash/config.yml).
+[group('git')]
+dash:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ gh dash (q — вийти, ? — довідка)…" >&2
+    gh dash
+
+# house-rules gate (self-review pro-note #2): ast-grep по ЗМІНЕНИХ python-файлах
+# vs merge-base — ловить машинно-перевірювані правила ДО пушу/рев'ю.
+# Патерни = найчастіші класи зі 123 feedback-пам'ятей.
+[group('git')]
+rules-check base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ house-rules gate: ast-grep по diff vs {{base}}…" >&2
+    mb=$(git merge-base {{base}} HEAD 2>/dev/null || echo {{base}})
+    files=$( { git diff --name-only "$mb"; git diff --name-only; } | sort -u | grep '\.py$' || true)
+    if [ -z "$files" ]; then echo "  ✅ python-файлів у diff нема" >&2; exit 0; fi
+    echo "  файлів: $(echo "$files" | wc -l | tr -d ' ')" >&2
+    fail=0
+    check() { # $1=pattern $2=label
+        local hits
+        hits=$(echo "$files" | xargs ast-grep run -p "$1" -l python 2>/dev/null || true)
+        if [ -n "$hits" ]; then
+            echo ""; echo "  🔴 $2  (pattern: $1)"
+            echo "$hits" | sed 's/^/     /' | head -12
+            fail=1
+        fi
+    }
+    check 'getattr($O, $A)'   'getattr заборонений — прямий доступ до Pydantic-поля'
+    check 'hasattr($O, $A)'   'hasattr заборонений'
+    check '$T.scan($$$)'      'DynamoDB scan без дозволу — Query або GSI'
+    check 'print($$$)'        'debug print — прибери або logger'
+    check 'except $E: pass'   'проковтнутий exception — logger.exception обов'"'"'язковий'
+    if [ "$fail" -eq 0 ]; then echo "  ✅ house-rules чисто" >&2
+    else echo "" ; echo "  FAIL — виправ або усвідомлено проігноруй (звіт вище)" >&2; exit 1; fi
+
+# --- TIL: engineering growth loop -------------------------------------------
+# Capture: /til у Claude-сесії пише wiki/til-*.md у zettelkasten.
+# Review:  ці рецепти — читання, повторення (spaced repetition), пошук.
+
+TIL_DIR := env_var('HOME') / "zettelkasten/claude_code/wiki"
+
+# Browse all TILs: fzf + bat preview, Enter = open in nvim
+[group('til')]
+til:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ TIL browser ({{TIL_DIR}}/til-*.md) → fzf+bat..." >&2
+    pick=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -r \
+        | fzf --prompt="TIL → " --height=80% --border \
+              --preview='bat --color=always --style=plain {}' \
+              --preview-window='right,65%') || { echo "  (нічого не обрано)" >&2; exit 0; }
+    nvim "$pick"
+
+# Random TIL in the terminal — spaced repetition, add to shell startup or cron
+[group('til')]
+til-random:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    f=$(fd 'til-.*\.md' "{{TIL_DIR}}" 2>/dev/null | sort -R | head -1)
+    if [ -z "$f" ]; then echo "  поки нема TIL — у Claude-сесії: /til <що вивчив>" >&2; exit 0; fi
+    echo "━━━ 🎲 random TIL: $(basename "$f") ━━━" >&2
+    bat --color=always --style=plain "$f"
+
+# Full-text search across TILs (rg + fzf + bat)
+[group('til')]
+til-grep pattern:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ rg '{{pattern}}' у TIL-ах..." >&2
+    rg --color=always --line-number -- "{{pattern}}" "{{TIL_DIR}}" --glob 'til-*.md' \
+        | fzf --ansi --delimiter=: \
+              --preview='bat --color=always --style=plain --highlight-line {2} {1}' \
+              --preview-window='right,60%,+{2}/2'
+
+# Новий TIL з терміналу (gum) — без Claude: title → topic → body → нотатка
+# з vault-frontmatter + рядок у log.md. Для перевірених технічних фактів
+# краще /til (Claude верифікує) — це швидкий ручний шлях.
+[group('til')]
+til-new:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    command -v gum >/dev/null 2>&1 || { echo "  gum відсутній: brew install gum" >&2; exit 1; }
+    title=$(gum input --header "TIL — що вивчив? (один рядок)" --width 80) || exit 0
+    [ -z "$title" ] && exit 0
+    topic=$(gum choose --header "Топік:" \
+        "topic/backend" "topic/aws" "topic/python" "topic/devops" \
+        "topic/tooling" "topic/dotfiles" "topic/git" "topic/llm") || topic="topic/misc"
+    body=$(gum write --header "Тіло (Що вивчив / Чому так / Приклад / Як застосовувати)" \
+        --width 100 --height 12) || body=""
+    slug=$(echo "$title" | iconv -t ascii//TRANSLIT 2>/dev/null | tr '[:upper:]' '[:lower:]' \
+        | sed 's/[^a-z0-9]\+/-/g; s/^-//; s/-$//' | cut -c1-40)
+    [ -z "$slug" ] && slug="note-$(date +%H%M%S)"
+    d=$(date +%F)
+    f="{{TIL_DIR}}/til-$d-$slug.md"
+    {
+        printf -- '---\ntags: [wiki, til, %s]\ntype: wiki\nproject: misc\ndate: %s\naliases: []\n---\n\n' "$topic" "$d"
+        printf '# TIL — %s\n\n%s\n\n## Related\n- [[MOC-wiki]]\n' "$title" "$body"
+    } > "$f"
+    echo "- [[wiki/til-$d-$slug]] \`til\` — $title  $d" >> "$HOME/zettelkasten/claude_code/log.md"
+    gum style --border rounded --padding "0 1" --border-foreground 2 \
+        "✅ $f" "переглянути: just -g til · повторення: til-random"
+
+# TIL cheatsheet
+[group('til')]
+til-help:
+    @echo "TIL — конвеєр інженерного росту (capture → review → repeat)"
+    @echo ""
+    @echo "  /til <урок>        # у Claude-сесії: перевірена лекція → wiki/til-*.md"
+    @echo "  /til               # без арг.: Claude майнить уроки з поточної сесії"
+    @echo "  just -g til-new    # швидкий TIL з терміналу (gum, без Claude)"
+    @echo "  just -g til        # fzf+bat браузер, Enter → nvim"
+    @echo "  just -g til-random # випадковий TIL (spaced repetition; 1/день у новому терміналі)"
+    @echo "  just -g til-grep X # повнотекстовий пошук"
+    @echo ""
+    @echo "  Файли: ~/zettelkasten/claude_code/wiki/til-YYYY-MM-DD-<slug>.md"
+
+# --- Self-help --------------------------------------------------------------
+
+# List all global recipes
+[group('self')]
+ls:
+    @just -g --list
+
+# Show source of a recipe without running it
+[group('self')]
+show recipe:
+    @just -g --show {{recipe}}

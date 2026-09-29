@@ -1,0 +1,3 @@
+# Explicitly unrestricted profile. Start with: codex --profile auto
+approval_policy = "never"
+sandbox_mode = "danger-full-access"

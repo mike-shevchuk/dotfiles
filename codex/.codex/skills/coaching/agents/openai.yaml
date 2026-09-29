@@ -1,0 +1,4 @@
+interface:
+  display_name: "coaching"
+  short_description: "Run the coaching workflow"
+  default_prompt: "Use $coaching for this task."

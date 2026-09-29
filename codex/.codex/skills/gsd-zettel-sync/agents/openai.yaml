@@ -1,0 +1,4 @@
+interface:
+  display_name: "gsd zettel sync"
+  short_description: "Run the gsd zettel sync workflow"
+  default_prompt: "Use $gsd-zettel-sync for this task."

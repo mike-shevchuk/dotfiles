@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# pre-push hook for ~/dotfiles
+# ─────────────────────────────────────────────────────────────────────────────
+# Warns when ~/zettelkasten has unpushed commits, because dotfiles often
+# references content that lives in zettelkasten (CLAUDE.md files registered
+# via `just claudes-add`, .target paths, project notes). If dotfiles ships
+# without zettelkasten catching up, the second machine sees a `claudes-link`
+# pointing at content the remote doesn't have yet.
+#
+# This hook NEVER blocks the push — it only warns and offers to push
+# zettelkasten interactively. Set DOTFILES_SKIP_ZK_CHECK=1 to silence it.
+#
+# Install:  just hooks-install
+# Disable:  git -C ~/dotfiles config --unset core.hooksPath
+# ─────────────────────────────────────────────────────────────────────────────
+
+set -e
+
+[ "${DOTFILES_SKIP_ZK_CHECK:-0}" = "1" ] && exit 0
+
+zk="$HOME/zettelkasten"
+[ -d "$zk/.git" ] || exit 0
+
+# Only check the upstream-tracking branch in zettelkasten
+if ! git -C "$zk" rev-parse '@{u}' >/dev/null 2>&1; then
+    exit 0
+fi
+
+ahead=$(git -C "$zk" rev-list '@{u}..HEAD' --count 2>/dev/null || echo 0)
+[ "$ahead" -eq 0 ] && exit 0
+
+# Color helpers (skip if stderr is not a TTY)
+if [ -t 2 ]; then
+    yellow='\033[33m'; cyan='\033[36m'; dim='\033[2m'; reset='\033[0m'
+else
+    yellow=''; cyan=''; dim=''; reset=''
+fi
+
+printf "\n" >&2
+printf "  ${yellow}⚠  ~/zettelkasten has %s unpushed commit(s)${reset}\n" "$ahead" >&2
+printf "\n" >&2
+git -C "$zk" log '@{u}..HEAD' --oneline | sed 's/^/     /' >&2
+printf "\n" >&2
+printf "  ${dim}If your dotfiles changes reference new claudes/ content,${reset}\n" >&2
+printf "  ${dim}push zettelkasten first or the second machine will see stale content.${reset}\n" >&2
+printf "\n" >&2
+
+# Read from /dev/tty because git already holds stdin (refspec list)
+if [ -e /dev/tty ]; then
+    printf "  ${cyan}Push ~/zettelkasten now?${reset} [y/N/a=abort] " >&2
+    read -r answer < /dev/tty || answer=""
+    case "$answer" in
+        [Yy]*)
+            printf "  → pushing ~/zettelkasten...\n" >&2
+            if git -C "$zk" push 2>&1 | sed 's/^/    /' >&2; then
+                printf "  ${cyan}OK — proceeding with dotfiles push${reset}\n\n" >&2
+            else
+                printf "  push failed; aborting dotfiles push\n" >&2
+                exit 1
+            fi
+            ;;
+        [Aa]*)
+            printf "  aborted\n" >&2
+            exit 1
+            ;;
+        *)
+            printf "  ${dim}continuing without pushing zettelkasten${reset}\n\n" >&2
+            ;;
+    esac
+else
+    printf "  ${dim}(non-interactive — continuing without prompt)${reset}\n\n" >&2
+fi
+
+exit 0

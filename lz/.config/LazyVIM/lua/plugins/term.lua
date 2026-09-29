@@ -1,7 +1,7 @@
 local tterm = {
   "akinsho/nvim-toggleterm.lua",
-  lazy = false,
   branch = "main",
+  cmd = { "ToggleTerm", "TermExec" },
   config = function()
     require("toggleterm").setup({
       close_on_exit = false,
@@ -147,6 +147,8 @@ return {
   -- project_cli_terminal,
   tterm,
   tmanager,
-  -- multiplexer,
-  zellij,
+  -- multiplexer, -- disabled: would also grab <C-hjkl>
+  -- zellij,      -- removed: you use tmux, not zellij; it collided with the
+  --                 <C-hjkl> window-nav maps in config/keymaps.lua. Window
+  --                 navigation is now handled solely by those :wincmd maps.
 }

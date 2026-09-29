@@ -8,7 +8,12 @@ zsh/.zshrc.secure
 # Backup files
 *.backup
 *~
+*.bak.gsd-*
+*.bak-*
 lz/.config/LazyVIM/lazy-lock.json
+
+# Transient tool/MCP artifacts
+.playwright-mcp/
 
 # Hammerspoon secrets
 hammerspoon/.hammerspoon/.env
@@ -18,3 +23,15 @@ hammerspoon/.hammerspoon/modules/spec/
 
 # macOS
 .DS_Store
+
+# Per-checkout Claude Code state (local permissions, agent worktrees)
+/.claude/
+
+# /review-html skill artifacts (generated HTML, explanations, comments)
+.claude-review/
+__pycache__/
+
+# projctl: machine-specific project list + local state (registry.conf.example is tracked)
+projctl/code/projctl/registry.conf
+projctl/code/projctl/projctl.log
+*.projctl-bak

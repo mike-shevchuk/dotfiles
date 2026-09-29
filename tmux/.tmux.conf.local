@@ -10,6 +10,52 @@ set -g allow-passthrough on
 set -ga update-environment TERM
 set -ga update-environment TERM_PROGRAM
 
+# -- Clipboard over SSH (OSC 52) -----------------------------------------------
+# This config frequently runs on a remote host (Mac server) reached over SSH
+# from a local Wayland/Arch box. The base config (lines 122-131) and tmux-yank
+# both pick a clipboard tool based on THIS host, so on the Mac they fall back to
+# pbcopy and copied text lands in the *remote* clipboard — never reaching the
+# local machine. OSC 52 fixes this transport-agnostically: tmux emits an escape
+# sequence on every copy and the *local* terminal writes to its own clipboard,
+# working through SSH regardless of what's installed on the remote host.
+# Requires an OSC 52-capable local terminal (kitty, alacritty, wezterm, foot).
+set -g set-clipboard on
+set -ga terminal-features ',*:clipboard'
+
+# prefix + y → copy top paste-buffer to the LOCAL clipboard via OSC 52.
+# Overrides base .tmux.conf:128 which pipes to pbcopy = Mac-only clipboard —
+# the exact failure mode the OSC 52 block above exists to fix.
+# load-buffer -w (tmux 3.2+) re-loads the buffer and emits OSC 52 to the client.
+bind y run -b 'tmux save-buffer - | tmux load-buffer -w -'
+
+# prefix + Y → copy the pane's current path (kept from tmux-yank, which was
+# removed — see plugin note below), OSC 52 via load-buffer -w.
+bind Y run -b 'tmux display -p -F "#{q:pane_current_path}" | tr -d "\n" | tmux load-buffer -w -'
+
+# -- Terminal quality ------------------------------------------------------------
+
+# Pin tmux-256color: the base config's runtime probe silently degrades to
+# screen-256color (no italics, worse keys) if a macOS update loses the
+# terminfo entry. tmux 3.6b + modern terminals all have tmux-256color.
+set -g default-terminal 'tmux-256color'
+
+# REVERTED: extended-keys (CSI u / Kitty keyboard protocol) — enabling it
+# caused real typing lag/misbehaving keys. The live client at the time
+# reported termname xterm-256color; when the actual terminal doesn't fully
+# implement CSI-u, tmux and the terminal disagree on key encoding and normal
+# typing gets delayed/garbled. The upside (disambiguated Ctrl+Shift+…,
+# Ctrl+Enter) isn't worth that risk — leave it off.
+# set -s extended-keys on
+# set -as terminal-features ',xterm*:extkeys,foot*:extkeys,alacritty*:extkeys,kitty*:extkeys'
+
+# 5000-line default is a few seconds of Claude/log output; 50k is still cheap.
+# (Applies to new panes only.)
+set -g history-limit 50000
+
+# Incremental copy-mode search — highlight-as-you-type instead of enter-then-jump
+bind -T copy-mode-vi / command-prompt -i -T search -p '(search down)' { send-keys -X search-forward-incremental '%%' }
+bind -T copy-mode-vi ? command-prompt -i -T search -p '(search up)'   { send-keys -X search-backward-incremental '%%' }
+
 # -- TPM (Tmux Plugin Manager) ------------------------------------------------
 
 # Auto-install TPM if missing
@@ -18,8 +64,19 @@ if "test ! -d ~/.tmux/plugins/tpm" \
 
 # Plugins
 set -g @plugin 'tmux-plugins/tpm'
-set -g @plugin 'tmux-plugins/tmux-yank'
 set -g @plugin 'Ataraxy-Labs/opensessions'
+
+# tmux-yank removed: on tmux 3.6b with `set-clipboard on` every buffer copy
+# already emits OSC 52; the plugin only raced the gpakosz binding rewriter
+# and left mixed pbcopy bindings. Its one used feature (prefix Y = copy pane
+# pwd) is re-bound natively above.
+
+# tmux-fingers — hint-based copy of URLs/paths/SHAs/IPs from scrollback
+# (prefix + u). Copies go through the tmux buffer → OSC 52 delivers them to
+# the LOCAL clipboard over SSH. ('u' was a duplicate TPM update-plugins key;
+# 'U' still does that.)
+set -g @plugin 'Morantron/tmux-fingers'
+set -g @fingers-key 'u'
 
 # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
 # To re-enable, uncomment below:
@@ -32,50 +89,110 @@ set -g @plugin 'Ataraxy-Labs/opensessions'
 
 
 # -- Status bar (catppuccin-inspired, #!important overrides base theme) --------
+#
+# PERFORMANCE: every value shown here is read from a tmux user-option
+# (#{@cpu}, #{@pane_git}, …) — ZERO subprocesses per redraw. Those options
+# are refreshed by ~/.tmux-status.sh:
+#   * refresh-global  — driven once per status-interval by a single empty-output
+#     #() trigger embedded in status-left (sets @cpu @ram @claude @sessions …)
+#   * refresh-pane    — driven by focus/select HOOKS only (sets @pane_git …)
+# See the "Status refresh" hook block below.
 
+set -g status 2 #!important
 set -g status-position bottom #!important
 set -g status-justify left #!important
+set -g status-interval 5 #!important
 set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 
-# Left: prefix indicator + session name + session count
+# Left (row 0): mode badge (recolors by prefix/copy/zoom) + session name + count.
+# The trailing #() runs refresh-global once per interval (empty output).
 set -g status-left-length 50 #!important
-set -g status-left '#{?client_prefix,#[bg=#f38ba8],#[bg=#89b4fa]}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #(~/.tmux-status.sh sessions) ' #!important
+set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
 
-# Right: claude | cpu | ram | AWS | kubectl | time | date
-set -g status-right-length 160 #!important
-set -g status-right '#{?#(~/.tmux-status.sh claude),#[fg=#cba6f7]󰚩 #(~/.tmux-status.sh claude) ,}#[fg=#94e2d5] #(~/.tmux-status.sh cpu) #[fg=#74c7ec] #(~/.tmux-status.sh ram) #[fg=#f9e2af]#{?#(printenv AWS_PROFILE),  #(printenv AWS_PROFILE) ,}#[fg=#a6e3a1]#{?#(kubectl config current-context 2>/dev/null), 󱃾 #(kubectl config current-context) ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
+# Right (row 0): python | claude | cpu | ram | AWS | kubectl | time | date.
+# All segments read cached user-options (no subprocess).
+set -g status-right-length 200 #!important
+set -g status-right '#[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}#[fg=#cba6f7]#{?#{@claude},󰚩 #{@claude} ,}#[fg=#94e2d5] #{@cpu} #[fg=#74c7ec] #{@ram} #[fg=#f9e2af]#{?#{@aws},  #{@aws} ,}#[fg=#a6e3a1]#{?#{@kube}, 󱃾 #{@kube} ,}#[fg=#cdd6f4]  %H:%M #[bg=#89b4fa,fg=#1e1e2e,bold]  %d-%b ' #!important
 
-# Window tabs — 󰚩 icon when claude is the foreground process
-set -g window-status-format '#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#[fg=#6c7086]#I:#W ' #!important
-set -g window-status-current-format '#{?#{==:#{pane_current_command},claude},#[bg=#313244,fg=#cba6f7,bold]󰚩 ,}#[bg=#313244,fg=#89b4fa,bold]#I:#W ' #!important
-set -g window-status-separator '' #!important
+# Row 1 (bottom of the 2-row status bar) — Variant C: active-pane context.
+# Left-filled: git branch · PR (gh, cached) · compact path · python of the
+# focused pane. Updated by the refresh-pane hooks, not every redraw.
+set -g status-format[1] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[fg=#f9e2af]#{?#{@pane_python},🐍 #{@pane_python} ,}' #!important
 
-# Pane borders — color reflects claude state
-#   amber (#f9e2af) = claude thinking/working
-#   green (#a6e3a1) = claude waiting for input
-#   blue  (#89b4fa) = no claude / default
+# Window tabs — active tab is underlined (no bg block) so the gap with
+# inactive tabs is clearly visible; separator inherits window-status-style
+# which has no underline, so the underline doesn't run across the whole bar.
+set -g window-status-style 'fg=#6c7086' #!important
+set -g window-status-current-style 'fg=#89b4fa,bold,underscore' #!important
+set -g window-status-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-current-format ' #{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#I:#W ' #!important
+set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
+
+# -- Mode colors (native formats, no plugin) -----------------------------------
+# Mode-reactive frame WITHOUT repainting the theme (replaces tubular-tmux,
+# which took over status-left/right/tabs and killed the custom segments).
+# Only two things change color by mode: the active-pane border and the
+# status-left session badge. Everything else stays catppuccin.
+# Switch palettes: prefix + S (fzf presets, applies live + rewrites the 5
+# lines below) or `open ~/dotfiles/tmux/mode-theme-picker.html` for fully
+# custom colors (tweak → copy the generated lines over the 5 below).
+set -g @mode_color_prefix '#f38ba8'
+set -g @mode_color_copy   '#f9e2af'
+set -g @mode_color_zoom   '#fab387'
+set -g @mode_color_claude '#cba6f7'
+set -g @mode_color_rest   '#89b4fa'
+
+# Pane borders — active border priority: prefix > copy > zoom > claude > rest
 set -g pane-border-style 'fg=#313244' #!important
-set -g pane-active-border-style '#{?#{==:#{pane_current_command},claude},fg=#cba6f7,fg=#89b4fa}' #!important
+set -g pane-active-border-style '#{?client_prefix,fg=#{@mode_color_prefix},#{?pane_in_mode,fg=#{@mode_color_copy},#{?window_zoomed_flag,fg=#{@mode_color_zoom},#{?#{==:#{pane_current_command},claude},fg=#{@mode_color_claude},fg=#{@mode_color_rest}}}}}' #!important
+# Light ASCII border (-|+) instead of solid box-drawing (─│┌┐) so the
+# active pane reads as a non-solid underline rather than a heavy frame.
+set -g pane-border-lines simple #!important
+# Colour the corners of the active pane so it's still easy to spot.
+set -g pane-border-indicators colour #!important
 set -g pane-border-status top #!important
-set -g pane-border-format ' #{?#{==:#{pane_current_command},claude},#{?#{==:#(~/.tmux-status.sh claude-state #{pane_id}),waiting},#[fg=#a6e3a1]󰚩 ready,#[fg=#f9e2af]󰚩 thinking} #[fg=#6c7086]│ ⏱ #(~/.tmux-status.sh claude-uptime #{pane_id}) │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),},#[fg=#6c7086]#{pane_current_command} │ #{pane_current_path} #{?#(~/.tmux-status.sh pane-git #{pane_current_path}),#[fg=#a6e3a1]🌿 #(~/.tmux-status.sh pane-git #{pane_current_path}),}} ' #!important
+# ONE subprocess per visible pane (was ~4). pane-meta returns the whole
+# pre-formatted string (claude state + uptime, or command, then path/git/python)
+# with embedded #[...] styles, which tmux interprets in #() output.
+set -g pane-border-format ' #(~/.tmux-status.sh pane-meta #{pane_id} "#{pane_current_path}") ' #!important
 
 # Message style
 set -g message-style 'bg=#313244 fg=#cdd6f4' #!important
 
 
+# -- Status refresh (user-option cache, populated outside the redraw path) -----
+
+# Active-pane context (@pane_git/@pane_python/@pane_path) — refreshed only on
+# user navigation, never on the 5s redraw tick. -b keeps tmux non-blocking.
+# CAVEAT: these are GLOBAL options. With two clients attached to different
+# sessions, row 1 reflects whichever pane was focused last (tmux has no
+# convenient per-client user-options). Correct for the common single-client case.
+set-hook -g after-select-pane    'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g after-select-window  'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g pane-focus-in        'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g session-window-changed 'run-shell -b "~/.tmux-status.sh refresh-pane"'
+set-hook -g client-session-changed 'run-shell -b "~/.tmux-status.sh refresh-pane"'
+
+# Populate both caches immediately on load so the bar isn't blank until the
+# first interval / focus event fires.
+run-shell -b "~/.tmux-status.sh refresh-global"
+run-shell -b "~/.tmux-status.sh refresh-pane"
+
+
 # -- DevOps layout bindings ----------------------------------------------------
 
 # prefix + D → 3-pane devops layout (editor top, logs + shell bottom)
-bind D split-window -v -p 30 \; \
-     split-window -h -p 50 \; \
+# (-l N% instead of deprecated -p N, tmux 3.1+)
+bind D split-window -v -l 30% \; \
+     split-window -h -l 50% \; \
      select-pane -t 0 \; \
      display "DevOps layout: editor | logs | shell"
 
 # prefix + C-d → 4-pane quad layout for log tailing
-bind C-d split-window -v -p 50 \; \
-       split-window -h -p 50 \; \
+bind C-d split-window -v -l 50% \; \
+       split-window -h -l 50% \; \
        select-pane -t 0 \; \
-       split-window -h -p 50 \; \
+       split-window -h -l 50% \; \
        select-pane -t 0 \; \
        display "Quad layout for log tailing"
 
@@ -83,7 +200,7 @@ bind C-d split-window -v -p 50 \; \
 # -- Claude Code layout --------------------------------------------------------
 
 # prefix + C → 3-pane Claude Code layout (nvim top, claude + shell bottom)
-bind C split-window -v -p 35 \; \
+bind C split-window -v -l 35% \; \
      split-window -h -p 50 \; \
      select-pane -t 1 \; \
      send-keys 'claude' Enter \; \
@@ -104,22 +221,122 @@ bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read 
 # prefix + T → tmux project switcher (ts — create/attach session from project dirs)
 bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
 
-# prefix + j → switch between existing tmux sessions
-bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
+# prefix + S → mode-color theme picker (fzf: presets or HTML custom picker;
+# applies live and persists into this file — see scripts/theme-picker.sh).
+# S = Style: verified unused by tmux defaults, the gpakosz base AND this file.
+bind S display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/theme-picker.sh"
+
+# prefix + j → session switcher (fzf list + live preview: windows/panes/git/claude)
+bind j display-popup -E -w 70% -h 60% "~/dotfiles/tmux/scripts/session-switch.sh"
 
 # prefix + B → btop system monitor
 bind B display-popup -E -w 85% -h 85% "btop"
 
+# prefix + G → lazygit on Branches view (compare current vs main: <space> on main)
+bind G display-popup -E -w 90% -h 90% -d "#{pane_current_path}" "lazygit branch"
 
-# -- Duplicate popup section (disabled, kept as reference) ---------------------
-# These were duplicated during rebase. The active bindings are above.
+# ─── Diff/Compare popups (delegate to ~/dotfiles/tmux/scripts/git-compare.sh) ─
+# EVERY binding starts with fzf branch picker (default branch pre-selected).
+# Hit Enter for the common case; arrow/type to compare against another branch.
 
-# bind g display-popup -E -w 85% -h 85% "lazygit"
-# bind o new-window -n yazi "yazi; tmux wait-for -S yazi-done" \; set-option -w remain-on-exit off
-# bind s display-popup -E -w 60% -h 40% "just -f ~/dotfiles/justfile status; read -n1 -rp 'Press any key...'"
-# bind T display-popup -E -w 70% -h 60% "zsh -ic 'ts'"
-# bind j display-popup -E -w 50% -h 40% "sess=$(tmux list-sessions -F '#{session_name}' | fzf --prompt='session: ' --border) && tmux switch-client -t \"$sess\""
-# bind B display-popup -E -w 85% -h 85% "btop"
+# prefix + v → DiffView (nvim side-by-side): single fzf picker for the branch to
+# compare against (default = origin's default, e.g. origin/main — Enter picks it),
+# then nvim opens DiffView with the WORKING TREE vs that branch.
+# (lowercase v — pairs with V; uppercase U is TPM's update-plugins.)
+bind v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh diffview"
+
+# prefix + V → CodeDiff (VSCode-style, C-powered, two-tier line+char highlighting).
+# Same two-picker UX as prefix v: pick HEAD (default current) + BASE (default
+# origin's default), diff BASE → HEAD (right side = WORKING TREE if HEAD = current).
+# To use legacy DiffView instead: ~/dotfiles/tmux/scripts/git-compare.sh diffview
+bind V display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh codediff"
+
+# prefix + C-v → DIFF MENU: pick a platform (codediff / diffview / delta /
+# difftastic / tig) via fzf, THEN the same HEAD + BASE two-picker, then launch
+# the chosen viewer. Run the SAME comparison through different tools to find the
+# one you like best. (C-v, not d — prefix d stays detach-client.)
+bind C-v display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh menu"
+
+# prefix + M → delta side-by-side pager vs picked branch (fallback if delta missing)
+bind M display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh delta"
+
+# prefix + N → difftastic semantic diff vs picked branch (fallback if difft missing)
+bind N display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh difftastic"
+
+# prefix + O → pick branch → fzf list of changed files → open picked file in DiffView
+bind O display-popup -E -w 95% -h 95% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/git-compare.sh files"
+
+
+# -- Productivity popups (fzf/justfile-driven, scripts in tmux/scripts/) -------
+
+# prefix + A → Claude dashboard: every pane running claude across all sessions,
+#              with state / uptime / path / branch; Enter jumps to it.
+bind A display-popup -E -w 85% -h 70% "~/dotfiles/tmux/scripts/claude-dashboard.sh"
+
+# prefix + W → worktree session: git worktrees of the current repo → fzf →
+#              create/attach a tmux session rooted in the chosen worktree.
+bind W display-popup -E -w 80% -h 60% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/worktree-session.sh"
+
+# prefix + R → just recipe runner: pick a recipe (global + project justfile),
+#              doc-comment preview; Enter runs it in the popup.
+bind R display-popup -E -w 80% -h 70% -d "#{pane_current_path}" "~/dotfiles/tmux/scripts/just-menu.sh"
+
+# prefix + ? (or F1) → keybinding cheat-sheet for these custom bindings.
+# Runs through `less -R`, so it scrolls with j/k · C-d/C-u · g/G · /search · q.
+# F1 is the discoverable alias — '?' is easy to forget and needs Shift.
+bind '?' display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
+bind F1  display-popup -E -w 74% -h 82% "~/dotfiles/tmux/scripts/keys-help.sh"
+
+# -- Scroll the PANE without the mouse -----------------------------------------
+# No prefix needed: these enter copy-mode for you, scroll, and (with `-e`) drop
+# back to the shell automatically once you reach the bottom. The mouse wheel
+# already does this (WheelUpPane → copy-mode -e); these are its keyboard twin.
+#   Shift-PageUp / Shift-PageDown → one screen
+#   Shift-Up     / Shift-Down     → three lines
+#   Alt-Up       / Alt-Down       → three lines (same; kept as an alias)
+# Inside copy-mode the usual keys keep working: j/k, C-u/C-d, g/G, /search, q.
+#
+# Shift+arrows are the PRIMARY line-scroll keys: macOS/SSH terminals often don't
+# emit M-Up/M-Down at all (Option is eaten or sent as a composed char), while
+# Shift+arrow is transmitted by everything that already sends Shift-PageUp.
+# PLAIN PageUp / PageDown — no modifier at all, because some terminals (and SSH
+# clients) never transmit modified arrows/pages: S-Up, M-Up and even S-PageUp
+# can be swallowed before tmux ever sees them. A bare key always arrives.
+# Guarded so it stays invisible to full-screen apps: inside nvim/less/fzf
+# (alternate screen) or an already-open copy-mode the key is passed straight
+# through to the program, so their own paging keeps working. Only at the shell
+# prompt does it mean "scroll my scrollback".
+# ONE line per press — the key auto-repeats while held, so holding it scrolls
+# smoothly like a wheel instead of jumping.
+#
+# The guard is on `alternate_on` ONLY (a real full-screen app: nvim, less, fzf →
+# the key belongs to them). It must NOT include `pane_in_mode`: passing the key
+# through while copy-mode is already open handed it to copy-mode's own PageUp,
+# which pages a whole screen — that was the "first press small, then it jumps"
+# behaviour. Inside copy-mode we keep doing our own one-line scroll.
+#
+# tmux cannot show scrollback outside copy-mode, but `-e` leaves it the moment
+# you reach the bottom again, so it never feels like a mode you're stuck in.
+# Want a bigger step? change both `-N 1` values.
+bind -n PPage if -F '#{alternate_on}' \
+    { send-keys PPage } { copy-mode -e ; send-keys -X -N 1 scroll-up }
+bind -n NPage if -F '#{alternate_on}' \
+    { send-keys NPage } \
+    { if -F '#{pane_in_mode}' { send-keys -X -N 1 scroll-down } { send-keys NPage } }
+
+# prefix PgUp — same one-line scroll, but behind the prefix so it always works
+# even on terminals/SSH clients that swallow the plain PageUp key.
+bind PPage copy-mode -e \; send-keys -X -N 1 scroll-up
+
+# Modified pages/arrows: same `alternate_on` guard as PPage/NPage above, so inside
+# a full-screen app (nvim/less/fzf) the key is passed straight through instead of
+# being hijacked into copy-mode (or, for the Down variants, silently swallowed).
+bind -n S-PageUp   if -F '#{alternate_on}' { send-keys S-PageUp }   { copy-mode -eu }
+bind -n S-PageDown if -F '#{alternate_on}' { send-keys S-PageDown } { if -F '#{pane_in_mode}' { send-keys -X page-down } { } }
+bind -n S-Up       if -F '#{alternate_on}' { send-keys S-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n S-Down     if -F '#{alternate_on}' { send-keys S-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
+bind -n M-Up       if -F '#{alternate_on}' { send-keys M-Up }       { copy-mode -e ; send-keys -X -N 3 scroll-up }
+bind -n M-Down     if -F '#{alternate_on}' { send-keys M-Down }     { if -F '#{pane_in_mode}' { send-keys -X -N 3 scroll-down } { } }
 
 
 # -- Initialize TPM (keep at bottom) ------------------------------------------

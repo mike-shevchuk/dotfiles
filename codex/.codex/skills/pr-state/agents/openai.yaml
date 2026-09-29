@@ -1,0 +1,4 @@
+interface:
+  display_name: "pr state"
+  short_description: "Run the pr state workflow"
+  default_prompt: "Use $pr-state for this task."

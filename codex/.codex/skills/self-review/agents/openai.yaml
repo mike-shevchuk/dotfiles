@@ -1,0 +1,4 @@
+interface:
+  display_name: "self review"
+  short_description: "Run the self review workflow"
+  default_prompt: "Use $self-review for this task."

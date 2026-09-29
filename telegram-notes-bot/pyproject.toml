@@ -1,0 +1,20 @@
+[project]
+name = "notesbot"
+version = "0.1.0"
+description = "Personal Telegram notes bot with weekly Claude recap"
+requires-python = ">=3.12"
+dependencies = [
+    "aiogram>=3.20,<4",
+    "apscheduler>=3.10,<4",
+    "python-dotenv>=1.0",
+]
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

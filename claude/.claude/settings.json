@@ -1,8 +1,17 @@
 {
-  "model": "sonnet",
+  "model": "claude-fable-5[1m]",
   "hooks": {
-    "PreToolUse": [],
-    "PostToolUse": [],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "matcher": "",
@@ -21,6 +30,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/stop.ts --chat"
+          },
+          {
+            "type": "command",
+            "command": "npx tsx ~/.claude/hooks/cost-logger.ts"
           }
         ]
       }
@@ -32,6 +45,17 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/subagent_stop.ts"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "f=$(jq -r \".tool_input.file_path // empty\"); case \"$f\" in *.py) ruff check --fix \"$f\" >/dev/null 2>&1 || true;; esac"
           }
         ]
       }
@@ -52,8 +76,18 @@
     "claude-md-management@claude-plugins-official": true,
     "telegram@claude-plugins-official": true,
     "linear@claude-plugins-official": true,
-    "frontend-design@claude-plugins-official": true
+    "frontend-design@claude-plugins-official": true,
+    "ralph-skills@ralph-marketplace": true
+  },
+  "extraKnownMarketplaces": {
+    "ralph-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "snarktank/ralph"
+      }
+    }
   },
   "effortLevel": "high",
+  "theme": "dark",
   "voiceEnabled": true
 }

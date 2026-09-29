@@ -1,0 +1,4 @@
+interface:
+  display_name: "lgtm listen"
+  short_description: "Run the lgtm listen workflow"
+  default_prompt: "Use $lgtm-listen for this task."

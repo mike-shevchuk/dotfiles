@@ -1,0 +1,19 @@
+# projctl registry (TEMPLATE) — copy to registry.conf and fill in for THIS machine.
+#   cp registry.conf.example registry.conf
+# registry.conf itself is git-ignored, because the paths are machine-specific.
+#
+# format: name | dir | tmux-session | port(optional) | extra-sessions(optional) | enabled
+#   enabled: 1 = started by `just up all` and on login
+#            0 = kept in the list but manual-only (start it explicitly with `just up <name>`)
+#
+# Prefer the CLI over editing by hand:
+#   just add     <name> <dir> <session> [port] [extra]   # add, enabled at startup
+#   just add-off <name> <dir> <session> [port] [extra]   # add, but manual-only
+#   just enable  <name>                                  # include in `up all`/login
+#   just disable <name>                                  # keep listed, don't auto-start
+#   just remove  <name>                                  # drop from the list
+#
+# example entries:
+# stt-host|~/zettelkasten/claude_code/stt-service/host|stt-host|8069||1
+# immich|~/code/prj/immich_ml|immich|3003||1
+# flowdbg|~/code/flow-debugger|flowdbg|9000||0

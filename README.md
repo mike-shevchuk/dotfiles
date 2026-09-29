@@ -18,8 +18,11 @@ just lz
 # Check system health
 just health
 
-# See all available commands
-just
+# Browse recipes interactively (fzf-powered, runs on Enter)
+just help
+
+# Pull + push both ~/dotfiles and ~/zettelkasten
+just sync
 ```
 
 ## Packages
@@ -27,6 +30,7 @@ just
 | Package | Stows to | What |
 |---------|----------|------|
 | `claude` | `~/.claude/` | Claude Code settings, hooks, sounds, statusline |
+| `codex` | `~/.codex/` | Codex settings and migrated command prompts |
 | `zsh` | `~/.zshrc`, `~/.zsh_zinit`, `~/.zsh_spaces/` | ZSH config, zinit plugins, spaces (job/ssh modules) |
 | `tmux` | `~/.tmux.conf`, `~/.tmux.conf.local` | tmux base config + local overrides with TPM |
 | `kitty` | `~/.config/kitty/` | Kitty terminal config |
@@ -49,18 +53,134 @@ justfile                   # core: setup, migrate, install-deps
   stow.just                # all stow package recipes + all + remove
   health.just              # status + health diagnostics
   mise.just                # mise tool manager + nvim/ruff install
+  sync.just                # multi-machine sync, fzf help, claudes/ symlinks, hooks-install
+.githooks/
+  pre-push                 # warns when ~/zettelkasten has unpushed commits (dotfiles only)
 ```
 
 ### Key Commands
 
 | Command | What |
 |---------|------|
-| `just setup` | Install deps + stow core packages |
+| `just` (no args) | Open fzf recipe picker (alias for `just help`) |
+| `just help` | Browse all recipes with fzf preview, run on Enter |
+| `just setup` | Install deps + stow core packages + link CLAUDE.md files |
+| `just sync` | `git pull --rebase --autostash` + push for both repos |
+| `just sync-pull` | Pull-only variant (safe to run from shell startup hooks) |
+| `just claudes-link` | (Re)create CLAUDE.md symlinks from `claudes/*/.target` |
+| `just claudes-status` | Show health of every linked CLAUDE.md |
+| `just claudes-add <name> <path>` | Register a new repo's CLAUDE.md under `claudes/` |
+| `just hooks-install` | Activate `.githooks/` for ~/dotfiles (pre-push zettelkasten check) |
 | `just health` | Check all dependencies |
 | `just status` | Show stow status of all packages |
 | `just all` | Stow everything |
 | `just remove <pkg>` | Unstow a package |
 | `just migrate` | Remove manual symlinks (one-time) |
+
+---
+
+## Multi-machine Sync
+
+Two machines (Mac + Linux) share `~/dotfiles` (this repo) and `~/zettelkasten`
+(private notes). Both are git-backed; `just sync` keeps them aligned.
+
+### Daily workflow
+
+```bash
+just sync     # pull --rebase --autostash + push, for BOTH repos
+```
+
+`sync` is verbose by design — it announces each step, prints the resolved
+`git` command before running, and indents the output so you can see exactly
+what happened. If a rebase conflict shows up, sync stops and you resolve
+it manually (`git rebase --continue` / `--abort`), then re-run.
+
+### Auto-pull on shell startup (opt-in)
+
+`zsh/.zsh_spaces/sync/sync-space.zsh` runs a background pull on every new
+interactive shell — pulls only, never pushes, so it's safe to leave on.
+Enable in your `~/.zshrc` (or any sourced file):
+
+```zsh
+export DOTFILES_AUTO_PULL=1
+```
+
+To customize repos:
+
+```zsh
+export DOTFILES_AUTO_PULL_REPOS="$HOME/dotfiles $HOME/zettelkasten $HOME/work-notes"
+```
+
+To disable for a single shell: `DOTFILES_AUTO_PULL=0 zsh`.
+
+### CLAUDE.md storage — `claudes/` in zettelkasten
+
+Source-of-truth for every `CLAUDE.md` (global + per-repo) lives under
+`~/zettelkasten/claude_code/claudes/{name}/`:
+
+```
+~/zettelkasten/claude_code/claudes/
+  global/
+    CLAUDE.md          # ~/CLAUDE.md content
+    .target            # "~/CLAUDE.md"
+  rescue-serverless/
+    CLAUDE.md
+    .target            # "~/code/rescue-serverless/CLAUDE.md"
+```
+
+`.target` is a single line saying where the symlink should live (`~` is
+expanded at runtime, so the same file works on every machine). On a fresh
+checkout:
+
+```bash
+just claudes-link        # reads every .target, makes the symlinks
+just claudes-status      # green = OK, yellow = drift, red = broken
+```
+
+### Adding a new repo to the sync
+
+```bash
+cd ~/code/some-repo
+just -f ~/dotfiles/justfile claudes-add some-repo ./CLAUDE.md
+# → moves CLAUDE.md into zettelkasten, replaces it with a symlink,
+#   writes .target, commits + pushes zettelkasten
+```
+
+Now every machine that runs `just sync && just claudes-link` will have the
+same `CLAUDE.md` at `~/code/some-repo/CLAUDE.md`.
+
+### Pre-push hook — warns if zettelkasten is behind
+
+`just hooks-install` (run automatically by `just setup`) sets
+`core.hooksPath` to `~/dotfiles/.githooks/`. The included `pre-push`
+script blocks no pushes — it just warns when `~/zettelkasten` has
+unpushed commits, so you don't ship dotfiles changes that reference
+content the second machine can't fetch yet:
+
+```
+⚠  ~/zettelkasten has 2 unpushed commit(s)
+
+   a1b2c3d Register rescue-serverless CLAUDE.md under claudes/
+   d4e5f6a Update global CLAUDE.md week numbering note
+
+   If your dotfiles changes reference new claudes/ content,
+   push zettelkasten first or the second machine will see stale content.
+
+Push ~/zettelkasten now? [y/N/a=abort]
+```
+
+Bypass for one push:  `DOTFILES_SKIP_ZK_CHECK=1 git push`
+Disable entirely:     `git -C ~/dotfiles config --unset core.hooksPath`
+
+### Avoiding overwrites between machines
+
+| Risk | Mitigation |
+|------|------------|
+| Editing without pulling first → divergence | `just sync` (or auto-pull on shell start) |
+| Force-push wiping the other machine's commits | Never `--force` to master; PR for shared changes |
+| Machine-specific tweaks polluting the synced file | Keep them in `~/.claude/settings.local.json` (gitignored) |
+| Symlink drift between machines | `just claudes-status` flags it; `just claudes-link` fixes it |
+| Pushing dotfiles before zettelkasten | `pre-push` hook warns and offers to push zettelkasten first |
 
 ---
 
@@ -119,7 +239,43 @@ Claude Code CLI with custom hooks, statusline, and sound notifications.
 
 - Effort level: high
 - Voice: enabled
-- Plugins: context7, code-review, code-simplifier, playwright, superpowers, huggingface, claude-md-management
+- Plugins (reinstall via `/plugin`, not backed up): context7, code-review, code-simplifier, playwright, superpowers, huggingface-skills, claude-md-management, ralph-loop, telegram, linear, frontend-design, claude-code-kanban, ui-ux-pro-max, stop-slop, ralph-skills
+
+### Cheatsheets — one fuzzy entry point
+
+Every hotkey/command cheatsheet on the machine is reachable from anywhere with
+`cheat` (alias for `just -g cheat`). It indexes three sources with **no data
+migration** — the files stay where they are:
+
+| Source | What |
+|--------|------|
+| `README.md` | every `##` section (Tmux, Neovim, Kitty, Yazi, Hyprland, Mise, Claude Code, …), split into `~/.cache/cheat/readme/` and refreshed when README changes |
+| `~/zettelkasten/**/cheatsheet/*.md` | any note inside a `cheatsheet/` folder (nvim, tmux, python, …) |
+| `~/zettelkasten/**/*cheatsheet*.md` | any note whose name contains "cheatsheet" (claude_code, uv, …) |
+
+```bash
+cheat            # fzf over everything, bat preview, Enter opens full sheet
+cheat tmux       # jump straight to tmux-related sheets
+cheats           # plain scriptable list (just -g cheat-list)
+```
+
+To add a sheet: drop any `*.md` into a `cheatsheet/` folder under
+`~/zettelkasten`, or add a `## …` section to this README — it appears
+automatically, no re-index step.
+
+### Migrating to a new machine
+
+Full checklist: [`docs/claude-migration.md`](docs/claude-migration.md) — what the
+`claude` stow package carries, what must be copied by hand (secrets, per-project
+memory), and what to reinstall (GSD, plugins, MCP auth).
+
+Maintenance recipes (`.justdir/claude.just`):
+
+| Recipe | Purpose |
+|--------|---------|
+| `just claude-drift` | list `~/.claude` files not symlinked into this repo (new commands/hooks that never got committed) |
+| `just claude-orphans` | kill orphaned plugin daemons (telegram `bun server.ts`) that spin at ~30% CPU after a session ends |
+| `just hooks-status` | verify hook scripts + sounds exist and are registered |
 
 ---
 
@@ -286,6 +442,101 @@ All hotkeys use **Alt+Shift** (`hyper`).
 | `hyper + W` | Pomodoro |
 | `hyper + A` | Screenshot + annotate |
 | `hyper + R` | Reload config |
+
+### Displays
+
+| Key | Action |
+|-----|--------|
+| `hyper + I` | Pick which display is main |
+| `hyper + N` | Toggle mirror ⇄ extended |
+| `hyper2 + M` | Mirror this screen onto the iPad, and back |
+| `hyper2 + P` | Pick any offered Screen Mirroring device |
+
+(`hyper2` = Ctrl+Alt+Shift — every `hyper` letter is already taken.)
+
+---
+
+## Screen Mirroring (iPad / Sidecar)
+
+Duplicate the Mac onto an iPad — or use it as an extra display — from the
+terminal. Sidecar is wireless, so **the iPad can be in another room**: nothing
+is plugged in and the iPad is never touched.
+
+```bash
+just -g mirror              # duplicate this screen onto the iPad
+just -g mirror-extend       # use the iPad as an extra display instead
+just -g mirror-off          # disconnect
+just -g mirror-toggle       # connect ⇄ disconnect  (same as hyper + O)
+just -g mirror-status       # is it attached, and which displays exist
+just -g mirror-list         # devices Screen Mirroring is offering
+just -g mirror-pick         # fzf over those devices
+just -g mirror-res          # resolutions the mirrored set can take
+just -g mirror-res 1600x1112   # …and set one
+just -g mirror-solo         # iPad only: monitor backlight to 0, then mirror
+just -g mirror-wake         # leave solo — drop Sidecar, monitor back on
+just -g mirror-help         # the whole cheatsheet, in the terminal
+```
+
+### Making things fit, and going iPad-only
+
+Mirroring squeezes both screens to a shared resolution — 1180x820 by default,
+which is why nothing fits. `mirror-res` lists what the iPad can take and sets
+it; `mirror-res max` jumps straight to the widest mode.
+
+This matters most under a tiling WM. Measured here with PaperWM holding 23
+windows: 1180x820 shows 3 columns, 2360x1640 shows 5. The rest are not gone —
+PaperWM parks them past the edge with a 1px sliver showing, so scrolling brings
+them back.
+
+`mirror-solo` turns the monitor's backlight off over DDC (`m1ddc`) and mirrors,
+so the picture exists only on the iPad. Order is forced by macOS: while a
+mirrored set is up the physical monitor is unreachable over DDC, so the
+backlight is dimmed *before* Sidecar attaches and restored *after* it detaches —
+`mirror-wake` therefore drops the session on its way out. If the iPad fails to
+attach, the brightness is put back immediately rather than leaving a dark
+monitor.
+
+### Input from the iPad side
+
+Sidecar forwards only a hardware **keyboard** and **Apple Pencil** to the Mac. A
+trackpad or mouse paired to the *iPad* does nothing — its pointer never leaves
+iPadOS. Pair the keyboard/trackpad to the **Mac** instead; the iPad is only a
+display.
+
+Every recipe takes the device name as its argument — `just -g mirror "Mike's iPad"` —
+defaulting to `iPad`.
+
+### Menubar widget
+
+Hammerspoon puts a Screen Mirroring item in the menu bar:
+
+| Icon | Meaning |
+|------|---------|
+| `📱` | iPad not connected |
+| `🪞` | attached (tooltip says mirror or extend) |
+| `⏳` | connecting — Sidecar takes a few seconds |
+
+Click it for *Mirror this screen* / *Use as extended display* / *Disconnect*
+(shown only when attached) / *Pick device…*, plus the current display list. It
+never opens Control Center just to refresh itself — the icon follows the display
+list, and `hs.screen.watcher` updates it the moment a display comes or goes.
+
+**How it works.** macOS exposes no API for this, so
+`hammerspoon/.hammerspoon/modules/mirror.lua` drives the real Control Center →
+Screen Mirroring pane through the accessibility API and reads the result back
+from it. The recipes only ask Hammerspoon to run it and wait for the answer in
+`~/.cache/hs/mirror.txt`.
+
+**Requirements**
+
+- Hammerspoon running, with Accessibility permission and the `hs` CLI
+  (`hs.ipc.cliInstall()` once, from the Hammerspoon console)
+- iPad awake, on the same Wi-Fi, signed into the same Apple Account, within
+  Sidecar range (~10 m, walls included)
+
+**When it will not connect**, `mirror` says so instead of hanging — check the
+iPad is awake first; `just -g mirror-list` shows whether macOS is offering it
+at all.
 
 ---
 

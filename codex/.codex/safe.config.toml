@@ -1,0 +1,3 @@
+# Normal guarded profile. Start with: codex --profile safe
+approval_policy = "on-request"
+sandbox_mode = "workspace-write"

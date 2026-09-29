@@ -1,0 +1,4 @@
+interface:
+  display_name: "auto mode"
+  short_description: "Run the auto mode workflow"
+  default_prompt: "Use $auto-mode for this task."

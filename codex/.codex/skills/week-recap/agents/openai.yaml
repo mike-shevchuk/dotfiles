@@ -1,0 +1,4 @@
+interface:
+  display_name: "week recap"
+  short_description: "Run the week recap workflow"
+  default_prompt: "Use $week-recap for this task."

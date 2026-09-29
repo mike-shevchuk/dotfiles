@@ -7,12 +7,17 @@
 # HISTORY CONFIGURATION
 # =============================================================================
 
-HISTSIZE=10000
-SAVEHIST=10000
+# History is the primary search index (fzf CTRL-R) — make it big and timestamped
+HISTSIZE=100000
+SAVEHIST=100000
 HISTFILE=~/.histfile
 setopt SHARE_HISTORY
-setopt HIST_IGNORE_DUPS
+setopt EXTENDED_HISTORY       # timestamps + duration per entry
+setopt HIST_IGNORE_ALL_DUPS   # stronger than HIST_IGNORE_DUPS
 setopt HIST_FIND_NO_DUPS
+setopt HIST_IGNORE_SPACE      # ' cmd' = keep out of history (secrets!)
+setopt HIST_REDUCE_BLANKS
+setopt HIST_VERIFY            # expand !! before running
 # Enable prompt substitution for themes using $(...) in PROMPT
 setopt PROMPT_SUBST
 # export EDITOR='NVIM_APPNAME=PWNVIM nvim'
@@ -23,6 +28,7 @@ setopt PROMPT_SUBST
 # =============================================================================
 
 export EDITOR='nvim'
+typeset -U path PATH   # zsh: auto-dedupe PATH (login shells + tmux nesting double entries)
 export PATH="$HOME/.local/bin:$PATH"
 
 # mise — manages JS, Go, tools; activate BEFORE pyenv so pyenv shims win for python
@@ -48,36 +54,111 @@ ZINITRC="$HOME/.zsh_zinit"
 # =============================================================================
 
 # ASDF (if available)
-[ -f "$HOME/.asdf/asdf.sh" ] && . "$HOME/.asdf/asdf.sh"
-fpath=(${ASDF_DIR}/completions $fpath)
+if [ -f "$HOME/.asdf/asdf.sh" ]; then
+    . "$HOME/.asdf/asdf.sh"
+    fpath=("$ASDF_DIR/completions" $fpath)
+fi
 
-# Initialize completion system — skip security audit if dump is <24h old
+# NOTE: compinit runs AFTER zinit (see below) so plugin-provided completions
+# (zsh-users/zsh-completions etc.) land in fpath before the dump is built.
+
+# =============================================================================
+# PLUGIN MANAGEMENT
+# =============================================================================
+
+# Load ZInit configuration
+source $ZINITRC
+
+# Initialize completion system — after zinit so plugin completions are in fpath.
+# Skip the security audit if the dump is <24h old.
 autoload -Uz compinit
 if [[ -n ${ZDOTDIR:-$HOME}/.zcompdump(#qN.mh+24) ]]; then
     compinit
 else
     compinit -C
 fi
+zinit cdreplay -q   # replay completion definitions captured by zinit
 
-# =============================================================================
-# PLUGIN MANAGEMENT
-# =============================================================================
+# fzf-tab styling (plugin loads in .zsh_zinit; without these it's barely useful)
+zstyle ':completion:*' matcher-list 'm:{a-z}={A-Za-z}'   # case-insensitive
+zstyle ':completion:*:descriptions' format '[%d]'
+# cd → directory contents (eza)
+zstyle ':fzf-tab:complete:cd:*' fzf-preview 'eza -1 --color=always --group-directories-first $realpath 2>/dev/null || ls -1 $realpath'
+# git — diff for staging, log for switching, show for history subcommands
+zstyle ':fzf-tab:complete:git-(add|restore|diff|stage):*' fzf-preview 'git diff --color=always -- $word'
+zstyle ':fzf-tab:complete:git-(checkout|switch):*' fzf-preview 'git log --color=always --oneline -30 $word 2>/dev/null'
+zstyle ':fzf-tab:complete:git-(show|log|revert|cherry-pick|rebase|reset):*' fzf-preview 'git show --color=always $word 2>/dev/null'
+# docker — matching containers/images
+zstyle ':fzf-tab:complete:docker-(run|exec|start|stop|restart|rm|kill|logs|inspect|attach):*' fzf-preview 'docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | grep -i -- $word'
+# systemctl units (Linux)
+zstyle ':fzf-tab:complete:systemctl-*:*' fzf-preview 'SYSTEMD_COLORS=1 systemctl status -- $word 2>/dev/null'
+# processes for kill/ps
+zstyle ':fzf-tab:complete:(kill|ps):*' fzf-preview 'ps -p $word -o pid,pcpu,pmem,comm,args 2>/dev/null'
+# env var / parameter value
+zstyle ':fzf-tab:complete:(-command-|-parameter-|-brace-parameter-|export|unset|expand):*' fzf-preview 'echo ${(P)word}'
+# man pages
+zstyle ':fzf-tab:complete:(\\|*/|)man:*' fzf-preview 'man $word 2>/dev/null | col -bx | bat -l man -p --color=always 2>/dev/null || man $word 2>/dev/null'
+# generic fallback — bat for files, eza for dirs
+zstyle ':fzf-tab:complete:*:*' fzf-preview '[[ -d $realpath ]] && eza -1 --color=always $realpath 2>/dev/null || bat --style=numbers --color=always --line-range=:200 $realpath 2>/dev/null'
+zstyle ':fzf-tab:*' switch-group ',' '.'
 
-# Load ZPlug configuration
-# source $ZPLUGRC
+# fzf shell integration: CTRL-R history, CTRL-T files, ALT-C cd
+if command -v fzf >/dev/null 2>&1; then
+    source <(fzf --zsh)
+    # fd: fast, .gitignore-aware; hidden files included, .git excluded
+    export FZF_DEFAULT_COMMAND='fd --type f --hidden --follow --exclude .git'
+    export FZF_CTRL_T_COMMAND="$FZF_DEFAULT_COMMAND"
+    export FZF_ALT_C_COMMAND='fd --type d --hidden --follow --exclude .git'
+    export FZF_DEFAULT_OPTS='--height 50% --layout=reverse --border'
+    export FZF_CTRL_T_OPTS="--preview 'bat --style=numbers --color=always {} 2>/dev/null | head -200'"
+    export FZF_ALT_C_OPTS="--preview 'ls -la {} | head -50'"
+fi
 
-# Load ZInit configuration
-source $ZINITRC
+# zoxide — smarter cd (z <dir>, zi = interactive fzf picker); replaces rupa/z
+if command -v zoxide >/dev/null 2>&1; then
+    eval "$(zoxide init zsh)"
+    # z-prune — drop DB entries whose directory no longer exists (stale worktrees,
+    # deleted branches). Those dead-but-high-ranked paths are why `z <query>` jumps
+    # wrong. When `z` still guesses badly among LIVE dirs, use `zi <query>` (fzf picker)
+    # or add a keyword: `z b2b fast` instead of `z fast`.
+    z-prune() {
+        local p n=0
+        while IFS= read -r p; do
+            [[ -d "$p" ]] || { zoxide remove "$p" && (( ++n )) }
+        done < <(zoxide query --list)
+        echo "z-prune: removed $n stale entr$([[ $n == 1 ]] && echo y || echo ies)"
+    }
+fi
 
-# Initialize pyenv (after zinit to avoid conflicts)
+# Initialize pyenv (after zinit to avoid conflicts).
+# virtualenv-init dropped: it added a per-prompt shell-out and project-env.zsh
+# already auto-activates .venv dirs; run `pyenv activate <env>` manually for named envs.
 eval "$(pyenv init -)" 2>/dev/null
-eval "$(pyenv virtualenv-init -)" 2>/dev/null
 
 # =============================================================================
 # CLIPBOARD UTILITIES
 # =============================================================================
 
-# Universal clipboard — works on macOS (pbcopy), Wayland (wl-copy), X11 (xclip/xsel)
+# OSC 52 — copy to the clipboard of the terminal you're PHYSICALLY at.
+# Works over SSH in both directions: the escape sequence travels down the tty
+# and the local terminal emulator writes its own clipboard. Wraps for tmux
+# passthrough. Note: some terminals cap OSC 52 payloads (~74KB after base64);
+# Terminal.app does NOT support OSC 52 (kitty/alacritty/wezterm/foot/iTerm2 do).
+osc52() {
+    local data
+    if [ -p /dev/stdin ] || ! [ -t 0 ]; then data="$(cat)"; else data="$*"; fi
+    local b64=$(printf '%s' "$data" | base64 | tr -d '\n')
+    local seq=$'\e]52;c;'"${b64}"$'\a'
+    if [ -n "${TMUX:-}" ]; then
+        # tmux passthrough: \ePtmux; + double inner ESCs + \e\\
+        seq=$'\ePtmux;\e'"${seq//$'\e'/$'\e\e'}"$'\e\\'
+    fi
+    # Write to the controlling tty so it survives pipes/subshells
+    printf '%s' "$seq" > /dev/tty
+}
+
+# Universal clipboard — OSC 52 over SSH (reaches the LOCAL machine), native
+# tools otherwise: macOS (pbcopy), Wayland (wl-copy), X11 (xclip/xsel).
 # Usage: clip <text>  OR  command | clip
 clip() {
     local data
@@ -89,6 +170,12 @@ clip() {
         echo "Usage: clip <text>  or  command | clip" >&2
         return 1
     fi
+    # Over SSH: local clipboard tools write the REMOTE clipboard — emit OSC 52
+    # so the text lands on the machine you're physically sitting at.
+    if [ -n "${SSH_TTY:-}${SSH_CONNECTION:-}" ]; then
+        printf '%s' "$data" | osc52
+        return
+    fi
     if [[ "$OSTYPE" == "darwin"* ]]; then
         printf '%s' "$data" | pbcopy
     elif command -v wl-copy >/dev/null 2>&1; then
@@ -98,8 +185,7 @@ clip() {
     elif command -v xsel >/dev/null 2>&1; then
         printf '%s' "$data" | xsel --clipboard --input
     else
-        echo "clip: no clipboard tool found. Run 'clip-health' for options." >&2
-        return 1
+        printf '%s' "$data" | osc52   # last resort: let the terminal handle it
     fi
 }
 
@@ -137,16 +223,19 @@ alias lc="fc -ln -1 | clip"
 # ALIASES
 # =============================================================================
 
-# System management
-alias syu='sudo pacman -Syu'
-alias pau='sudo reboot now'
-alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
-[[ "$OSTYPE" == linux* ]] && alias open="xdg-open"
+# System management (Linux-only tools guarded — same dotfiles serve the Mac).
+# 'pau' (sudo reboot) dropped: a two-letter alias for reboot is an accident waiting to happen.
+if [[ "$OSTYPE" == linux* ]]; then
+    alias syu='sudo pacman -Syu'
+    alias battery="watch upower -i /org/freedesktop/UPower/devices/battery_BAT0"
+    alias open="xdg-open"
+fi
 
 # Shell management
 alias szsh='source ~/.zshrc'
 alias cl='clear'
 alias cc='claude'
+alias cx='codex'
 
 # File operations
 alias l='ls'
@@ -155,8 +244,103 @@ alias la='ls -ah'
 alias ll='ls -lh'
 
 # Development tools
-alias nv='nvim'
-alias stow="$HOME/.local/src/stow-2.4.1/bin/stow"
+# (no plain `nv` alias here — nv = AstroNvim, defined in the NVIM section below)
+# (no stow alias — the old ~/.local/src/stow-2.4.1 build is gone; brew's stow is in PATH)
+
+# Just — fzf chooser wrappers that echo the resolved command before running.
+#   jj   = local justfile chooser  (cwd's justfile)
+#   jjg  = global justfile chooser (~/.config/just/justfile via -g)
+#   jd   = dry-run mode (alias for --dry-run, pair with --choose)
+#   jv   = verbose mode (echoes each shell line)
+#   jq-  = quiet mode (jq is the JSON tool, so we suffix)
+# `just install-global` from ~/dotfiles wires the -g symlink the first time.
+_just_pick() {
+    # $1 = "" for local, "-g" for global
+    local flag="$1" picked recipe
+    picked=$(just $flag --list 2>/dev/null | tail -n +2 | grep -v '^[[:space:]]*$' \
+        | fzf --ansi \
+              --prompt="just $flag > " \
+              --header='enter=run · type to filter · esc=cancel' \
+              --preview='r=$(echo {} | awk "{print \$1}"); case "$r" in \[*|"") echo "(group header — pick a recipe)" ;; *) just '"$flag"' --show "$r" 2>/dev/null ;; esac' \
+              --preview-window='right,55%,wrap')
+    [ -z "$picked" ] && return 0
+    recipe=$(echo "$picked" | awk '{print $1}')
+    case "$recipe" in
+        \[*|"") return 0 ;;   # group header line — ignore
+    esac
+    echo "→ just $flag $recipe" >&2
+    eval "just $flag \"$recipe\""
+}
+jj()  { _just_pick "" }
+jjg() { _just_pick "-g" }
+alias jg='just -g'              # global justfile shorthand: `jg weather`, `jg ls`
+alias jgl='just -g --list'      # grouped list of every global recipe
+alias jd='just --dry-run'
+alias jv='just --verbose'
+alias 'jq-'='just --quiet'
+
+# cheat — fuzzy-browse every cheatsheet on the machine (README + zettelkasten).
+#   cheat            → fzf over all sheets, bat preview, Enter opens full
+#   cheat tmux       → pre-filter the query to "tmux"
+alias cheat='just -g cheat'
+alias cheats='just -g cheat-list'   # plain scriptable list, no fzf
+
+# jm — shorthand for a scratch/temp justfile at ~/audit-followup.just, so
+# one-off `just -f ~/some-temp.just <recipe>` sessions don't need -f typed
+# every time. Point JM_JUSTFILE elsewhere (or edit the alias) to retarget it
+# at a different temp file; delete both the file and this alias once done.
+export JM_JUSTFILE="$HOME/audit-followup.just"
+alias jm='just -f "$JM_JUSTFILE"'
+alias jml='just -f "$JM_JUSTFILE" --list'
+
+# jb2b — shortcut for the per-repo local justfile.v2 (never committed; see each
+# repo's .gitignore). Unlike jm's fixed JM_JUSTFILE, this resolves the CURRENT
+# git repo's root every call, so it's worktree-safe: `jb2b <recipe>` from any
+# worktree of any b2b repo runs `just --justfile <that-worktree-root>/justfile.v2
+# <recipe>` — no path to remember or retarget per checkout.
+jb2b() {
+    local root jf common
+    root=$(git rev-parse --show-toplevel 2>/dev/null) || { echo "jb2b: not inside a git repo" >&2; return 1; }
+    # In a LINKED WORKTREE justfile.v2 never came along — it is gitignored
+    # (**/justfile.*), so worktrees are created without it and the scan below
+    # finds nothing. --git-common-dir points at the MAIN checkout's .git, so
+    # retarget there and `jb2b <recipe>` works identically from any worktree.
+    # (In the main checkout common == root, so this is a no-op.)
+    common=$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)
+    common=${common%/.git}
+    if [ -n "$common" ] && [ -d "$common" ] && [ "$common" != "$root" ]; then
+        root="$common"
+    fi
+    if [ -f "$root/justfile.v2" ]; then
+        jf="$root/justfile.v2"
+    else
+        # Not all b2b repos keep justfile.v2 at the root (rescue-serverless nests
+        # it under backend/src/lambdas/api/fast/). Find the shallowest one under
+        # the repo, cached per-repo in $JB2B_CACHE so we scan only once.
+        local cache="${JB2B_CACHE:-$HOME/.cache/jb2b}"; mkdir -p "$cache"
+        local key="$cache/$(echo "$root" | sed 's#/#_#g')"
+        if [ -f "$key" ] && [ -f "$(cat "$key")" ]; then
+            jf=$(cat "$key")
+        else
+            if command -v fd >/dev/null; then
+                jf=$(fd -HI -t f '^justfile\.v2$' "$root" -E '.git' -E 'node_modules' \
+                     -E '.claude/worktrees' 2>/dev/null | awk '{print gsub(/\//,"/"), $0}' \
+                     | sort -n | head -1 | cut -d' ' -f2-)
+            else
+                jf=$(find "$root" -name justfile.v2 -not -path '*/.git/*' \
+                     -not -path '*/node_modules/*' -not -path '*/.claude/worktrees/*' 2>/dev/null \
+                     | awk '{print gsub(/\//,"/"), $0}' | sort -n | head -1 | cut -d' ' -f2-)
+            fi
+            [ -n "$jf" ] && echo "$jf" > "$key"
+        fi
+        if [ -z "$jf" ]; then
+            echo "jb2b: no justfile.v2 found under $root" >&2
+            return 1
+        fi
+    fi
+    just --justfile "$jf" "$@"
+}
+jb2bl() { jb2b --list "$@" }
 
 # Git
 alias gs='git status'
@@ -168,6 +352,17 @@ alias gd='git diff'
 alias gco='git checkout'
 alias gb='git branch'
 alias git_dog="git log --all --decorate --oneline --graph"
+
+# forgit — interactive git via fzf. `gi` prefix = "git interactive"; none of these
+# collide with the g* aliases above. (plugin loads in .zsh_zinit; FORGIT_NO_ALIASES=1)
+alias gia='forgit::add'          # stage files (multi-select + diff preview)
+alias gid='forgit::diff'         # browse a diff
+alias gil='forgit::log'          # browse the log
+alias gico='forgit::checkout::file'   # discard changes in picked files
+alias gib='forgit::switch::branch'    # switch branch
+alias gis='forgit::stash::show'  # browse stashes
+alias gifx='forgit::fixup'       # pick the commit to --fixup into
+alias giwt='forgit::worktree'    # worktree picker (rescue-serverless uses worktrees)
 
 # Python
 alias pip_freeze="pip list --not-required --format freeze"
@@ -310,6 +505,25 @@ alias td="todoist-cli --color --namespace --indent --project-namespace"
 
 # Tmux management
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
+
+# Find file by content: rg -> fzf (live) -> open in $EDITOR at line
+# Usage: rgf [query] [path]
+rgf() {
+  local query=${1:-}
+  local search_path=${2:-.}
+  local rg_cmd="rg --column --line-number --no-heading --color=always --ignore-case"
+  local result
+  result=$(
+    FZF_DEFAULT_COMMAND="${rg_cmd} -- ${(q)query} ${(q)search_path}" \
+    fzf --ansi --disabled --query "$query" \
+        --bind "change:reload:sleep 0.1; ${rg_cmd} -- {q} ${(q)search_path} || true" \
+        --delimiter : \
+        --preview 'bat --style=numbers --color=always --highlight-line {2} {1}' \
+        --preview-window 'right,60%,border-left,+{2}/2'
+  ) || return
+  local file=${result%%:*} line=${${result#*:}%%:*}
+  ${EDITOR:-nvim} "$file" "+${line}"
+}
 
 
 # =============================================================================
@@ -498,24 +712,28 @@ bindkey "^[[1;5C" forward-word
 function encrypt_dir() {
     # Display help message
     if [[ "$1" == "--help" ]]; then
-        echo "Usage: encrypt_directory <directory> <passphrase>"
-        echo "Encrypts the specified directory and deletes the original if encryption is successful."
+        echo "Usage: encrypt_dir <directory>"
+        echo "Encrypts the specified directory (passphrase prompted interactively)"
+        echo "and deletes the original if encryption is successful."
         echo
         echo "Example:"
-        echo "  encrypt_directory comb-notes 'my_secret_text_anigma'"
+        echo "  encrypt_dir comb-notes"
         return 0
     fi
 
     # Check if proper arguments are provided
-    if [[ $# -ne 2 ]]; then
+    if [[ $# -ne 1 ]]; then
         echo "Error: Invalid arguments."
         echo "Use '--help' for usage information."
         return 1
     fi
 
     local dir=$1
-    local passphrase=$2
     local output_file="${dir}.gpg"
+    # Passphrase read interactively — never as a CLI arg (would land in shell
+    # history and be visible in `ps` while gpgtar runs)
+    local passphrase
+    read -rs "passphrase?Passphrase: "; echo
 
     # Encrypt the directory using gpgtar with the given passphrase
     gpgtar -c -o "$output_file" --gpg-args "--batch --yes --passphrase=$passphrase" "$dir"
@@ -533,24 +751,27 @@ function encrypt_dir() {
 function decrypt_dir() {
     # Display help message
     if [[ "$1" == "--help" ]]; then
-        echo "Usage: decrypt_directory <gpg_file> <passphrase>"
-        echo "Decrypts the specified .gpg file and deletes the encrypted file if decryption is successful."
+        echo "Usage: decrypt_dir <gpg_file>"
+        echo "Decrypts the specified .gpg file (passphrase prompted interactively)"
+        echo "and deletes the encrypted file if decryption is successful."
         echo
         echo "Example:"
-        echo "  decrypt_directory comb-notes.gpg 'my_secret_text_anigma'"
+        echo "  decrypt_dir comb-notes.gpg"
         return 0
     fi
 
     # Check if proper arguments are provided
-    if [[ $# -ne 2 ]]; then
+    if [[ $# -ne 1 ]]; then
         echo "Error: Invalid arguments."
         echo "Use '--help' for usage information."
         return 1
     fi
 
     local gpg_file=$1
-    local passphrase=$2
     local output_dir="."
+    # Passphrase read interactively — never as a CLI arg (history + ps leak)
+    local passphrase
+    read -rs "passphrase?Passphrase: "; echo
 
     # Decrypt the gpg file using gpgtar with the given passphrase
     gpgtar --decrypt --directory "$output_dir" --gpg-args "--batch --yes --passphrase=$passphrase" "$gpg_file"
@@ -583,8 +804,11 @@ function y() {
 # SYSTEM MANAGEMENT
 # =============================================================================
 
-alias sstat='systemctl list-units --type=service --state=running | less'
-alias sfailed='systemctl --failed'
+# systemd is Linux-only — guarded so the Mac doesn't carry broken aliases
+if [[ "$OSTYPE" == linux* ]]; then
+    alias sstat='systemctl list-units --type=service --state=running | less'
+    alias sfailed='systemctl --failed'
+fi
 
 # =============================================================================
 # TMATE PAIR PROGRAMMING
@@ -642,23 +866,6 @@ _ZSH_SPACES_LOADER="$HOME/.zsh_spaces/loader.zsh"
 [ ! -f "$_ZSH_SPACES_LOADER" ] && _ZSH_SPACES_LOADER="$HOME/dotfiles/zsh/.zsh_spaces/loader.zsh"
 [ -f "$_ZSH_SPACES_LOADER" ] && source "$_ZSH_SPACES_LOADER"
 
-# # >>> conda initialize >>>
-# # !! Contents within this block are managed by 'conda init' !!
-# __conda_setup="$('/home/mike/miniconda3/bin/conda' 'shell.zsh' 'hook' 2> /dev/null)"
-# if [ $? -eq 0 ]; then
-#     eval "$__conda_setup"
-# else
-#     if [ -f "/home/mike/miniconda3/etc/profile.d/conda.sh" ]; then
-#         . "/home/mike/miniconda3/etc/profile.d/conda.sh"
-#     else
-#         export PATH="/home/mike/miniconda3/bin:$PATH"
-#     fi
-# fi
-# unset __conda_setup
-# # <<< conda initialize <<<
-#
-
-
 # Auto-change to last Yazi directory
 if [ -f ~/.yazi_last_dir ]; then
     cd "$(cat ~/.yazi_last_dir)" 2>/dev/null && rm ~/.yazi_last_dir
@@ -677,3 +884,7 @@ if [ -d "$HOME/.bun" ]; then
   export PATH="$BUN_INSTALL/bin:$PATH"
   [ -s "$BUN_INSTALL/_bun" ] && source "$BUN_INSTALL/_bun"
 fi
+
+# Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
+# PATH entry on the Orange Pi, which shares this file via stow)
+[[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
