@@ -14,7 +14,10 @@ want=$(jq -r --rawfile dep <(cat "$dep" 2>/dev/null) '
   ($dep | split("\n") | map(select(. != "") | split("\t") | {(.[0]): .[1]}) | add // {}) as $b
   | .windows | to_entries[]
   | "\(.key)\t\(if .value.need_mike then "1" else "" end)\t\($b[(.value.pr // "" | tostring)] // "")"' "$f" 2>/dev/null)
-tmux list-windows -a -F '#{window_id}	#{window_name}	#{@need_mike}	#{@deploy}' | while IFS=$'\t' read -r id name cur_need cur_dep; do
+# \x1f, not tab: tab is IFS-whitespace, so `read` would merge an empty @need_mike
+# into the next field and re-set both options on every tick.
+us=$'\x1f'
+tmux list-windows -a -F "#{window_id}${us}#{window_name}${us}#{@need_mike}${us}#{@deploy}" | while IFS=$us read -r id name cur_need cur_dep; do
     line=$(printf '%s\n' "$want" | awk -F'\t' -v n="$name" '$1 == n' | head -1)
     need=$(printf '%s' "$line" | cut -f2); dp=$(printf '%s' "$line" | cut -f3)
     [ "$need" = "$cur_need" ] || tmux set -w -t "$id" @need_mike "$need"
