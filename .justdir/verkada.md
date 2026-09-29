@@ -26,7 +26,7 @@ just verkada-stream sesn_XXXXXXXX 60
 | Що | Перевірка |
 |---|---|
 | Робочі AWS-креди (той самий доступ, що `jb2b secret-keys`) | `aws sts get-caller-identity` |
-| `jq`, `curl` | `command -v jq curl` |
+| `jq`, `xh` | `command -v jq xh` |
 | `fzf` (лише для `verkada-secrets`) | `command -v fzf` |
 | Дійсний `sesn_…` | див. [Troubleshooting → 404](#404-session-not-found) |
 
@@ -59,7 +59,7 @@ just verkada-stream sesn_XXXXXXXX 60
 > Якщо `source .env` зробити **перед** `aws`, ці мертві креди перебивають робочі і `aws` тихо падає → порожній ключ.
 > Тому AWS тягнеться першим, а `.env` — у subshell, щоб його `AWS_*` не витекли.
 
-Значення ніколи не друкується. У `━━━ curl ━━━` банері стоїть ім'я `$ANTHROPIC_API_KEY` (як у `todo-today` з `$TODOIST_TOKEN`).
+Значення ніколи не друкується. У `━━━ xh ━━━` банері стоїть ім'я `$ANTHROPIC_API_KEY` (як у `todo-today` з `$TODOIST_TOKEN`).
 
 ---
 

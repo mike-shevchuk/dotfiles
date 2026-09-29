@@ -47,23 +47,21 @@ verkada-send session=_VK_SESSION text=_VK_MSG:
     echo "  OK payload: $payload" >&2
 
     echo "→ [3/3] POSTing event to session {{session}}..." >&2
-    echo "━━━ curl ━━━" >&2
-    echo "curl -X POST '$url' \\" >&2
-    echo "  -H 'x-api-key: \$ANTHROPIC_API_KEY' \\" >&2
-    echo "  -H 'anthropic-version: 2023-06-01' \\" >&2
-    echo "  -H 'anthropic-beta: {{_VK_BETA}}' \\" >&2
-    echo "  -H 'content-type: application/json' \\" >&2
-    echo "  -d '$payload'" >&2
-    echo "━━━━━━━━━━━━" >&2
+    echo "━━━ xh ━━━" >&2
+    echo "xh --ignore-stdin -p hb --pretty=none POST '$url' \\" >&2
+    echo "  'x-api-key:\$ANTHROPIC_API_KEY' \\" >&2
+    echo "  'anthropic-version:2023-06-01' \\" >&2
+    echo "  'anthropic-beta:{{_VK_BETA}}' \\" >&2
+    echo "  --raw '$payload'" >&2
+    echo "━━━━━━━━━━" >&2
 
-    resp=$(curl -sS -w $'\n%{http_code}' -X POST "$url" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "anthropic-beta: {{_VK_BETA}}" \
-        -H "content-type: application/json" \
-        -d "$payload")
-    code=$(printf '%s' "$resp" | tail -n1)
-    body=$(printf '%s' "$resp" | sed '$d')
+    resp=$(xh --ignore-stdin -p hb --pretty=none POST "$url" \
+        "x-api-key:$ANTHROPIC_API_KEY" \
+        "anthropic-version:2023-06-01" \
+        "anthropic-beta:{{_VK_BETA}}" \
+        --raw "$payload" 2>/dev/null)
+    code=$(printf '%s' "$resp" | head -n1 | awk '{print $2}'); code=${code:-0}
+    body=$(printf '%s' "$resp" | sed '1,/^$/d')
     printf '%s\n' "$body" | jq . 2>/dev/null || printf '%s\n' "$body"
     if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
         echo "  OK ($code) — event queued. Watch it with: just verkada-stream" >&2
@@ -86,13 +84,15 @@ verkada-stream session=_VK_SESSION max_time="0":
     fi
     [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "  FAIL — ANTHROPIC_API_KEY unresolved." >&2; exit 1; }
     url="https://api.anthropic.com/v1/sessions/{{session}}/events/stream"
-    echo "━━━ curl ━━━" >&2
-    echo "curl -N --max-time {{max_time}} '$url' -H 'x-api-key: \$ANTHROPIC_API_KEY' -H 'anthropic-version: 2023-06-01' -H 'anthropic-beta: {{_VK_BETA}}'" >&2
-    echo "━━━━━━━━━━━━ (Ctrl-C to stop)" >&2
-    curl -N --max-time {{max_time}} "$url" \
-        -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
-        -H "anthropic-beta: {{_VK_BETA}}"
+    # max_time>0 → xh --timeout (connect/idle timeout, not a total cap like curl --max-time)
+    to=(); [ "{{max_time}}" != "0" ] && to=(--timeout "{{max_time}}")
+    echo "━━━ xh ━━━" >&2
+    echo "xh --ignore-stdin -b --stream ${to[*]:-} GET '$url' 'x-api-key:\$ANTHROPIC_API_KEY' 'anthropic-version:2023-06-01' 'anthropic-beta:{{_VK_BETA}}'" >&2
+    echo "━━━━━━━━━━ (Ctrl-C to stop)" >&2
+    xh --ignore-stdin -b --stream "${to[@]}" GET "$url" \
+        "x-api-key:$ANTHROPIC_API_KEY" \
+        "anthropic-version:2023-06-01" \
+        "anthropic-beta:{{_VK_BETA}}"
 
 # Materialize a Linux session env file (0600) with secrets pulled from AWS.
 # Default: just ANTHROPIC_API_KEY. Values go to the file only, never to stdout.
@@ -149,7 +149,7 @@ verkada-secrets:
 [group('claude/verkada')]
 verkada-ls:
     #!/usr/bin/env bash
-    set -uo pipefail
+    set -u  # no pipefail: xh exits 4 on 4xx, jq below still renders the error
     if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
         ANTHROPIC_API_KEY=$(aws secretsmanager get-secret-value --secret-id '{{_VK_SID}}' \
             --query SecretString --output text --region '{{_VK_REGION}}' \
@@ -157,11 +157,11 @@ verkada-ls:
     fi
     [ -n "${ANTHROPIC_API_KEY:-}" ] || { echo "  FAIL — ANTHROPIC_API_KEY unresolved." >&2; exit 1; }
     for ep in agents sessions; do
-        echo "━━━ GET /v1/$ep ━━━" >&2
-        curl -sS "https://api.anthropic.com/v1/$ep?limit=20" \
-            -H "x-api-key: $ANTHROPIC_API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -H "anthropic-beta: {{_VK_BETA}}" \
+        echo "━━━ xh ━━━  xh -b --ignore-stdin GET 'https://api.anthropic.com/v1/$ep?limit=20' 'x-api-key:\$ANTHROPIC_API_KEY' 'anthropic-version:2023-06-01' 'anthropic-beta:{{_VK_BETA}}'" >&2
+        xh -b --ignore-stdin GET "https://api.anthropic.com/v1/$ep?limit=20" \
+            "x-api-key:$ANTHROPIC_API_KEY" \
+            "anthropic-version:2023-06-01" \
+            "anthropic-beta:{{_VK_BETA}}" \
         | jq -r 'if .data then (.data[] | "  \(.id)   \(.name // .agent_id // .status // "")") else (.error.message // .) end' 2>/dev/null \
         || echo "  (unparseable / empty)"
     done
