@@ -315,6 +315,112 @@ cheat-list:
         awk -F'\t' '{ printf "  %-8s  %s\n", $1, $2 }'
     printf "\n"
 
+# --- Reminders (🔔 statusline badge; wraps ~/.claude/reminders.sh) -----------
+
+# List active reminders (the 🔔<n> statusline badge counts these).
+[group('reminders')]
+[doc('active reminders — the 🔔 statusline badge source')]
+rem:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    REM="$HOME/.claude/reminders.sh"
+    [ -x "$REM" ] || { echo "  FAIL: $REM missing" >&2; exit 1; }
+    echo "→ reminders: $("$REM" count) active" >&2
+    "$REM" list
+
+# List ALL reminders including done ones.
+[group('reminders')]
+[doc('all reminders incl. done')]
+rem-all:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    "$HOME/.claude/reminders.sh" list all
+
+# Show one reminder's body (fzf-pick when SLUG omitted; renders md via glow/bat).
+[group('reminders')]
+[doc('show a reminder body (fzf-pick if SLUG omitted)')]
+rem-show SLUG="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    REM="$HOME/.claude/reminders.sh"
+    SLUG="$1"
+    if [ -z "$SLUG" ]; then
+        if { : </dev/tty; } 2>/dev/null; then
+            SLUG=$("$REM" list | fzf --prompt='reminder ❯ ' --height=70% --reverse \
+                --with-nth=3.. --preview="$REM show {1}" --preview-window='right,60%,wrap' </dev/tty | awk '{print $1}')
+        elif [ "$("$REM" count)" = "1" ]; then
+            SLUG=$("$REM" list | awk 'NR==1{print $1}')
+            echo "  (no TTY — auto-showing the only active reminder)" >&2
+        else
+            echo "  no TTY for fzf-pick — pass a slug: just -g rem-show <slug>" >&2
+            "$REM" list >&2; exit 0
+        fi
+    fi
+    [ -n "$SLUG" ] || { echo "  (nothing selected)" >&2; exit 0; }
+    echo "━━━ reminders ━━━  $REM show $SLUG" >&2
+    if command -v glow >/dev/null; then "$REM" show "$SLUG" | glow -
+    elif command -v bat >/dev/null; then "$REM" show "$SLUG" | bat --language=md --style=plain
+    else "$REM" show "$SLUG"; fi
+
+# Mark a reminder done (fzf-pick if omitted, gum-confirm) → drops off the 🔔 badge.
+[group('reminders')]
+[doc('mark a reminder done (fzf-pick + gum-confirm) → clears from 🔔')]
+rem-done SLUG="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    REM="$HOME/.claude/reminders.sh"
+    SLUG="$1"
+    HAVE_TTY=0; { : </dev/tty; } 2>/dev/null && HAVE_TTY=1
+    if [ -z "$SLUG" ]; then
+        if [ "$HAVE_TTY" = "1" ]; then
+            SLUG=$("$REM" list | fzf --prompt='done ❯ ' --height=70% --reverse \
+                --with-nth=3.. --preview="$REM show {1}" --preview-window='right,60%,wrap' </dev/tty | awk '{print $1}')
+        else
+            echo "  no TTY — pass a slug explicitly: just -g rem-done <slug>" >&2
+            "$REM" list >&2; exit 0
+        fi
+    fi
+    [ -n "$SLUG" ] || { echo "  (nothing selected)" >&2; exit 0; }
+    if [ "$HAVE_TTY" = "1" ] && command -v gum >/dev/null; then
+        gum confirm "mark '$SLUG' done?" </dev/tty || { echo "  (cancelled)" >&2; exit 0; }
+    fi
+    echo "━━━ reminders ━━━  $REM done $SLUG" >&2
+    "$REM" done "$SLUG"
+
+# Re-activate a done reminder.
+[group('reminders')]
+[doc('reopen a done reminder')]
+rem-reopen SLUG:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    echo "━━━ reminders ━━━  $HOME/.claude/reminders.sh reopen $1" >&2
+    "$HOME/.claude/reminders.sh" reopen "$1"
+
+# Add a reminder: `just -g rem-add <slug> <title…>` (body from gum/$EDITOR or stdin).
+[group('reminders')]
+[doc('add a reminder: rem-add <slug> <title…> (body via gum or stdin)')]
+rem-add SLUG *TITLE:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    REM="$HOME/.claude/reminders.sh"
+    SLUG="$1"; shift; TITLE="$*"; [ -n "$TITLE" ] || TITLE="$SLUG"
+    if command -v gum >/dev/null && [ -t 0 ]; then
+        BODY=$(gum write --placeholder "reminder body (commands, notes)…" </dev/tty)
+    else
+        echo "  (paste body, then Ctrl-D)" >&2; BODY=$(cat)
+    fi
+    echo "━━━ reminders ━━━  printf … | $REM add $SLUG \"$TITLE\"" >&2
+    printf '%s\n' "$BODY" | "$REM" add "$SLUG" "$TITLE"
+    echo "  🔔 now $("$REM" count) active" >&2
+
+# Active reminder count (scriptable — same value the statusline badge shows).
+[group('reminders')]
+[doc('active reminder count (scriptable)')]
+rem-count:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    "$HOME/.claude/reminders.sh" count
+
 # --- Git / repo sync --------------------------------------------------------
 
 # Pull dotfiles, show status — used by night-job
@@ -524,24 +630,38 @@ weather city="":
     echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
     xh -b --ignore-stdin GET "$url"; echo
 
-# Multi-day ASCII forecast from wttr.in. days=1|2|3 (wttr max is 3).
+# All forecast views behind ONE entry. No view + TTY → gum menu.
+#   just -g forecast                 → pick a view (gum)
+#   just -g forecast kyiv chart      → straight to a view
+#   just -g forecast "" week         → auto-locate, 7-day
+# views: days|narrow|graph (wttr) · chart|hourly|week (Open-Meteo). days=1|2|3 (wttr).
 [group('system')]
-forecast city="" days="3":
+forecast city="" view="" days="3":
     #!/usr/bin/env bash
-    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-    # ?{{days}} limits days; F=hide follow line, M=metric wind, q=no header
-    url="https://wttr.in/${city_enc}?{{days}}FMq"
-    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
-    xh -b --ignore-stdin GET "$url"
-
-# Compact wttr.in view — morning/noon/evening/night summary table, narrower
-[group('system')]
-forecast-narrow city="":
-    #!/usr/bin/env bash
-    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-    url="https://wttr.in/${city_enc}?nFMq"
-    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
-    xh -b --ignore-stdin GET "$url"
+    set -uo pipefail
+    CITY="$1"; VIEW="$2"; DAYS="$3"
+    # back-compat: `forecast kyiv 2` (pre-merge signature city days) → days view
+    [[ "$VIEW" =~ ^[0-9]+$ ]] && { DAYS="$VIEW"; VIEW=days; }
+    if [ -z "$VIEW" ] && { : </dev/tty; } 2>/dev/null && command -v gum >/dev/null; then
+        VIEW=$(gum choose --header "forecast ❯ $CITY" days narrow graph chart hourly week </dev/tty) || exit 0
+    fi
+    [ -z "$VIEW" ] && VIEW=days
+    case "$VIEW" in
+        days|narrow|graph)
+            city_enc=$(printf %s "$CITY" | jq -sRr @uri)
+            case "$VIEW" in
+                days)   q="${DAYS}FMq" ;;   # F=hide follow line, M=metric wind, q=no header
+                narrow) q="nFMq" ;;          # n=narrow morning/noon/evening/night table
+                graph)  q="format=v2" ;;     # v2=hourly temp curve, precip bars, wind arrows
+            esac
+            url="https://wttr.in/${city_enc}?${q}"
+            echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
+            xh -b --ignore-stdin GET "$url" ;;
+        chart)  echo "━━━ just ━━━  just -g _fc-chart \"$CITY\"" >&2; just -g _fc-chart "$CITY" ;;
+        hourly) echo "━━━ just ━━━  just -g _fc-hourly \"$CITY\"" >&2; just -g _fc-hourly "$CITY" ;;
+        week)   echo "━━━ just ━━━  just -g _fc-week \"$CITY\"" >&2; just -g _fc-week "$CITY" ;;
+        *) echo "  unknown view: $VIEW (days|narrow|graph|chart|hourly|week)" >&2; exit 1 ;;
+    esac
 
 # Resolve a city (or auto-detect via ip-api) → lat<TAB>lon<TAB>name on stdout
 [group('system')]
@@ -564,7 +684,8 @@ _resolve-location city="":
 
 # Pretty 24h chart: Unicode temp chart + rain/precip-prob/wind bars (Open-Meteo)
 [group('system')]
-forecast-chart city="":
+[private]
+_fc-chart city="":
     #!/usr/bin/env bash
     set -uo pipefail
     echo "[1/2] resolving location..." >&2
@@ -654,18 +775,10 @@ forecast-chart city="":
     print()
     PY
 
-# wttr.in v2 — graph view: hourly temp curve, precip bars, wind arrows (3 days)
-[group('system')]
-forecast-graph city="":
-    #!/usr/bin/env bash
-    city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
-    url="https://wttr.in/${city_enc}?format=v2"
-    echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
-    xh -b --ignore-stdin GET "$url"
-
 # Hourly numeric table for next 24h via Open-Meteo
 [group('system')]
-forecast-hourly city="":
+[private]
+_fc-hourly city="":
     #!/usr/bin/env bash
     set -uo pipefail
     echo "[1/2] resolving location..." >&2
@@ -684,7 +797,8 @@ forecast-hourly city="":
 
 # 7-day forecast via Open-Meteo (free, no key). Resolves city → lat/lon first.
 [group('system')]
-forecast-week city="":
+[private]
+_fc-week city="":
     #!/usr/bin/env bash
     set -uo pipefail
     echo "[1/2] resolving location..." >&2
@@ -726,6 +840,7 @@ ports:
 #   just -g disk-hogs             ranked "usual suspects" (Docker.raw, caches, Xcode, node_modules, Trash)
 #   just -g disk-snapshots        list APFS local snapshots — the invisible eater
 #   just -g disk-clean [1]        SAFE cleanup — dry-run; add `1` to actually delete
+#   just -g disk-pick [min]       INTERACTIVE: fzf-pick targets (preview shows contents+safety+size), gum-approve, delete
 #   just -g disk-clean-snapshots  thin APFS local snapshots (reclaims "purgeable" GB, needs sudo)
 #   just -g disk-clean-docker     docker system prune -a --volumes (confirms first)
 
@@ -746,6 +861,9 @@ disk-help:
     CLEAN (dry-run unless told otherwise):
       disk-clean          show what SAFE cleanup would free (Trash, caches, tmp)
       disk-clean 1        actually delete those safe targets
+      disk-pick [min]     INTERACTIVE fzf picker (preview: contents+safety+size) → gum approve → delete
+                          e.g.  just -g disk-pick        (hides items <50MB)
+                                just -g disk-pick 200     (only items ≥200MB)
       disk-clean-snapshots   thin APFS snapshots — biggest single win, needs sudo
       disk-clean-docker      docker system prune -a --volumes (asks first)
 
@@ -911,6 +1029,178 @@ disk-clean-docker:
     echo "→ docker system prune -a --volumes -f" >&2
     docker system prune -a --volumes -f
     echo "  OK — note: Docker.raw only shrinks after Docker Desktop → Troubleshoot → Clean/Purge" >&2
+
+# Interactive cleanup picker: fzf multi-select (preview = contents + safety + size) → gum approve → delete
+[group('disk')]
+disk-pick min="50":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v fzf >/dev/null 2>&1 || { echo "  fzf required (brew install fzf)" >&2; exit 1; }
+    command -v gum >/dev/null 2>&1 || { echo "  gum required (brew install gum)" >&2; exit 1; }
+    MIN_MB="{{min}}"
+    echo "→ disk-pick — measuring candidates ≥${MIN_MB}MB (du can take ~20s)..." >&2
+    tmp=$(mktemp)
+
+    # add SAFETY  LABEL  PATH  MODE  [always]  — measures size, drops rows below MIN_MB unless always=1
+    add() {
+        local safety="$1" label="$2" path="$3" mode="$4" always="${5:-0}" kb sz
+        [ -e "$path" ] || return 0
+        kb=$(du -sk "$path" 2>/dev/null | cut -f1); [ -z "$kb" ] && kb=0
+        [ "$always" != "1" ] && [ "$kb" -lt $((MIN_MB*1024)) ] && return 0
+        sz=$(du -sh "$path" 2>/dev/null | cut -f1); [ -z "$sz" ] && sz="?"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$kb" "$sz" "$safety" "$label" "$path" "$mode" >> "$tmp"
+    }
+
+    # 🟢 SAFE — every big child of ~/Library/Caches (browsers, pip, playwright, node-gyp…)
+    for d in "$HOME/Library/Caches"/*/; do d="${d%/}"; add "🟢SAFE" "cache · $(basename "$d")" "$d" contents; done
+    # 🟢 SAFE — trash + dev caches
+    add "🟢SAFE" "Trash"           "$HOME/.Trash"        contents 1
+    add "🟢SAFE" "npm cache"       "$HOME/.npm/_cacache" contents
+    add "🟡CARE" "~/.cache (uv/pip + HF models, pre-commit envs…)" "$HOME/.cache" contents
+    # 🟡 CARE — regenerated but costly to rebuild / re-download
+    add "🟡CARE" "Claude local-agent VMs (re-downloads)" "$HOME/Library/Application Support/Claude/vm_bundles"  contents
+    add "🟡CARE" "Xcode DerivedData"                      "$HOME/Library/Developer/Xcode/DerivedData"           contents
+    add "🟡CARE" "iOS Simulators"                         "$HOME/Library/Developer/CoreSimulator/Devices"       contents
+    # 🟠 DOCKER — special: prune unused, never rm the whole store
+    add "🟠DOCK" "Docker images/volumes (prune -a)" "$HOME/Library/Containers/com.docker.docker" docker 1
+
+    [ -s "$tmp" ] || { echo "  nothing ≥${MIN_MB}MB to clean 🎉" >&2; rm -f "$tmp"; exit 0; }
+    sort -rn "$tmp" -o "$tmp"   # biggest first
+
+    # ── disk overview: size / used / free / capacity / snapshots / reclaimable ──
+    read -r SIZE USED AVAIL CAP < <(df -H /System/Volumes/Data | awk 'END{print $2, $3, $4, $5}')
+    SNAP=$(tmutil listlocalsnapshots / 2>/dev/null | grep -c 'com.apple') || SNAP=0
+    # docker row = whole container incl. Docker.raw, which prune doesn't shrink → not "reclaimable"
+    reclaim_kb=$(awk -F'\t' '$6 != "docker" {s+=$1} END{print s+0}' "$tmp")
+    RECLAIM=$(awk -v k="$reclaim_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
+    NCAND=$(grep -c . "$tmp")
+    {
+        echo "── disk: /System/Volumes/Data ──"
+        printf "  size %s · used %s · free %s · %s used\n" "$SIZE" "$USED" "$AVAIL" "$CAP"
+        printf "  APFS local snapshots: %s   (reclaim: just -g disk-clean-snapshots)\n" "${SNAP:-0}"
+        printf "  candidates ≥%sMB: %s · up to ~%s reclaimable\n" "$MIN_MB" "$NCAND" "$RECLAIM"
+    } >&2
+
+    # fields: 1=kb 2=size 3=safety 4=label 5=path 6=mode  ·  show 2,3,4  ·  preview reads {5}/{2}/{3}
+    sel=$(fzf --multi --delimiter='\t' --with-nth=2,3,4 --ansi \
+        --header="used $USED · free $AVAIL/$SIZE ($CAP) · ${NCAND} items ≤ ~$RECLAIM"$'\nTAB=pick · ENTER=confirm · ESC=cancel    🟢 safe  🟡 care  🟠 docker' \
+        --preview 'p={5}; echo "PATH : $p"; echo "SIZE : {2}"; echo "CLASS: {3}"; echo; case "{3}" in *SAFE*) echo "🟢 Безпечно — кеш/сміття, застосунок відновить сам.";; *CARE*) echo "🟡 Обережно — відновиться, але повторна збірка/завантаження займе час.";; *DOCK*) echo "🟠 Docker — НЕ rm; запущу docker prune -a (лише невживане).";; esac; echo; echo "── що всередині (top 20) ──"; du -sh "$p"/* 2>/dev/null | sort -rh | head -20' \
+        --preview-window='right,55%,wrap' < "$tmp") || { echo "  cancelled — nothing deleted." >&2; rm -f "$tmp"; exit 0; }
+    rm -f "$tmp"
+    [ -n "$sel" ] || { echo "  nothing selected." >&2; exit 0; }
+
+    # summary of the picks
+    echo "→ selected:" >&2
+    total_kb=0
+    while IFS=$'\t' read -r kb sz safety label path mode; do
+        printf "  %s  %-7s  %s\n" "$safety" "$sz" "$label" >&2
+        [ "$mode" = docker ] || total_kb=$((total_kb + kb))
+    done <<< "$sel"
+    total_h=$(awk -v k="$total_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
+    n=$(printf '%s\n' "$sel" | grep -c .)
+    echo "  ── reclaim up to ~$total_h across $n item(s) ──" >&2
+
+    gum confirm "Delete/prune the $n selected item(s) (~$total_h)?" || { echo "  aborted — nothing deleted." >&2; exit 0; }
+
+    before=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    i=0
+    while IFS=$'\t' read -r kb sz safety label path mode; do
+        i=$((i+1))
+        case "$mode" in
+            docker)
+                echo "  [$i/$n] docker prune ($label) ..." >&2
+                if docker system df >/dev/null 2>&1; then
+                    echo "━━━ just ━━━  docker system prune -a --volumes -f" >&2
+                    docker system prune -a --volumes -f && echo "      OK (Docker.raw shrinks only via Docker Desktop → Troubleshoot → Purge)" >&2
+                else
+                    echo "      SKIP — Docker daemon not running; start Docker Desktop, then rerun" >&2
+                fi ;;
+            contents)
+                echo "  [$i/$n] wiping $path/* ..." >&2
+                rm -rf "$path"/* 2>/dev/null && echo "      OK" >&2 || echo "      FAIL (in use / perms)" >&2 ;;
+        esac
+    done <<< "$sel"
+    after=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    freed=$(( (after - before) / 1024 ))
+    echo "" >&2
+    echo "disk-pick: done — freed ~${freed} MiB · free now: $(df -H /System/Volumes/Data | awk 'END{print $4}')" >&2
+
+# --- Worktree cleanup (fzf+gum picker; YOU pick & confirm — never a raw remove) ---
+#
+# Interactive worktree cleaner mirroring disk-pick. Enumerates every
+# .claude/worktrees/* of rescue-serverless, classes each, fzf multi-select with a
+# preview (status / size / branch / uncommitted / untracked junk / live tmux pane),
+# then gum-confirm → git worktree remove --force + prune. Never removes without
+# your pick + confirm; risky classes get an extra "точно?" gate.
+#   just -g wt-clean            усі ворктрі (TAB=позначити, ENTER=підтвердити)
+#   just -g wt-clean safe       перед-фільтр fzf на "SAFE" (merged+clean, без пана)
+[group('worktree')]
+wt-clean filter="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v fzf >/dev/null 2>&1 || { echo "  fzf required (brew install fzf)" >&2; exit 1; }
+    command -v gum >/dev/null 2>&1 || { echo "  gum required (brew install gum)" >&2; exit 1; }
+    repo="$HOME/code/b2b/rescue-serverless"
+    cd "$repo" || { echo "  FAIL: $repo not found" >&2; exit 1; }
+    echo "→ wt-clean — збираю статус ворктрі (fetch + du, ~15s)…" >&2
+    git fetch --prune origin >/dev/null 2>&1 || true
+    main=$(git rev-parse origin/main 2>/dev/null || git rev-parse main)
+    panes=$(tmux list-panes -a -F '#{pane_current_path}' 2>/dev/null | sort -u)
+    self=$(git -C "{{invocation_directory()}}" rev-parse --show-toplevel 2>/dev/null || true)   # never offer the wt we run from
+    tmp=$(mktemp)
+    for wt in .claude/worktrees/*/; do
+        wt="${wt%/}"; name="${wt##*/}"; abs="$repo/$wt"
+        [ "$abs" = "$self" ] && continue                 # ніколи не чіпати це вікно
+        head=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || continue
+        br=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
+        dirty=$(git -C "$wt" status --porcelain 2>/dev/null | grep -c . || true)
+        live="no"; printf '%s\n' "$panes" | awk -v a="$abs" '$0 == a || index($0, a "/") == 1 {f=1} END{exit !f}' && live="yes"
+        if git merge-base --is-ancestor "$head" "$main" 2>/dev/null; then merged=yes; else merged=no; fi
+        if   [ "$live" = yes ];   then safety="🔒LIVE"
+        elif [ "$merged" = no ];  then safety="🔴UNMERGED"
+        elif [ "$dirty" -ne 0 ];  then safety="🟡DIRTY"
+        else                           safety="🟢SAFE"; fi
+        kb=$(du -sk "$abs" 2>/dev/null | cut -f1); [ -z "$kb" ] && kb=0
+        sz=$(du -sh "$abs" 2>/dev/null | cut -f1); [ -z "$sz" ] && sz="?"
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$kb" "$sz" "$safety" "$name" "$abs" "$dirty" "$br" >> "$tmp"
+    done
+    [ -s "$tmp" ] || { echo "  немає ворктрі для показу" >&2; rm -f "$tmp"; exit 0; }
+    sort -rn "$tmp" -o "$tmp"                             # найбільші зверху
+    reclaim_kb=$(awk -F'\t' '$3 ~ /SAFE/ {s+=$1} END{print s+0}' "$tmp")
+    RECLAIM=$(awk -v k="$reclaim_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM",(k>1048576)?k/1048576:k/1024}')
+    NSAFE=$(awk -F'\t' '$3 ~ /SAFE/' "$tmp" | grep -c . || true)
+    # fields: 1kb 2size 3safety 4name 5path 6dirty 7branch · show 2,3,4 · preview reads {5}
+    sel=$(fzf --multi --delimiter='\t' --with-nth=2,3,4 --ansi --query="{{filter}}" \
+        --header="🟢SAFE: ${NSAFE} · до ~${RECLAIM} безпечно"$'\nTAB=позначити · ENTER=підтвердити · ESC=скасувати   🟢 merged+clean  🟡 dirty  🔴 unmerged  🔒 live-pane' \
+        --preview 'p={5}; echo "WT   : {4}"; echo "PATH : $p"; echo "SIZE : {2}"; echo "CLASS: {3}"; echo "BR   : {7}"; echo "DIRTY: {6} файл(ів)"; echo; case "{3}" in *SAFE*) echo "🟢 Змерджено в origin/main, чисто, без живого пана — безпечно знести.";; *DIRTY*) echo "🟡 Змерджено, АЛЕ є некомічене — знесення втратить його.";; *UNMERGED*) echo "🔴 НЕ в origin/main — гілка не змерджена, знесення = втрата роботи.";; *LIVE*) echo "🔒 Активний tmux-пан у ворктрі — НЕ чіпати.";; esac; echo; echo "── некомічене (git status --short) ──"; git -C "$p" status --short 2>/dev/null | head -20; echo; echo "── untracked-сміття (git clean -nd) ──"; git -C "$p" clean -nd 2>/dev/null | head -15' \
+        --preview-window='right,62%,wrap' < "$tmp") || { echo "  скасовано — нічого не знесено." >&2; rm -f "$tmp"; exit 0; }
+    rm -f "$tmp"
+    [ -n "$sel" ] || { echo "  нічого не обрано." >&2; exit 0; }
+    echo "→ обрано:" >&2; risky=0; total_kb=0
+    while IFS=$'\t' read -r kb sz safety name path dirty br; do
+        printf "  %s  %-7s  %s\n" "$safety" "$sz" "$name" >&2
+        case "$safety" in *SAFE*) ;; *) risky=1 ;; esac
+        total_kb=$((total_kb + kb))
+    done <<< "$sel"
+    total_h=$(awk -v k="$total_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM",(k>1048576)?k/1048576:k/1024}')
+    n=$(printf '%s\n' "$sel" | grep -c . || true)
+    echo "  ── знести $n ворктрі, звільнити ~$total_h ──" >&2
+    if [ "$risky" = 1 ]; then
+        gum confirm --default=false "⚠ Серед обраних є 🟡/🔴/🔒 (втрата роботи / активні). Точно знести всі $n?" </dev/tty || { echo "  скасовано." >&2; exit 0; }
+    fi
+    gum confirm "Знести $n ворктрі (~$total_h)?" </dev/tty || { echo "  скасовано." >&2; exit 0; }
+    before=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    i=0
+    while IFS=$'\t' read -r kb sz safety name path dirty br; do
+        i=$((i+1))
+        echo "  [$i/$n] ━━━ git ━━━ worktree remove $path --force" >&2
+        if git worktree remove "$path" --force 2>&1 | sed 's/^/      /' >&2; then echo "      OK" >&2; else echo "      FAIL" >&2; fi
+    done <<< "$sel"
+    git worktree prune 2>/dev/null || true
+    after=$(df -k /System/Volumes/Data | awk 'END{print $4}')
+    freed=$(( (after - before) / 1024 ))
+    echo "" >&2
+    echo "wt-clean: готово — звільнено ~${freed} MiB · вільно: $(df -H /System/Volumes/Data | awk 'END{print $4}')" >&2
 
 # --- Todoist / Claude quick refs --------------------------------------------
 

@@ -7,11 +7,105 @@ local st = vim.keymap.set
 -- Independent maps — set these FIRST, before the commander guard, because they
 -- don't depend on commander. Window navigation especially must survive even if
 -- commander fails to load.
-st("n", "<c-k>", ":wincmd k<CR>")
-st("n", "<c-j>", ":wincmd j<CR>")
-st("n", "<c-h>", ":wincmd h<CR>")
-st("n", "<c-l>", ":wincmd l<CR>")
+-- <C-hjkl> window/pane nav now owned by smart-splits.nvim (plugins/navigation.lua):
+-- it moves between nvim splits AND crosses into tmux panes (Claude Code) seamlessly.
+-- (Old plain :wincmd maps removed — they shadowed smart-splits.)
 st("n", "<leader>md", "<cmd>NoiceDismiss<cr>", { desc = "Dismiss message" })
+
+-- <leader>? / :Cheat — live keymap cheat-sheet. Dumps the REAL keymaps (those
+-- with a desc) from nvim_get_keymap, grouped by <leader> namespace, into a
+-- scrollable float. Generated from live maps → never goes stale (no hand-written
+-- second source of truth). Inside: `/` search, j/k scroll, q/<Esc> close.
+local function show_cheatsheet()
+  local order = {
+    { "z", "Zettelkasten" }, { "t", "Terminal" }, { "g", "LSP / Goto" },
+    { "f", "Find / Palette" }, { "b", "Buffers" }, { "o", "Octo / GitHub" },
+    { "a", "AI" }, { "v", "Python venv" }, { "d", "Diagnostics" },
+    { "l", "LSP misc" }, { "r", "Rename / Reload" }, { "c", "Code action" },
+    { "w", "Workspace" }, { "s", "Symbols" }, { "m", "Misc" },
+  }
+  -- keep only maps with a meaningful desc; drop nvim's built-in `:help …-default` noise.
+  local function keep(d)
+    return d and d ~= "" and not d:match("%-default$") and not vim.startswith(d, ":help")
+  end
+  local leader_groups, other, termins = {}, {}, {}
+  for _, m in ipairs(vim.api.nvim_get_keymap("n")) do
+    if keep(m.desc) then
+      local lhs = m.lhs
+      if lhs:sub(1, 1) == " " and #lhs >= 2 then
+        local g = lhs:sub(2, 2)
+        leader_groups[g] = leader_groups[g] or {}
+        table.insert(leader_groups[g], { lhs = "<leader>" .. lhs:sub(2), desc = m.desc })
+      else
+        table.insert(other, { lhs = lhs, desc = m.desc })
+      end
+    end
+  end
+  for _, mode in ipairs({ "t", "i" }) do
+    for _, m in ipairs(vim.api.nvim_get_keymap(mode)) do
+      if keep(m.desc) then
+        table.insert(termins, { lhs = "[" .. mode .. "] " .. m.lhs, desc = m.desc })
+      end
+    end
+  end
+
+  local lines = { "  ⌨  KEYMAP CHEAT-SHEET   ( / search · j/k scroll · q close )", "" }
+  local function section(title, items)
+    if #items == 0 then
+      return
+    end
+    table.sort(items, function(a, b)
+      return a.lhs < b.lhs
+    end)
+    lines[#lines + 1] = "▍ " .. title
+    for _, it in ipairs(items) do
+      lines[#lines + 1] = string.format("   %-18s %s", it.lhs, it.desc)
+    end
+    lines[#lines + 1] = ""
+  end
+
+  local seen = {}
+  for _, pair in ipairs(order) do
+    local g = pair[1]
+    if leader_groups[g] then
+      section("<leader>" .. g .. "   " .. pair[2], leader_groups[g])
+      seen[g] = true
+    end
+  end
+  for g, items in pairs(leader_groups) do
+    if not seen[g] then
+      section("<leader>" .. g, items)
+    end
+  end
+  section("Other keys (no <leader>)", other)
+  section("Terminal / Insert mode", termins)
+
+  local buf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
+  vim.bo[buf].modifiable = false
+  vim.bo[buf].bufhidden = "wipe"
+  vim.bo[buf].filetype = "help"
+  local width = math.min(vim.o.columns - 8, 92)
+  local height = math.min(vim.o.lines - 6, #lines)
+  local win = vim.api.nvim_open_win(buf, true, {
+    relative = "editor",
+    width = width,
+    height = height,
+    col = math.floor((vim.o.columns - width) / 2),
+    row = math.floor((vim.o.lines - height) / 2),
+    style = "minimal",
+    border = "rounded",
+    title = " keymaps (live) ",
+    title_pos = "center",
+  })
+  vim.wo[win].winhl = "Normal:NormalFloat,FloatBorder:FloatBorder"
+  vim.wo[win].cursorline = true
+  for _, k in ipairs({ "q", "<Esc>" }) do
+    vim.keymap.set("n", k, "<cmd>close<CR>", { buffer = buf, nowait = true, silent = true })
+  end
+end
+vim.api.nvim_create_user_command("Cheat", show_cheatsheet, { desc = "Keymap cheat-sheet (live)" })
+st("n", "<leader>?", show_cheatsheet, { desc = "Cheat-sheet — all keymaps (live)" })
 
 -- commander is eager-loaded; guard anyway so a load-order change can't break
 -- startup. Everything below this point depends on commander, so a clean return

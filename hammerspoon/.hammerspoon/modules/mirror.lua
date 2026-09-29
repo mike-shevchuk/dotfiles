@@ -178,7 +178,16 @@ local function openMirroring(cb, retried)
     click(btn)
 
     waitUntil(function() return findInWindows(a, byId(DEVICE_LIST)) end, M.config.ui_timeout, function(ok)
-      if ok then cb(a) else cb(nil, "Screen Mirroring pane did not open") end
+      if ok then return cb(a) end
+      -- The pane can be open and still carry no list: that is what an empty
+      -- offer looks like, and it is a different problem from the pane refusing
+      -- to open. Saying "pane did not open" there sends you debugging the Mac
+      -- when the thing to wake is the iPad.
+      if findInWindows(a, byId("screen-mirroring-header")) then
+        return cb(nil, "Screen Mirroring is open but offering no devices — " ..
+                       "wake the iPad, and check it is on this Wi-Fi and the same Apple Account")
+      end
+      cb(nil, "Screen Mirroring pane did not open")
     end)
   end)
 end

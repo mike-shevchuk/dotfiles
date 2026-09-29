@@ -14,6 +14,11 @@
 #   just -g mirror-list     # devices Screen Mirroring is offering
 #   just -g mirror-pick     # fzf over those devices
 #
+#   # when the Mac is locked (Sidecar cannot run against the lock screen):
+#   just -g mirror-remote   # wait for you to unlock over VNC, then mirror
+#   just -g mirror-nolock   # stop the session locking so mirror always works
+#   just -g mirror-lock     # undo mirror-nolock
+#
 # Every recipe takes the device name as its argument; it defaults to "iPad".
 
 # The resolution step is not optional decoration: left alone, macOS mirrors at
@@ -182,6 +187,170 @@ mirror-solo device="iPad" res="max":
 mirror-wake device="iPad":
     @just -f "{{justfile()}}" mirror-off "{{device}}"
 
+# --- Mirroring when the Mac is locked ---------------------------------------
+#
+# Sidecar is driven through Control Center, which lives in the graphical
+# session: on the lock screen there is nothing to click, so `mirror` refuses
+# with "the Mac is locked" (mirror.lua checks CGSSessionScreenIsLocked). macOS
+# also blocks any script from typing the login password into a locked session.
+# So NEITHER of these mirrors *while* locked — each only removes the need to
+# walk to the machine:
+#
+#   just -g mirror-remote   wait for you to unlock over VNC, then mirror itself
+#   just -g mirror-nolock   stop the session locking at all — `mirror` always works
+#   just -g mirror-lock     undo mirror-nolock: require the password on wake again
+
+# Print the VNC address, then poll until the session is unlocked and mirror the
+# instant it is. This recipe runs ON the mini, so it cannot unlock itself —
+# unlock from another machine (Screen Sharing → the address it prints) and it
+# fires the moment you do. Already unlocked? It mirrors immediately.
+#
+# Locked Mac: wait for a VNC unlock, then mirror automatically.
+[group('mirror')]
+mirror-remote device="iPad" res="max":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    j="{{justfile()}}"
+    echo "[1/3] hammerspoon..." >&2
+    echo "━━━ just ━━━  just -f $j _mirror-hs" >&2
+    just -f "$j" _mirror-hs || exit 1
+
+    echo "[2/3] lock state..." >&2
+    hostn="$(scutil --get LocalHostName 2>/dev/null || true)"
+    vnc="vnc://${hostn:-this-mac}.local"
+    state=$(just -f "$j" _mirror-locked) || exit 1
+    if [ "$state" = "false" ]; then
+        echo "  OK — already unlocked" >&2
+    else
+        echo "━━━ unlock ━━━  open '$vnc' from your other Mac and sign in" >&2
+        echo "→ waiting up to 180s for you to unlock over Screen Sharing ..." >&2
+        deadline=$((SECONDS + 180))
+        while [ "$state" != "false" ]; do
+            [ "$SECONDS" -lt "$deadline" ] || { printf '\n' >&2; echo "  FAIL — still locked after 180s; unlock at $vnc and retry" >&2; exit 1; }
+            printf '\r  still locked ... %ds ' "$((180 - deadline + SECONDS))" >&2
+            sleep 2
+            state=$(just -f "$j" _mirror-locked) || exit 1
+        done
+        printf '\n' >&2
+        echo "  OK — unlocked" >&2
+    fi
+
+    echo "[3/3] mirror..." >&2
+    echo "━━━ just ━━━  just -f $j mirror {{device}} {{res}}" >&2
+    just -f "$j" mirror "{{device}}" "{{res}}"
+
+# Stop the session locking, so `mirror` never hits the lock guard again. Turns
+# off "require password after sleep / screen saver" (sysadminctl -screenLock
+# off) — needs your login password once. Cold-boot / FileVault password is
+# unaffected; anyone already at the mini or on VNC is past the lock. Reversible
+# with `mirror-lock`. A lock screen that is ALREADY up stays up: unlock it once
+# (or use mirror-remote) — this only stops the next one.
+#
+# Locked Mac: disable the lock entirely so `mirror` always works (password once).
+[group('mirror')]
+mirror-nolock device="iPad" res="max":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    j="{{justfile()}}"
+    echo "→ disabling password-on-wake (screen lock) — this is a security tradeoff" >&2
+    echo "[1/3] screen lock off..." >&2
+    echo "━━━ just ━━━  just -f $j _mirror-screenlock off" >&2
+    just -f "$j" _mirror-screenlock off || exit 1
+
+    echo "[2/3] lock state..." >&2
+    echo "━━━ just ━━━  just -f $j _mirror-hs" >&2
+    just -f "$j" _mirror-hs || exit 1
+    state=$(just -f "$j" _mirror-locked) || exit 1
+    if [ "$state" != "false" ]; then
+        echo "  OK — lock disabled, but the lock screen already up stays until you unlock it once" >&2
+        echo "       next: just -g mirror-remote {{device}} {{res}}" >&2
+        exit 0
+    fi
+
+    echo "[3/3] mirror..." >&2
+    echo "━━━ just ━━━  just -f $j mirror {{device}} {{res}}" >&2
+    just -f "$j" mirror "{{device}}" "{{res}}"
+
+# Undo mirror-nolock: require the login password again after sleep / screen saver
+[group('mirror')]
+mirror-lock:
+    @echo "━━━ just ━━━  just -f {{justfile()}} _mirror-screenlock immediate" >&2
+    just -f "{{justfile()}}" _mirror-screenlock immediate
+
+# Set sysadminctl's screen lock and prove it took. `-password -` makes sysadminctl
+# prompt itself, so the password never lands in argv (visible to `ps`); success
+# is read back from `-screenLock status`, not guessed from the output wording.
+[group('mirror')]
+[private]
+_mirror-screenlock mode:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    case "{{mode}}" in off) ask=0 ;; immediate) ask=1 ;; *) echo "  FAIL — mode must be off|immediate" >&2; exit 1 ;; esac
+    echo "━━━ sysadminctl ━━━  sysadminctl -screenLock {{mode}} -password -" >&2
+    sysadminctl -screenLock "{{mode}}" -password -
+    status=$(sysadminctl -screenLock status 2>&1)
+    if { [ "$ask" = 0 ] && [[ "$status" != *"is off"* ]]; } || { [ "$ask" = 1 ] && [[ "$status" == *"is off"* ]]; }; then
+        echo "  FAIL — screen lock did not change (wrong password?): ${status##*] }" >&2
+        exit 1
+    fi
+    # Sequoia ignores the old default, but set it too so older tooling agrees.
+    defaults -currentHost write com.apple.screensaver askForPassword -int "$ask" 2>/dev/null || true
+    echo "  OK — ${status##*] }" >&2
+
+# Print true/false for "is the session locked"; exit 1 when hs cannot tell, so a
+# dead socket is never read as "unlocked".
+[group('mirror')]
+[private]
+_mirror-locked:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    s=$(timeout 5 hs -c 'return tostring(hs.caffeinate.sessionProperties().CGSSessionScreenIsLocked == true)' 2>/dev/null | tr -dc 'a-z')
+    case "$s" in
+        *true*)  echo true ;;
+        *false*) echo false ;;
+        *) echo "  FAIL — could not read lock state from Hammerspoon (hs ipc silent)" >&2; exit 1 ;;
+    esac
+
+# Ensure Hammerspoon is up AND its hs.ipc socket answers (the socket is what we
+# actually need). `open -a Hammerspoon` is unreliable when the GUI login session's
+# launchd domain is wedged (RBSRequestErrorDomain 5 / OSLaunchdErrorDomain 125),
+# so we exec the app binary directly instead of going through LaunchServices.
+# Run from the Mac's own GUI session: over plain SSH there is no window server.
+[group('mirror')]
+[private]
+_mirror-hs:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    command -v hs >/dev/null 2>&1 || { echo "  FAIL — no 'hs' CLI; run hs.ipc.cliInstall() inside Hammerspoon" >&2; exit 1; }
+    # Capture, then match: `grep -q` in a pipe can SIGPIPE hs and fail under pipefail.
+    _hs_socket_up() { [[ "$(timeout 3 hs -c 'return "ok"' 2>/dev/null)" == *ok* ]]; }
+    _hs_socket_up && exit 0
+    if ! pgrep -x Hammerspoon >/dev/null 2>&1; then
+        bin=""
+        for app in /Applications "$HOME/Applications"; do
+            [ -x "$app/Hammerspoon.app/Contents/MacOS/Hammerspoon" ] && { bin="$app/Hammerspoon.app/Contents/MacOS/Hammerspoon"; break; }
+        done
+        [ -n "$bin" ] || { echo "  FAIL — Hammerspoon.app not found in /Applications or ~/Applications" >&2; exit 1; }
+        echo "→ Hammerspoon not running — launching directly (open is wedged: launchd RBS-125) ..." >&2
+        echo "━━━ hammerspoon ━━━  nohup $bin >/tmp/hs-mirror.log 2>&1 &" >&2
+        nohup "$bin" >/tmp/hs-mirror.log 2>&1 &
+        disown 2>/dev/null || true
+    else
+        echo "→ Hammerspoon running but hs ipc socket silent — waiting for it ..." >&2
+    fi
+    printf '  waiting for hs ipc socket ' >&2
+    for _ in $(seq 1 20); do
+        _hs_socket_up && { echo >&2; echo "  OK — Hammerspoon ready" >&2; exit 0; }
+        printf '.' >&2
+        sleep 1
+    done
+    echo >&2
+    echo "  FAIL — Hammerspoon up but its hs ipc socket never answered." >&2
+    echo "         Either hs.ipc.cliInstall() has not run in your config, or the GUI login" >&2
+    echo "         session's launchd domain is wedged (a log out / log in is the real fix)." >&2
+    echo "         last log: /tmp/hs-mirror.log" >&2
+    exit 1
+
 # Put the saved backlight back — only meaningful once Sidecar is already down
 [group('mirror')]
 [private]
@@ -229,6 +398,21 @@ mirror-help:
       Заміряно на PaperWM (23 вікна): 1180x820 -> видно 3 колонки,
       2360x1640 -> видно 5. Решта вікон не зникає, PaperWM паркує їх
       за краєм смужкою в 1px — прокрути, і вони повернуться.
+
+    КОЛИ MAC ЗАБЛОКОВАНИЙ (Sidecar на локскріні не працює — нема Control Center)
+      mirror-remote       показати VNC-адресу і ЧЕКАТИ, поки ти розблокуєш
+                          з іншого мака; щойно розблоковано — само дзеркалить
+      mirror-nolock       вимкнути пароль-на-пробудження (sysadminctl), щоб
+                          сесія взагалі не блокувалась → mirror завжди працює.
+                          Потрібен твій пароль один раз. Компроміс безпеки:
+                          хто вже за mini/на VNC — вже за локом. Пароль на
+                          холодний старт / FileVault лишається.
+      mirror-lock         повернути пароль-на-пробудження (відкат mirror-nolock)
+
+      macOS не дає скрипту ввести пароль у заблоковану сесію — тому жоден із
+      цих рецептів не дзеркалить "крізь лок". Вони лише прибирають потребу
+      йти до машини: або чекають твого розблокування по VNC, або роблять так,
+      щоб лок не вмикався.
 
     ТІЛЬКИ НА iPad, МОНІТОР ГАСНЕ
       mirror-solo             погасити монітор (DDC) + дзеркало на iPad
@@ -328,8 +512,8 @@ _mirror cmd device="iPad" mode="":
         done
     fi
     [ -n "$lua" ] || { echo "  FAIL — mirror.lua not found in ~/.hammerspoon/modules or ~/dotfiles (set MIRROR_LUA to override)" >&2; exit 1; }
-    command -v hs >/dev/null 2>&1 || { echo "  FAIL — no 'hs' CLI; run hs.ipc.cliInstall() inside Hammerspoon" >&2; exit 1; }
-    pgrep -x Hammerspoon >/dev/null 2>&1 || { echo "  FAIL — Hammerspoon is not running" >&2; exit 1; }
+    echo "━━━ just ━━━  just -f {{justfile()}} _mirror-hs" >&2
+    just -f "{{justfile()}}" _mirror-hs || exit 1
 
     res="$HOME/.cache/hs/mirror.txt"
     mkdir -p "$(dirname "$res")"
