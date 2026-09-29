@@ -343,7 +343,7 @@ rem-show SLUG="":
     #!/usr/bin/env bash
     set -uo pipefail
     REM="$HOME/.claude/reminders.sh"
-    SLUG="{{SLUG}}"
+    SLUG="$1"
     if [ -z "$SLUG" ]; then
         if { : </dev/tty; } 2>/dev/null; then
             SLUG=$("$REM" list | fzf --prompt='reminder ❯ ' --height=70% --reverse \
@@ -369,7 +369,7 @@ rem-done SLUG="":
     #!/usr/bin/env bash
     set -uo pipefail
     REM="$HOME/.claude/reminders.sh"
-    SLUG="{{SLUG}}"
+    SLUG="$1"
     HAVE_TTY=0; { : </dev/tty; } 2>/dev/null && HAVE_TTY=1
     if [ -z "$SLUG" ]; then
         if [ "$HAVE_TTY" = "1" ]; then
@@ -393,8 +393,8 @@ rem-done SLUG="":
 rem-reopen SLUG:
     #!/usr/bin/env bash
     set -uo pipefail
-    echo "━━━ reminders ━━━  $HOME/.claude/reminders.sh reopen {{SLUG}}" >&2
-    "$HOME/.claude/reminders.sh" reopen "{{SLUG}}"
+    echo "━━━ reminders ━━━  $HOME/.claude/reminders.sh reopen $1" >&2
+    "$HOME/.claude/reminders.sh" reopen "$1"
 
 # Add a reminder: `just -g rem-add <slug> <title…>` (body from gum/$EDITOR or stdin).
 [group('reminders')]
@@ -403,7 +403,7 @@ rem-add SLUG *TITLE:
     #!/usr/bin/env bash
     set -uo pipefail
     REM="$HOME/.claude/reminders.sh"
-    SLUG="{{SLUG}}"; TITLE="{{TITLE}}"; [ -n "$TITLE" ] || TITLE="$SLUG"
+    SLUG="$1"; shift; TITLE="$*"; [ -n "$TITLE" ] || TITLE="$SLUG"
     if command -v gum >/dev/null && [ -t 0 ]; then
         BODY=$(gum write --placeholder "reminder body (commands, notes)…" </dev/tty)
     else
@@ -639,25 +639,27 @@ weather city="":
 forecast city="" view="" days="3":
     #!/usr/bin/env bash
     set -uo pipefail
-    VIEW="{{view}}"
+    CITY="$1"; VIEW="$2"; DAYS="$3"
+    # back-compat: `forecast kyiv 2` (pre-merge signature city days) → days view
+    [[ "$VIEW" =~ ^[0-9]+$ ]] && { DAYS="$VIEW"; VIEW=days; }
     if [ -z "$VIEW" ] && { : </dev/tty; } 2>/dev/null && command -v gum >/dev/null; then
-        VIEW=$(gum choose --header "forecast ❯ {{city}}" days narrow graph chart hourly week </dev/tty) || exit 0
+        VIEW=$(gum choose --header "forecast ❯ $CITY" days narrow graph chart hourly week </dev/tty) || exit 0
     fi
     [ -z "$VIEW" ] && VIEW=days
     case "$VIEW" in
         days|narrow|graph)
-            city_enc=$(printf %s "{{city}}" | jq -sRr @uri)
+            city_enc=$(printf %s "$CITY" | jq -sRr @uri)
             case "$VIEW" in
-                days)   q="{{days}}FMq" ;;   # F=hide follow line, M=metric wind, q=no header
+                days)   q="${DAYS}FMq" ;;   # F=hide follow line, M=metric wind, q=no header
                 narrow) q="nFMq" ;;          # n=narrow morning/noon/evening/night table
                 graph)  q="format=v2" ;;     # v2=hourly temp curve, precip bars, wind arrows
             esac
             url="https://wttr.in/${city_enc}?${q}"
             echo "━━━ xh -b --ignore-stdin GET '$url' ━━━" >&2
             xh -b --ignore-stdin GET "$url" ;;
-        chart)  just -g _fc-chart  "{{city}}" ;;
-        hourly) just -g _fc-hourly "{{city}}" ;;
-        week)   just -g _fc-week   "{{city}}" ;;
+        chart)  echo "━━━ just ━━━  just -g _fc-chart \"$CITY\"" >&2; just -g _fc-chart "$CITY" ;;
+        hourly) echo "━━━ just ━━━  just -g _fc-hourly \"$CITY\"" >&2; just -g _fc-hourly "$CITY" ;;
+        week)   echo "━━━ just ━━━  just -g _fc-week \"$CITY\"" >&2; just -g _fc-week "$CITY" ;;
         *) echo "  unknown view: $VIEW (days|narrow|graph|chart|hourly|week)" >&2; exit 1 ;;
     esac
 
@@ -1034,6 +1036,7 @@ disk-pick min="50":
     #!/usr/bin/env bash
     set -uo pipefail
     command -v fzf >/dev/null 2>&1 || { echo "  fzf required (brew install fzf)" >&2; exit 1; }
+    command -v gum >/dev/null 2>&1 || { echo "  gum required (brew install gum)" >&2; exit 1; }
     MIN_MB="{{min}}"
     echo "→ disk-pick — measuring candidates ≥${MIN_MB}MB (du can take ~20s)..." >&2
     tmp=$(mktemp)
@@ -1053,7 +1056,7 @@ disk-pick min="50":
     # 🟢 SAFE — trash + dev caches
     add "🟢SAFE" "Trash"           "$HOME/.Trash"        contents 1
     add "🟢SAFE" "npm cache"       "$HOME/.npm/_cacache" contents
-    add "🟢SAFE" "uv/pip ~/.cache" "$HOME/.cache"        contents
+    add "🟡CARE" "~/.cache (uv/pip + HF models, pre-commit envs…)" "$HOME/.cache" contents
     # 🟡 CARE — regenerated but costly to rebuild / re-download
     add "🟡CARE" "Claude local-agent VMs (re-downloads)" "$HOME/Library/Application Support/Claude/vm_bundles"  contents
     add "🟡CARE" "Xcode DerivedData"                      "$HOME/Library/Developer/Xcode/DerivedData"           contents
@@ -1067,7 +1070,8 @@ disk-pick min="50":
     # ── disk overview: size / used / free / capacity / snapshots / reclaimable ──
     read -r SIZE USED AVAIL CAP < <(df -H /System/Volumes/Data | awk 'END{print $2, $3, $4, $5}')
     SNAP=$(tmutil listlocalsnapshots / 2>/dev/null | grep -c 'com.apple') || SNAP=0
-    reclaim_kb=$(awk -F'\t' '{s+=$1} END{print s}' "$tmp")
+    # docker row = whole container incl. Docker.raw, which prune doesn't shrink → not "reclaimable"
+    reclaim_kb=$(awk -F'\t' '$6 != "docker" {s+=$1} END{print s+0}' "$tmp")
     RECLAIM=$(awk -v k="$reclaim_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
     NCAND=$(grep -c . "$tmp")
     {
@@ -1090,7 +1094,7 @@ disk-pick min="50":
     total_kb=0
     while IFS=$'\t' read -r kb sz safety label path mode; do
         printf "  %s  %-7s  %s\n" "$safety" "$sz" "$label" >&2
-        total_kb=$((total_kb + kb))
+        [ "$mode" = docker ] || total_kb=$((total_kb + kb))
     done <<< "$sel"
     total_h=$(awk -v k="$total_kb" 'BEGIN{printf (k>1048576)?"%.1fG":"%.0fM", (k>1048576)?k/1048576:k/1024}')
     n=$(printf '%s\n' "$sel" | grep -c .)
@@ -1142,7 +1146,7 @@ wt-clean filter="":
     git fetch --prune origin >/dev/null 2>&1 || true
     main=$(git rev-parse origin/main 2>/dev/null || git rev-parse main)
     panes=$(tmux list-panes -a -F '#{pane_current_path}' 2>/dev/null | sort -u)
-    self="$repo/.claude/worktrees/disk-cleanup"
+    self=$(git -C "{{invocation_directory()}}" rev-parse --show-toplevel 2>/dev/null || true)   # never offer the wt we run from
     tmp=$(mktemp)
     for wt in .claude/worktrees/*/; do
         wt="${wt%/}"; name="${wt##*/}"; abs="$repo/$wt"
@@ -1150,7 +1154,7 @@ wt-clean filter="":
         head=$(git -C "$wt" rev-parse HEAD 2>/dev/null) || continue
         br=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
         dirty=$(git -C "$wt" status --porcelain 2>/dev/null | grep -c . || true)
-        live="no"; printf '%s\n' "$panes" | grep -qxF "$abs" && live="yes"
+        live="no"; printf '%s\n' "$panes" | awk -v a="$abs" '$0 == a || index($0, a "/") == 1 {f=1} END{exit !f}' && live="yes"
         if git merge-base --is-ancestor "$head" "$main" 2>/dev/null; then merged=yes; else merged=no; fi
         if   [ "$live" = yes ];   then safety="🔒LIVE"
         elif [ "$merged" = no ];  then safety="🔴UNMERGED"
