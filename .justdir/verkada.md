@@ -123,14 +123,14 @@ just verkada-send sesn_НОВИЙ
 
 ## Запуск із власного терміналу
 
-Модуль живе на гілці `worktree-pun-1650-verkada`. Щоб запустити з будь-де:
+Модуль імпортується кореневим `~/dotfiles/justfile`. Щоб запустити з будь-де:
 
 ```bash
-just --justfile /Users/mikeshevchuk/dotfiles/.claude/worktrees/pun-1650-verkada/justfile verkada-send sesn_XXXX
+just --justfile ~/dotfiles/justfile verkada-send sesn_XXXX
 ```
 
 У сесії з Claude Code можна виконати у своєму терміналі через префікс `!`:
 
 ```
-! just --justfile /Users/mikeshevchuk/dotfiles/.claude/worktrees/pun-1650-verkada/justfile verkada-ls
+! just --justfile ~/dotfiles/justfile verkada-ls
 ```
