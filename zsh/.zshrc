@@ -268,24 +268,42 @@ _just_pick() {
     case "$recipe" in
         \[*|"") return 0 ;;   # group header line — ignore
     esac
-    echo "→ just $flag $recipe" >&2
+    echo "━━━ just ━━━  just $flag $recipe" >&2
     eval "just $flag \"$recipe\""
 }
 jj()  { _just_pick "" }
 jjg() { _just_pick "-g" }
+
+# jrun — worktree-aware run WITH arguments: fzf-pick a jb2b recipe (the list shows
+# each recipe's params), then TYPE optional args, then run — with the nested-just
+# banner. `--choose` runs on Enter with NO args; this is the arg-capable flow.
+jrun() {
+    local picked recipe args
+    picked=$(jb2b --list 2>/dev/null | tail -n +2 | grep -v '^[[:space:]]*$' \
+        | fzf --ansi --prompt="jb2b run > " \
+              --header='pick (params shown) → Enter → type args → run · esc=cancel')
+    [ -z "$picked" ] && return 0
+    recipe=$(echo "$picked" | awk '{print $1}')
+    case "$recipe" in \[*|"") return 0 ;; esac   # group header — ignore
+    printf 'args for "%s" (blank = none) > ' "$recipe" >&2
+    read -r args
+    echo "━━━ just ━━━  jb2b $recipe $args" >&2
+    eval "jb2b $recipe ${args}"
+}
 alias jg='just -g'              # global justfile shorthand: `jg weather`, `jg ls`
 alias jgl='just -g --list'      # grouped list of every global recipe
 alias jd='just --dry-run'
 alias jv='just --verbose'
 alias 'jq-'='just --quiet'
-# jgc / jc — нативний `--choose` (fzf), але ДУБЛЮЄ обрану команду в лог банером
-#   `━━━ just ━━━  <resolved>` (стиль nested-just-visible) перш ніж запустити.
-#   jgc = глобальний (just -g --choose);  jc = локальний justfile (just --choose).
-#   Esc у fzf → exit 130 → just чемно скасовує.
-#   NB: поряд є jj/jjg (_just_pick) — той самий «вибери+залогуй», але через
-#   --list+eval; jgc/jc свідомо на native --choose (показує сигнатури/залежності).
-alias jgc='just -g --choose --chooser '\''fzf --height=60% --border | { IFS= read -r _r || exit 130; printf "━━━ just ━━━  jg %s\n" "$_r" >&2; printf "%s\n" "$_r"; }'\'''
-alias jc='just --choose --chooser '\''fzf --height=60% --border | { IFS= read -r _r || exit 130; printf "━━━ just ━━━  just %s\n" "$_r" >&2; printf "%s\n" "$_r"; }'\'''
+# Tracing chooser for EVERY `just --choose` — jg, jc, jb2b, projctl, bare `just`.
+# Centralized in $JUST_CHOOSER (single source of truth) so ANY --choose echoes the
+# resolved command with the nested-just banner `━━━ just ━━━  just <recipe>` to stderr
+# BEFORE running it. Esc in fzf → exit 130 → just cancels cleanly.
+# (Fixes: `jg --choose` used to run silently; only the old jgc/jc traced.)
+export JUST_CHOOSER='fzf --height=60% --border | { IFS= read -r _r || exit 130; printf "━━━ just ━━━  just %s\n" "$_r" >&2; printf "%s\n" "$_r"; }'
+# jgc/jc kept as shorthands; they inherit $JUST_CHOOSER (no per-alias duplication).
+alias jgc='just -g --choose'
+alias jc='just --choose'
 
 # cheat — fuzzy-browse every cheatsheet on the machine (README + zettelkasten).
 #   cheat            → fzf over all sheets, bat preview, Enter opens full
