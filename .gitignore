@@ -24,6 +24,9 @@ hammerspoon/.hammerspoon/.env
 # Per-checkout Claude Code state (local permissions, agent worktrees)
 /.claude/
 
+# codex migration inventory — generated, lists private local paths (public repo)
+codex/migration/
+
 # /review-html skill artifacts (generated HTML, explanations, comments)
 .claude-review/
 __pycache__/

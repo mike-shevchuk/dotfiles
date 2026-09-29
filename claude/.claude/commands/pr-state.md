@@ -12,8 +12,8 @@ per-branch state file the statusline reads.
 **Terminal language:** match Mike (Ukrainian or English).
 **No Mermaid in terminal** — use ASCII/Unicode boxes and tables (per project rule).
 
-The badge order shown on the statusline is **CR · SMP · RPR · JT**
-(code-review, simplify, review-pr, just-test). The detailed
+The badge order shown on the statusline is **CR · SMP · RPR · JT · DEMO**
+(code-review, simplify, review-pr, just-test, demo). The detailed
 output below also covers the rest of the 12-step pipeline.
 
 ## Argument modes
@@ -23,7 +23,14 @@ output below also covers the rest of the 12-step pipeline.
   Run `~/.claude/pipeline-stamp.sh stamp <step> marker` then re-print.
 - **`unstamp <step>`** → clear a step: `~/.claude/pipeline-stamp.sh unstamp <step>`.
 
-Known steps: `brainstorm code-review simplify review-pr just-test pr-summary merged`.
+Known steps: `brainstorm code-review simplify review-pr just-test demo pr-summary merged`.
+
+**DEMO is MANDATORY before merge (Mike, 2026-09-29).** Every PR has a guided demo recipe
+`jb2b <topic>-try` whose RESULT box calls
+`~/.claude/demo-result.sh write <pr> <recipe> <passed> <failed> <secs>` → `~/.claude/demo-results/pr-<N>.json`
+(+ stamps `demo`, anchored to the dev SHA it ran against). Gate: `~/.claude/demo-result.sh check <pr>`
+must exit 0 (failed=0 AND no non-merge commits after the demoed build). A PR without a passing,
+fresh DEMO is NOT merge-ready — say so in the merge-readiness line.
 
 `$ARGUMENTS`
 
@@ -145,6 +152,8 @@ stamps persist, then add what you can detect now.
 ~/.claude/pipeline-stamp.sh show     # existing state (may be empty)
 ```
 
+**0. DEMO** ⟶ `~/.claude/demo-result.sh check "$PR"` (exit 0 = ✓; stale/failed/missing = pending, print its reason).
+
 **A. GitHub (PR comments + checks)** — `gh pr view "$PR" --json comments,reviews` then:
 - **just-test** ⟶ any comment body contains `End-to-end smoke trace`.
 - **review-pr** ⟶ a substantial review comment: contains severity scores
@@ -239,9 +248,9 @@ Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps don
    check-pr/bugbot, just-test, merge. Mark each with its evidence
    (commit sha, comment id, check bucket) or "—".
 3. **ASCII pipeline bar** mirroring the statusline badges, e.g.
-   `🧭  CR ✓   SMP ✓-2   RPR ·   JT ✓`
+   `🧭  CR ✓   SMP ✓-2   RPR ·   JT ✓   DEMO ✓`
    (`✓-N` = done but N commits behind, rendered yellow on the statusline).
-4. **CI / merge readiness** line: checks summary + `mergeable`/`mergeStateStatus`.
+4. **CI / merge readiness** line: checks summary + `mergeable`/`mergeStateStatus` + DEMO gate (`demo-result.sh check`) — no DEMO ✓ ⇒ not merge-ready.
 5. **Stale-check warnings** — for any step with commits-ago > 0, flag it
    explicitly: per Mike's rule, code-review must re-run after EVERY fix, so
    `CR✓-3` means "3 unreviewed commits — re-run /code-review". Same logic for JT.

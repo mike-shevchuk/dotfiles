@@ -1,6 +1,6 @@
 ---
 description: "Full code review of a PR: analyze diff, find bugs, post English developer-friendly review on GitHub"
-argument-hint: "<PR number>"
+argument-hint: "<PR number> [--auto]"
 ---
 
 # Review PR #$ARGUMENTS (English)
