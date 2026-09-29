@@ -173,7 +173,7 @@ verkada-help:
     echo "  verkada — drive an Anthropic Managed Agent that has direct Verkada access (PUN-1650)" >&2
     echo "" >&2
     echo "    verkada-send    [session] [text]        POST a user.message (default: list devices, no thumbnails)" >&2
-    echo "    verkada-stream  [session] [max_time]    SSE stream (0=no timeout, 60=60s window)" >&2
+    echo "    verkada-stream  [session] [max_time]    SSE stream (0=no timeout, 60=60s idle timeout)" >&2
     echo "    verkada-env     [keys]                  pull secrets → 0600 /tmp/verkada-session.env → source it" >&2
     echo "    verkada-env-clean                       delete that file" >&2
     echo "    verkada-secrets                         fzf over key NAMES; pick shows masked value only" >&2

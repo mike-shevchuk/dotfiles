@@ -39,7 +39,7 @@ just verkada-stream sesn_XXXXXXXX 60
 | Рецепт | Що робить |
 |---|---|
 | `just verkada-send [session] [text]` | POST однієї `user.message` події в сесію. Дефолт `text` = «список Verkada-девайсів, без thumbnails». |
-| `just verkada-stream [session] [max_time]` | SSE-стрім подій. `max_time=0` (дефолт) = без таймауту, Ctrl-C щоб спинити; `60` = вікно 60 c. |
+| `just verkada-stream [session] [max_time]` | SSE-стрім подій. `max_time=0` (дефолт) = без таймауту, Ctrl-C щоб спинити; `60` = таймаут 60 c (xh --timeout: зʼєднання/простій, не загальний ліміт). |
 | `just verkada-env [keys]` | Тягне ключі з AWS у **0600**-файл `/tmp/verkada-session.env` для `source` у поточну сесію. Дефолт — `ANTHROPIC_API_KEY`. |
 | `just verkada-env-clean` | Видалити `/tmp/verkada-session.env`. |
 | `just verkada-secrets` | `fzf` по **іменах** ключів; на вибір показує лише **замасковане** значення `abcd…wxyz`. |
