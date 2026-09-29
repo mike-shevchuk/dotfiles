@@ -15,6 +15,7 @@ local mousefinder = require("modules.mousefinder")
 local scratchpad  = require("modules.scratchpad")
 local brightness  = require("modules.brightness")
 local notetaker   = require("modules.notetaker")
+local gitpanel    = require("modules.gitpanel")
 local launcher    = require("modules.launcher")
 local pomodoro    = require("modules.pomodoro")
 local screenshot  = require("modules.screenshot")
@@ -23,6 +24,14 @@ local linear      = require("modules.linear")
 local todoist     = require("modules.todoist")
 local bookmarks   = require("modules.bookmarks")
 local sysmonitor  = require("modules.sysmonitor")
+local paperwm     = require("modules.paperwm")
+local paperwmui   = require("modules.paperwmui")
+local focusborder = require("modules.focusborder")
+local paperwmfit  = require("modules.paperwmfit")
+local winjump     = require("modules.winjump")
+
+-- `hs -c "..."` CLI (binary comes from the hammerspoon brew formula)
+require("hs.ipc")
 
 -- ─── Master toggle (integrated into sysmonitor menubar) ─────────
 guard.start(true)
@@ -54,6 +63,33 @@ guard.bind(hyper2, "Down",  windows.move("right_two_thirds"))
 -- Move to other screen
 guard.bind(hyper, "[", windows.screenLeft)
 guard.bind(hyper, "]", windows.screenRight)
+
+-- ─── PaperWM (scrollable tiling) ────────────────────────────────
+-- Own chord: ctrl+alt+cmd (+shift). O = toggle tiling on/off, because while
+-- tiling is on it re-tiles windows and overrides the halves/thirds above.
+paperwm.start(true)
+guard.bind(hyper, "O", paperwm.toggle)
+
+-- U = flash the strip map (or unpin it); menubar shows position, e.g. 📄 3/6
+paperwmui.start()
+guard.bind(hyper, "U", paperwmui.show)
+
+-- X = border around the focused window: blue when tiled, amber when floating
+focusborder.start()
+guard.bind(hyper, "X", focusborder.toggle)
+
+-- Fit mode: squeeze the row to fit the screen instead of clipping at the edge
+paperwmfit.start()
+
+-- ctrl+alt+cmd+Space = jump to any window by app or tab name
+-- (mirrors alt+shift+Space, which is the app launcher)
+guard.bind({ "ctrl", "alt", "cmd" }, "Space", winjump.show)
+
+-- ctrl+alt+cmd+F = full WIDTH (stays in the row), and back to previous width
+guard.bind({ "ctrl", "alt", "cmd" }, "F", paperwmui.toggleFullWidth)
+
+-- ctrl+alt+cmd+Return = full SCREEN for the focused window, and back
+guard.bind({ "ctrl", "alt", "cmd" }, "return", paperwmui.toggleFullscreen)
 
 -- ─── Clipboard ──────────────────────────────────────────────────
 clipboard.start()
@@ -90,8 +126,12 @@ guard.bind(hyper, "J", scratchpad.toggle)
 guard.bind(hyper, "D", brightness.toggle)
 
 -- ─── Notetaker (Zettelkasten) ────────────────────────────────────
--- Z = daily/weekly note panel (saves to ~/zettelkasten/comb-notes/)
-guard.bind(hyper, "Z", notetaker.toggle)
+-- Y = daily/weekly note panel (saves to ~/zettelkasten/comb-notes/)
+guard.bind(hyper, "Y", notetaker.toggle)
+
+-- ─── Git Panel ───────────────────────────────────────────────────
+-- Z = floating git panel: status, commit msg, pull/commit/push buttons
+guard.bind(hyper, "Z", gitpanel.toggle)
 
 -- ─── Launcher (command palette) ─────────────────────────────────
 -- Space = app launcher + commands with fuzzy search
@@ -158,3 +198,22 @@ guard.addHotkey(hs.hotkey.bind({ "shift" }, "delete", function()
 end))
 
 hs.alert.show("🔨 Hammerspoon loaded", 1.5)
+
+-- ─── Command palette ────────────────────────────────────────────
+-- ctrl+alt+shift+Space = every command there is, by category
+-- ctrl+alt+shift+F     = click anything by keyboard
+-- ctrl+alt+shift+H     = open any cheatsheet
+local palette     = require("modules.palette")
+local keyboard    = require("modules.keyboard")
+local cheatsheets = require("modules.cheatsheets")
+guard.bind({ "ctrl", "alt", "shift" }, "Space", palette.open)
+guard.bind({ "ctrl", "alt", "shift" }, "F", keyboard.clickHints)
+guard.bind({ "ctrl", "alt", "shift" }, "H", cheatsheets.show)
+
+-- ctrl+alt+cmd+Space opens the palette too: it used to be the window jumper,
+-- which the Windows tab (⌥3) now covers. Binding it last wins over the earlier
+-- one, and the earlier one is disabled outright so nothing lingers.
+for _, hk in ipairs(hs.hotkey.getHotkeys()) do
+  if tostring(hk.msg or ""):find("⌘⌃⌥SPACE") and hk.disable then hk:disable() end
+end
+guard.bind({ "ctrl", "alt", "cmd" }, "Space", palette.open)
