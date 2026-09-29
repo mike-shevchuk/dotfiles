@@ -1,18 +1,27 @@
 local codeium = {
   "Exafunction/windsurf.nvim",
-  dependencies = {
-    "nvim-lua/plenary.nvim",
-    "hrsh7th/nvim-cmp",
-  },
-  config = function()
-    require("codeium").setup({})
+  -- VeryLazy: off the startup path, but the language server is warm before the first insert.
+  event = "VeryLazy",
+  cmd = "Codeium",
+  dependencies = { "nvim-lua/plenary.nvim" },
+  -- nvim-cmp is disabled (LazyVim uses blink.cmp), so the cmp source would make setup() throw;
+  -- show suggestions as inline virtual text instead.
+  opts = { enable_cmp_source = false, virtual_text = { enabled = true } },
+  config = function(_, opts)
+    require("codeium").setup(opts)
   end,
 }
 
 local codecomp = {
-
   "olimorris/codecompanion.nvim",
-  opts = {},
+  cmd = {
+    "CodeCompanion",
+    "CodeCompanionChat",
+    "CodeCompanionActions",
+    "CodeCompanionCmd",
+    "CodeCompanionCLI",
+    "CodeCompanionCodeReview",
+  },
   dependencies = {
     "nvim-lua/plenary.nvim",
     "nvim-treesitter/nvim-treesitter",
@@ -45,12 +54,18 @@ local codecomp = {
 
 local cursor = {
   "xTacobaco/cursor-agent.nvim",
+  cmd = { "CursorAgent", "CursorAgentSelection", "CursorAgentBuffer" },
+  -- <leader>a* AI namespace (off <leader>ca, which collides with LSP code-action).
+  -- As lazy `keys` so the maps exist before the plugin loads.
+  keys = {
+    { "<leader>aa", "<cmd>CursorAgent<cr>", desc = "Cursor Agent: Toggle terminal" },
+    { "<leader>as", ":CursorAgentSelection<CR>", mode = "x", desc = "Cursor Agent: Send selection" },
+    { "<leader>ab", "<cmd>CursorAgentBuffer<cr>", desc = "Cursor Agent: Send buffer" },
+  },
   config = function()
     require("cursor-agent").setup({})
-    -- Moved off <leader>ca (which collides with LSP code-action) to the <leader>a* AI namespace.
-    vim.keymap.set("n", "<leader>aa", ":CursorAgent<CR>", { desc = "Cursor Agent: Toggle terminal" })
-    vim.keymap.set("v", "<leader>as", ":CursorAgentSelection<CR>", { desc = "Cursor Agent: Send selection" })
-    vim.keymap.set("n", "<leader>ab", ":CursorAgentBuffer<CR>", { desc = "Cursor Agent: Send buffer" })
+    -- The plugin's after/plugin file maps global <leader>ca on load; drop it (LSP code-action lives there).
+    pcall(vim.keymap.del, "n", "<leader>ca")
   end,
 }
 
