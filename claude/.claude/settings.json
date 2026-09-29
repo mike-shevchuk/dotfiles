@@ -1,9 +1,7 @@
 {
-  "model": "claude-fable-5[1m]",
   "env": {
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
   },
-  "teammateMode": "tmux",
   "hooks": {
     "PreToolUse": [
       {
@@ -12,6 +10,15 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
+          }
+        ]
+      },
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/tmux/scripts/agent-state.sh working"
           }
         ]
       }
@@ -23,6 +30,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/notification.ts --notify"
+          },
+          {
+            "type": "command",
+            "command": "~/dotfiles/tmux/scripts/agent-state.sh waiting"
           }
         ]
       }
@@ -38,6 +49,10 @@
           {
             "type": "command",
             "command": "npx tsx ~/.claude/hooks/cost-logger.ts"
+          },
+          {
+            "type": "command",
+            "command": "~/dotfiles/tmux/scripts/agent-state.sh done"
           }
         ]
       }
@@ -63,12 +78,36 @@
           }
         ]
       }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "^(startup|resume|clear|compact|fork)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/mikeshevchuk/.claude/hooks/herdr-agent-state.sh' session",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/dotfiles/tmux/scripts/agent-state.sh working"
+          }
+        ]
+      }
     ]
   },
   "statusLine": {
     "type": "command",
     "command": "~/.claude/statusline.sh",
-    "padding": 2
+    "padding": 2,
+    "refreshInterval": 30
   },
   "enabledPlugins": {
     "context7@claude-plugins-official": true,
@@ -76,12 +115,16 @@
     "code-simplifier@claude-plugins-official": true,
     "playwright@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "huggingface-skills@claude-plugins-official": true,
+    "huggingface-skills@claude-plugins-official": false,
     "claude-md-management@claude-plugins-official": true,
-    "telegram@claude-plugins-official": true,
+    "telegram@claude-plugins-official": false,
     "linear@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
-    "ralph-skills@ralph-marketplace": true
+    "ralph-skills@ralph-marketplace": false,
+    "ponytail@ponytail": true,
+    "hookify@claude-plugins-official": true,
+    "agent-sdk-dev@claude-plugins-official": true,
+    "pyright-lsp@claude-plugins-official": true
   },
   "extraKnownMarketplaces": {
     "ralph-marketplace": {
@@ -89,9 +132,45 @@
         "source": "github",
         "repo": "snarktank/ralph"
       }
+    },
+    "ponytail": {
+      "source": {
+        "source": "github",
+        "repo": "DietrichGebert/ponytail"
+      }
     }
   },
   "effortLevel": "high",
+  "tui": "fullscreen",
   "theme": "dark",
+  "teammateMode": "tmux",
+  "agentPushNotifEnabled": true,
+  "autoMode": {
+    "environment": [
+      "### Org-wide",
+      "**Organization**: None configured",
+      "**Cloud provider(s)**: None configured",
+      "**Repository visibility**: private (mike-shevchuk/zettelekasten, confirmed via gh)",
+      "**Internal sharing / snippet hosting**: None configured — treat public paste/gist services as outside the trust boundary",
+      "**Secrets management**: None configured",
+      "**Default / protected branches**: Default branch: master; Protected branches: none listed (rulesets not queryable here, so ruleset-based protection cannot be ruled out)",
+      "**CI/CD deploy targets**: None configured",
+      "**Network posture**: None configured",
+      "**Source control**: The trusted repo (mike-shevchuk/zettelekasten, origin github.com:mike-shevchuk/zettelekasten.git) and its remote(s) only",
+      "**Trusted internal domains**: None configured",
+      "**Trusted cloud buckets**: None configured",
+      "**Key internal services**: None configured",
+      "**Internal package registry**: None configured",
+      "**Sensitive data locations & audiences**: any file or store holding personal data, confidential business data, credentials, regulated data, or similarly sensitive material; preserve exact handles when known and share only with audiences cleared at the [named+specifics] bar; note a filename matching prod naming was found in the repo (pun-1633-prod-drawer-vs-badge-2026-08-18.html) — treat as sensitive-looking until confirmed otherwise",
+      "**Data retention / declassification**: None configured",
+      "**Sensitive remote targets**: any namespace, host, or container whose name carries prod or production as a whole word or name segment (hyphen/underscore/dot-delimited)",
+      "**Protected deployment namespaces / environments**: None configured — fall back to the Sensitive remote targets heuristic",
+      "**Protected IaC scopes**: IAM, RBAC, networking, quota, and node-pool resources; anything whose name or tag carries prod or production as a whole word or name segment",
+      "### User-specific",
+      "**Primary use of Claude Code**: software development",
+      "**Trusted repo**: /Users/mikeshevchuk/zettelkasten/claude_code/rescue-serverless/alerts (working directory), git repo mike-shevchuk/zettelekasten, remote origin github.com:mike-shevchuk/zettelekasten.git, private visibility — confidential material OK to commit/push here, but secrets and sensitive personal/entrusted data are never cleared into the repo by visibility alone",
+      "**Org-specific CLIs**: None configured"
+    ]
+  },
   "voiceEnabled": true
 }

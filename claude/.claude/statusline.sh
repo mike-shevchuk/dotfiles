@@ -780,10 +780,10 @@ format_reset_time() {
 
   case "$style" in
   time)
-    (date -d "@$epoch" +"%l:%M%P" 2>/dev/null || date -r "$epoch" +"%l:%M%P" 2>/dev/null) | sed 's/^ //'
+    (date -d "@$epoch" +"%H:%M" 2>/dev/null || date -r "$epoch" +"%H:%M" 2>/dev/null)
     ;;
   datetime)
-    (date -d "@$epoch" +"%b %-d, %l:%M%P" 2>/dev/null || date -r "$epoch" +"%b %-d, %l:%M%P" 2>/dev/null) | sed 's/  / /g; s/^ //'
+    (date -d "@$epoch" +"%b %-d, %H:%M" 2>/dev/null || date -r "$epoch" +"%b %-d, %H:%M" 2>/dev/null) | sed 's/  / /g; s/^ //'
     ;;
   *)
     (date -d "@$epoch" +"%b %-d" 2>/dev/null || date -r "$epoch" +"%b %-d" 2>/dev/null)
@@ -1122,6 +1122,15 @@ if (exec 3<>/dev/tcp/127.0.0.1/3541) 2>/dev/null; then
   kanban_seg=" ${dim}·${reset} ${green}📋${reset} ${cyan}${kanban_lan:-localhost}:3541${reset}"
 fi
 line1+="$kanban_seg"
+
+# ---- Reminders indicator (~/.claude/reminders.sh) ----
+# Surfaces active reminders so a deferred task (e.g. a post-deploy prod migration)
+# stays visible on the statusline. Fail-safe: nothing shown if the helper is
+# missing or the active count is 0. Manage with `~/.claude/reminders.sh`.
+if [ -x "$HOME/.claude/reminders.sh" ]; then
+  rem_badge=$("$HOME/.claude/reminders.sh" badge 2>/dev/null || true)
+  [ -n "$rem_badge" ] && line1+=" ${dim}·${reset} ${yellow}${rem_badge}${reset}"
+fi
 
 # Output three lines
 printf "%b\n%b\n%b" "$line1" "$line2" "$line3"
