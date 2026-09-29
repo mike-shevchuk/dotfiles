@@ -18,6 +18,9 @@ lz/.config/LazyVIM/lazy-lock.json
 # Hammerspoon secrets
 hammerspoon/.hammerspoon/.env
 
+# Hammerspoon test specs (standalone lua scripts, not shipped)
+hammerspoon/.hammerspoon/modules/spec/
+
 # macOS
 .DS_Store
 
