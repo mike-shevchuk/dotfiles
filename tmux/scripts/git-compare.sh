@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # git-compare.sh — open a diff between current branch and a target branch.
-# Used by tmux popup bindings (prefix V/M/N/O).
+# Used by tmux popup bindings (prefix V/M/X/O).
 #
 # EVERY mode prompts for the target branch via fzf. Default branch is pre-selected
 # (cursor on first line) so you can just hit Enter for the common case.
