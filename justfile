@@ -4,6 +4,7 @@ import '.justdir/mise.just'
 import '.justdir/claude.just'
 import '.justdir/codex.just'
 import '.justdir/sync.just'
+import '.justdir/verkada.just'
 
 # Default recipe: launch the fzf-powered recipe picker (`just help`)
 default:
