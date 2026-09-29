@@ -1,9 +1,9 @@
 -- Plugin Manager: lazy.nvim
 
--- Helper command: :DvBranchHead [3dot|2dot]
+-- Helper command: :BranchDiff [3dot|2dot]
 -- Opens DiffView for current branch vs detected default base (origin/main OR origin/master).
 -- Falls back to `origin/main` if symbolic-ref lookup fails.
-vim.api.nvim_create_user_command("DvBranchHead", function(opts)
+vim.api.nvim_create_user_command("BranchDiff", function(opts)
   local mode = (opts.args == "" or opts.args == nil) and "3dot" or opts.args
   local out = vim.fn.systemlist({ "git", "symbolic-ref", "refs/remotes/origin/HEAD" })
   local base = "origin/main"
@@ -16,6 +16,94 @@ end, {
   nargs = "?",
   complete = function() return { "3dot", "2dot" } end,
   desc = "DiffView · branch vs detected default base (auto: origin/main or origin/master)",
+  force = true,
+})
+
+-- Backward-compat alias: old name kept so muscle memory / older notes still work.
+vim.api.nvim_create_user_command("DvBranchHead", function(o)
+  vim.cmd("BranchDiff " .. o.args)
+end, {
+  nargs = "?",
+  complete = function() return { "3dot", "2dot" } end,
+  desc = "alias → :BranchDiff",
+  force = true,
+})
+
+-- Helper command: :WtSwitch — fuzzy-pick a git worktree and tcd into it.
+-- Parses `--porcelain` → clean rows "● branch  ·  dir  (sha)" instead of raw
+-- absolute paths. Current worktree marked ● and sorted first. fuzzy over the
+-- whole row (branch + dir) via dressing → telescope.
+vim.api.nvim_create_user_command("WtSwitch", function()
+  local out = vim.fn.systemlist({ "git", "worktree", "list", "--porcelain" })
+  if vim.v.shell_error ~= 0 then
+    vim.notify("Not a git repo", vim.log.levels.ERROR)
+    return
+  end
+  local cur = vim.fn.systemlist({ "git", "rev-parse", "--show-toplevel" })[1] or ""
+
+  -- Parse porcelain blocks into {path, sha, branch}.
+  local entries, e = {}, nil
+  for _, line in ipairs(out) do
+    if line:match("^worktree ") then
+      e = { path = line:sub(10) }
+      entries[#entries + 1] = e
+    elseif e and line:match("^HEAD ") then
+      e.sha = line:sub(6, 12)
+    elseif e and line:match("^branch ") then
+      e.branch = line:gsub("^branch refs/heads/", "")
+    elseif e and line == "detached" then
+      e.branch = "(detached)"
+    end
+  end
+  for _, x in ipairs(entries) do
+    x.dir = vim.fn.fnamemodify(x.path, ":t")
+    x.branch = x.branch or "(no branch)"
+    x.current = x.path == cur
+  end
+  -- Current worktree first, then alphabetical by branch.
+  table.sort(entries, function(a, b)
+    if a.current ~= b.current then
+      return a.current
+    end
+    return a.branch < b.branch
+  end)
+
+  vim.ui.select(entries, {
+    prompt = "Switch to worktree:",
+    format_item = function(x)
+      return string.format("%s %-42s  %s  (%s)", x.current and "●" or " ", x.branch, x.dir, x.sha or "-------")
+    end,
+  }, function(choice)
+    if not choice then
+      return
+    end
+    vim.cmd("tcd " .. vim.fn.fnameescape(choice.path))
+    vim.notify("cwd → " .. choice.dir .. "  [" .. choice.branch .. "]")
+  end)
+end, { desc = "Worktree · fuzzy-switch cwd to another git worktree", force = true })
+
+-- Helper command: :PrDiff [number] — review a PR purely as a DiffView (no
+-- checkout, no octo). Resolves head/base via gh, fetches them, opens the
+-- 3-dot diff (= GitHub "Files changed"). With no arg, uses current branch's PR.
+vim.api.nvim_create_user_command("PrDiff", function(o)
+  local args = (o.args ~= "") and { "gh", "pr", "view", o.args, "--json", "headRefName,baseRefName" }
+    or { "gh", "pr", "view", "--json", "headRefName,baseRefName" }
+  local out = vim.fn.system(args)
+  if vim.v.shell_error ~= 0 then
+    vim.notify("gh pr view failed:\n" .. out, vim.log.levels.ERROR)
+    return
+  end
+  local ok, data = pcall(vim.fn.json_decode, out)
+  if not ok or not data.headRefName then
+    vim.notify("Could not resolve PR head/base", vim.log.levels.ERROR)
+    return
+  end
+  vim.notify(("PrDiff: fetching %s + %s …"):format(data.baseRefName, data.headRefName))
+  vim.fn.system({ "git", "fetch", "origin", data.baseRefName, data.headRefName })
+  vim.cmd(("DiffviewOpen origin/%s...origin/%s"):format(data.baseRefName, data.headRefName))
+end, {
+  nargs = "?",
+  desc = "Review PR · open a PR as DiffView (by number, or current branch) — no checkout, no comments",
   force = true,
 })
 
@@ -72,8 +160,8 @@ local git_review_palette = {
   { cmd = "Octo pr url",                               desc = "Try Octo · 26 — copy PR URL to clipboard" },
 
   -- ─ DiffView: universal side-by-side for any pair of refs
-  { cmd = "DvBranchHead 3dot",                         desc = "Try DiffView · 1 — branch vs detected base (3-dot, PR-style, auto main/master)" },
-  { cmd = "DvBranchHead 2dot",                         desc = "Try DiffView · 2 — branch vs detected base (2-dot, only my commits)" },
+  { cmd = "BranchDiff 3dot",                         desc = "Try DiffView · 1 — branch vs detected base (3-dot, PR-style, auto main/master)" },
+  { cmd = "BranchDiff 2dot",                         desc = "Try DiffView · 2 — branch vs detected base (2-dot, only my commits)" },
   { cmd = "DiffviewOpen HEAD~1...HEAD",                desc = "Try DiffView · 3 — last commit vs HEAD" },
   { cmd = "DiffviewOpen",                              desc = "Try DiffView · 4 — uncommitted (working tree vs index)" },
   { cmd = "DiffviewOpen HEAD",                         desc = "Try DiffView · 5 — uncommitted + staged vs HEAD" },
@@ -122,8 +210,8 @@ local git_review_palette = {
   { cmd = "DiffviewOpen",                              desc = "Git Diff · working tree vs index (DiffView)" },
   { cmd = "DiffviewOpen HEAD",                         desc = "Git Diff · working tree + staged vs HEAD" },
   { cmd = "DiffviewOpen --cached",                     desc = "Git Diff · staged vs HEAD" },
-  { cmd = "DvBranchHead 3dot",                         desc = "Git Diff · branch vs detected base (3-dot, PR-style, auto main/master)" },
-  { cmd = "DvBranchHead 2dot",                         desc = "Git Diff · branch vs detected base (2-dot, only my commits)" },
+  { cmd = "BranchDiff 3dot",                         desc = "Git Diff · branch vs detected base (3-dot, PR-style, auto main/master)" },
+  { cmd = "BranchDiff 2dot",                         desc = "Git Diff · branch vs detected base (2-dot, only my commits)" },
   { cmd = "DiffviewClose",                             desc = "Git Diff · close DiffView" },
   { cmd = "DiffviewRefresh",                           desc = "Git Diff · refresh DiffView" },
   { cmd = "DiffviewToggleFiles",                       desc = "Git Diff · toggle file panel" },
@@ -186,6 +274,7 @@ local git_review_palette = {
   { cmd = "Octo review discard",                       desc = "Review PR · discard in-progress review" },
   { cmd = "Octo review submit",                        desc = "Review PR · submit (approve / comment / request changes)" },
   { cmd = "Octo review comments",                      desc = "Review PR · list all review comments" },
+  { cmd = "PrDiff",                                    desc = "Review PR · open as DiffView (no checkout, no comments)" },
 
   -- ───── Octo comments / threads ──────────────────────────────────────────
   { cmd = "Octo comment add",                          desc = "Review Comment · add comment on line" },
@@ -216,6 +305,36 @@ local git_review_palette = {
   { cmd = "Octo notification list",                    desc = "GitHub · list notifications" },
   { cmd = "Octo gist list",                            desc = "GitHub · list gists" },
   { cmd = "Octo repo list",                            desc = "GitHub · list your repositories" },
+
+  -- ───── 🗒️ Zettelkasten (telekasten) ─────────────────────────────────────
+  -- Fuzzy hint: "zettel"
+  { cmd = "Telekasten goto_today",                     desc = "Zettel · daily note (today, active context)" },
+  { cmd = "Telekasten goto_thisweek",                  desc = "Zettel · weekly note (this week)" },
+  { cmd = "Telekasten goto_thismonth",                 desc = "Zettel · monthly note (this month)" },
+  { cmd = "Telekasten switch_vault",                   desc = "Zettel · switch context (work/life/sport/general)" },
+  { cmd = "Telekasten search_notes",                   desc = "Zettel · search all notes (full text)" },
+  { cmd = "Telekasten find_notes",                     desc = "Zettel · find note by title" },
+  { cmd = "Telekasten show_tags",                      desc = "Zettel · browse tags" },
+  { cmd = "Telekasten show_backlinks",                 desc = "Zettel · backlinks to current note" },
+  { cmd = "Telekasten show_calendar",                  desc = "Zettel · calendar" },
+  { cmd = "Telekasten new_note",                       desc = "Zettel · new note" },
+  { cmd = "ZkHelp",                                    desc = "Zettel · help cheatsheet panel" },
+
+  -- ───── 🐍 Python ─────────────────────────────────────────────────────────
+  -- Fuzzy hint: "python" / "venv"
+  { cmd = "VenvSelect",                                desc = "Python · select venv (fix pyright imports)" },
+  { cmd = "VenvSelectCached",                          desc = "Python · use cached venv for this dir" },
+  { cmd = "lua vim.lsp.buf.format()",                  desc = "Python · format buffer (ruff)" },
+  { cmd = "lua vim.lsp.buf.code_action()",             desc = "Python · code action (auto-import / quick-fix)" },
+  { cmd = "lua vim.lsp.buf.references()",              desc = "Python · find references (where used)" },
+  { cmd = "lua vim.lsp.buf.rename()",                  desc = "Python · rename symbol (project-wide)" },
+  { cmd = "lua vim.lsp.inlay_hint.enable(not vim.lsp.inlay_hint.is_enabled())", desc = "Python · toggle inlay hints (inferred types)" },
+  { cmd = "LspRestart",                                desc = "Python · restart LSP (pyright/ruff)" },
+
+  -- ───── 🌳 Worktree ───────────────────────────────────────────────────────
+  -- Fuzzy hint: "worktree"
+  { cmd = "WtSwitch",                                  desc = "Worktree · fuzzy-switch cwd to another worktree" },
+  { cmd = "BranchDiff 3dot",                         desc = "Worktree · review this branch vs base (PR-style diff)" },
 }
 
 local function palette_for_commander()
@@ -392,6 +511,17 @@ local commander = {
         "CAT",
         "CMD",
       },
+      -- Велике вікно замість зашитих у темі 20 рядків / center.
+      -- M.config тут перемагає theme_opts у force-extend (див. theme.lua) →
+      -- цей layout override спрацьовує. Resize у вікні: <M-r>/<M-R>.
+      layout_strategy = "vertical",
+      layout_config = {
+        width = 0.9,
+        height = 0.9,
+        prompt_position = "top",
+        mirror = false,
+        preview_cutoff = 9999, -- палітрі прев'ю не треба — уся висота під список
+      },
       integration = {
         telescope = {
           enable = true,
@@ -405,6 +535,20 @@ local commander = {
 
     -- Git + Code-Review palette — no keybinds, discoverable via `<leader>fk`.
     commander.add(palette_for_commander())
+
+    -- Mirror EVERY :user command into commander (searchable by NAME). Runs here,
+    -- inside commander's own config, so setup + telescope extension are ready
+    -- (no early force-load race). Deferred + PER-ITEM pcall so one malformed
+    -- command can never corrupt the layer and break <leader>fk.
+    vim.schedule(function()
+      for name, def in pairs(vim.api.nvim_get_commands({})) do
+        local desc = name
+        if def.definition and def.definition ~= "" then
+          desc = name .. "  —  " .. (def.definition:gsub("%s+", " "):sub(1, 60))
+        end
+        pcall(commander.add, { { cmd = "<CMD>" .. name .. "<CR>", desc = desc, cat = "cmd", show = true } })
+      end
+    end)
   end,
 }
 
@@ -414,13 +558,13 @@ local legendary = {
 
   config = function()
     local leg = require("legendary")
-    require("legendary").setup({ include_builtin = true, auto_register_which_key = true })
-    -- local commander = require("commander")
-    -- local commander_commands = commander.get_commands()
-
-    -- leg.keymap(commander)
-    -- leg.keymap(keymap)
+    -- ЄДИНИЙ setup (раніше було два — другий перетирав include_builtin, і вбудовані
+    -- мапи зникали зі списку). Тепер повний список: builtin + усі lazy keys +
+    -- зареєстровані команди + which-key групи.
     leg.setup({
+      include_builtin = true, -- вбудовані vim-мапи у списку
+      include_legendary_cmds = true, -- власні :Legendary* команди
+      auto_register_which_key = true,
       keymaps = {
         -- vim.g.legendary_keymaps,
 
