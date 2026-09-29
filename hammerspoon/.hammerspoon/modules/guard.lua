@@ -47,9 +47,19 @@ function M.start(skipMenubar)
   updateIcon()
 end
 
--- Convenience: bind a hotkey and register it with the guard
+-- Convenience: bind a hotkey and register it with the guard.
+--
+-- Keys are resolved to a raw keycode here, once, instead of being handed to
+-- hs.hotkey as a letter. hs.hotkey matches letters by CHARACTER and re-binds
+-- itself whenever the input source changes, so on a Cyrillic layout every
+-- Latin-letter hotkey goes through a fallback and can stop firing. A keycode
+-- is the physical key and does not care what layout is active.
 function M.bind(mods, key, fn)
-  local hk = hs.hotkey.bind(mods, key, fn)
+  local code = key
+  if type(key) == "string" then
+    code = hs.keycodes.map[key] or hs.keycodes.map[key:lower()] or key
+  end
+  local hk = hs.hotkey.bind(mods, code, fn)
   return M.addHotkey(hk)
 end
 
