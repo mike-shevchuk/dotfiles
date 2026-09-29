@@ -1,5 +1,6 @@
 local codeium = {
   "Exafunction/windsurf.nvim",
+  event = "InsertEnter", -- completion is only useful in insert mode
   dependencies = {
     "nvim-lua/plenary.nvim",
     "hrsh7th/nvim-cmp",
@@ -10,8 +11,8 @@ local codeium = {
 }
 
 local codecomp = {
-
   "olimorris/codecompanion.nvim",
+  cmd = { "CodeCompanion", "CodeCompanionChat", "CodeCompanionActions" },
   opts = {},
   dependencies = {
     "nvim-lua/plenary.nvim",
@@ -45,13 +46,15 @@ local codecomp = {
 
 local cursor = {
   "xTacobaco/cursor-agent.nvim",
-  config = function()
-    require("cursor-agent").setup({})
-    -- Moved off <leader>ca (which collides with LSP code-action) to the <leader>a* AI namespace.
-    vim.keymap.set("n", "<leader>aa", ":CursorAgent<CR>", { desc = "Cursor Agent: Toggle terminal" })
-    vim.keymap.set("v", "<leader>as", ":CursorAgentSelection<CR>", { desc = "Cursor Agent: Send selection" })
-    vim.keymap.set("n", "<leader>ab", ":CursorAgentBuffer<CR>", { desc = "Cursor Agent: Send buffer" })
-  end,
+  cmd = { "CursorAgent", "CursorAgentSelection", "CursorAgentBuffer" },
+  -- <leader>a* AI namespace (off <leader>ca, which collides with LSP code-action).
+  -- As lazy `keys` so the maps exist before the plugin loads.
+  keys = {
+    { "<leader>aa", "<cmd>CursorAgent<cr>", desc = "Cursor Agent: Toggle terminal" },
+    { "<leader>as", ":CursorAgentSelection<CR>", mode = "v", desc = "Cursor Agent: Send selection" },
+    { "<leader>ab", "<cmd>CursorAgentBuffer<cr>", desc = "Cursor Agent: Send buffer" },
+  },
+  opts = {},
 }
 
 return {
