@@ -44,7 +44,7 @@ M.repos = buildRepoList()
 local function gitAsync(dir, args, cb)
   hs.task.new("/bin/sh", function(code, out, err)
     cb(code == 0, (out or "") .. (err or ""))
-  end, { "-c", string.format("export PATH='%s'; cd '%s' && git %s 2>&1", PATH, dir, args) }):start()
+  end, { "-c", string.format("export PATH='%s'; cd '%s' && git %s 2>&1", PATH, dir:gsub("'", "'\\''"), args) }):start()
 end
 
 local function js(fn, ...)
@@ -367,7 +367,7 @@ select {
   }
 
   function showCommit(hash) {
-    window.webkit.messageHandlers.git.postMessage(JSON.stringify({action:'show', hash}));
+    window.webkit.messageHandlers.git.postMessage(JSON.stringify({action:'show', hash, repo: parseInt(document.getElementById('sel').value)}));
   }
 
   function showLocalDiff(repoIdx) {
@@ -449,6 +449,9 @@ local function handleAction(data)
       if r.path == removed.path then table.remove(extras, i); break end
     end
     saveExtraRepos(extras)
+    -- rows/<option>s carry list indices, which just shifted: re-render
+    M.webview:html(buildHTML(M.repos))
+    refreshAll()
     return
 
   elseif data.action == "diff" then
@@ -517,6 +520,11 @@ function M.toggle()
     { developerExtrasEnabled = false }, uc
   )
   M.webview:windowStyle({ "titled", "closable", "resizable", "utility" })
+  M.webview:deleteOnClose(true)
+  -- closed with the title-bar button: forget it, so the next toggle reopens
+  M.webview:windowCallback(function(action)
+    if action == "closing" then M.webview = nil; M.visible = false end
+  end)
   M.webview:level(hs.canvas.windowLevels.floating)
   M.webview:allowTextEntry(true)
   M.webview:html(buildHTML(M.repos))
