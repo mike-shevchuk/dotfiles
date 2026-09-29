@@ -404,18 +404,24 @@ if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   # Shows @sha(-M): the newest unresolved finding's commit and how many commits
   # behind HEAD it is. COLOUR encodes whether we've addressed it:
   #   -0 (finding still on HEAD)  → RED   — not fixed yet, live.
-  #   -M, M>0 (finding behind HEAD) → GREEN — a later commit fixed it; the
-  #        thread is just not triaged/re-reviewed on GitHub yet.
+  #   -M, M>0 (finding behind HEAD) → YELLOW — later commits exist; they MAY
+  #        have fixed it (commit count proves nothing), re-review pending.
+  #   (rebased) — sha no longer in HEAD's history → RED, age unknown.
   # Unknown age (no sha) stays red — can't prove it's fixed. The whole badge is
   # an OSC 8 hyperlink to the mirror PR — click to open, or copy the link.
   if [ -n "$pr_bugbot" ] && [ "$pr_bugbot" -gt 0 ] 2>/dev/null; then
     _bug_label="🐛${pr_bugbot}"
     _bug_colour="$red"   # default: unfixed / unknown
     if [ -n "$pr_bugsha" ]; then
-      _bug_ago=$(cd "$cwd" && git rev-list --count "${pr_bugsha}..HEAD" 2>/dev/null || true)
-      if [ -n "$_bug_ago" ]; then
+      # Only meaningful if the finding's commit is still in HEAD's history —
+      # after a rebase/force-push sha..HEAD counts the whole rewritten branch.
+      if (cd "$cwd" && git merge-base --is-ancestor "$pr_bugsha" HEAD 2>/dev/null); then
+        _bug_ago=$(cd "$cwd" && git rev-list --count "${pr_bugsha}..HEAD" 2>/dev/null || true)
         _bug_label="🐛${pr_bugbot} @${pr_bugsha}(-${_bug_ago})"
-        [ "$_bug_ago" -gt 0 ] 2>/dev/null && _bug_colour="$green"   # behind HEAD → fixed
+        # later commits exist, but that doesn't prove they fixed it → yellow, not green
+        [ "${_bug_ago:-0}" -gt 0 ] 2>/dev/null && _bug_colour="$yellow"
+      else
+        _bug_label="🐛${pr_bugbot} @${pr_bugsha}(rebased)"
       fi
     fi
     if [ -n "$pr_bugurl" ]; then
