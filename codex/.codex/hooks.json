@@ -1,25 +1,35 @@
 {
   "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "^Bash$",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 ~/.codex/hooks/danger_guard.py",
-            "statusMessage": "Checking command safety"
-          }
-        ]
-      }
-    ],
     "PostToolUse": [
       {
-        "matcher": "apply_patch|Edit|Write",
         "hooks": [
           {
-            "type": "command",
             "command": "python3 ~/.codex/hooks/format.py",
-            "statusMessage": "Formatting edited file"
+            "statusMessage": "Formatting edited file",
+            "type": "command"
+          }
+        ],
+        "matcher": "apply_patch|Edit|Write"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "command": "python3 ~/.codex/hooks/danger_guard.py",
+            "statusMessage": "Checking command safety",
+            "type": "command"
+          }
+        ],
+        "matcher": "^Bash$"
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.codex/hooks/gsd-check-update.js\"",
+            "type": "command"
           }
         ]
       }
@@ -28,12 +38,12 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "python3 ~/.codex/hooks/notify.py stop"
+            "command": "python3 ~/.codex/hooks/notify.py stop",
+            "type": "command"
           },
           {
-            "type": "command",
-            "command": "python3 ~/.codex/hooks/cost_logger.py"
+            "command": "python3 ~/.codex/hooks/cost_logger.py",
+            "type": "command"
           }
         ]
       }
@@ -42,18 +52,8 @@
       {
         "hooks": [
           {
-            "type": "command",
-            "command": "python3 ~/.codex/hooks/notify.py subagent_stop"
-          }
-        ]
-      }
-    ],
-    "SessionStart": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"/Users/mikeshevchuk/.local/share/mise/installs/node/25.8.1/bin/node\" \"/Users/mikeshevchuk/.codex/hooks/gsd-check-update.js\""
+            "command": "python3 ~/.codex/hooks/notify.py subagent_stop",
+            "type": "command"
           }
         ]
       }

@@ -1,5 +1,5 @@
 # Personal Codex defaults managed by ~/dotfiles.
-model_reasoning_effort = "high"
+model_reasoning_effort = "medium"
 personality = "pragmatic"
 approval_policy = "on-request"
 sandbox_mode = "workspace-write"
@@ -8,6 +8,7 @@ notify = ["python3", "/Users/mikeshevchuk/.codex/hooks/notify.py", "notification
 
 # Reuse existing per-project Claude instructions while projects migrate to AGENTS.md.
 project_doc_fallback_filenames = ["CLAUDE.md"]
+model = "gpt-6-luna"
 
 [features]
 hooks = true
@@ -19,6 +20,11 @@ notification_method = "auto"
 notification_condition = "unfocused"
 status_line = ["project-name", "current-dir", "git-branch", "model-with-reasoning", "context-used", "context-remaining", "five-hour-limit", "weekly-limit", "total-input-tokens", "total-output-tokens", "fast-mode", "thread-id"]
 terminal_title = ["spinner", "project", "git-branch", "model", "task-progress"]
+screen_reader_detection_done = true
+
+[tui.model_availability_nux]
+"gpt-5.5" = 1
+gpt-6-astra = 4
 
 [projects."/Users/mikeshevchuk/code/b2b/rescue-serverless"]
 trust_level = "trusted"
