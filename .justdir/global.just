@@ -946,7 +946,7 @@ tokens:
 #                  CLAUDE_CONFIG_DIR при запуску `claude`.
 #
 # Перемикання діє з НАСТУПНОГО запуску `claude`, не в живій сесії.
-# setup/save зберігають конфіг + plugins/ + .credentials.json (логін),
+# setup/save зберігають конфіг + plugins/ + .claude.json (MCP/trust; логін на macOS — Keychain),
 # але ВИКЛЮЧАЮТЬ рантайм-логи (jobs/ projects/ sessions/ ...) — новий
 # профіль наростить свої. Правила копіювання — одні, у _c-sync.
 #
@@ -963,7 +963,7 @@ c-list:
     set -uo pipefail
     green='\033[32m'; cyan='\033[36m'; dim='\033[2m'; yellow='\033[33m'; reset='\033[0m'
     profiles="$HOME/.claude-profiles"
-    active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
     printf "\n  ${cyan}%-3s%-14s %-8s %s${reset}\n" "" "PROFILE" "SIZE" "PATH"
     mark=" "; [ "$active" = default ] && mark="●"
     # default = живий ~/.claude (2ГБ+ рантайму) — не du-имо його заради колонки
@@ -984,11 +984,12 @@ c-list:
 c-setup name:
     #!/usr/bin/env bash
     set -euo pipefail
-    name="{{name}}"
-    case "$name" in ""|default|*/*|*" "*) echo "  назва недопустима (не порожня, не 'default', без / і пробілів)" >&2; exit 1 ;; esac
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ && "$name" != default ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-], не 'default' (блокує . .. / → \$HOME)" >&2; exit 1; }
     dst="$HOME/.claude-profiles/$name"
     [ -e "$dst" ] && { echo "  профіль '$name' вже існує — онови через: jg c-save $name" >&2; exit 1; }
-    active=$(just -g _c-active); src=$(just -g _c-dir "$active")
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-dir \"$active\"" >&2; src=$(just -g _c-dir "$active")
     echo "→ setup '$name' зі знімка '$active'..." >&2
     echo "━━━ just ━━━  just -g _c-sync \"$src\" \"$dst\"" >&2
     if ! just -g _c-sync "$src" "$dst"; then
@@ -1003,10 +1004,11 @@ c-setup name:
 c-save name:
     #!/usr/bin/env bash
     set -euo pipefail
-    name="{{name}}"
-    case "$name" in ""|default|*/*|*" "*) echo "  назва недопустима (не порожня, не 'default', без / і пробілів)" >&2; exit 1 ;; esac
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ && "$name" != default ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-], не 'default' (блокує . .. / → \$HOME)" >&2; exit 1; }
     dst="$HOME/.claude-profiles/$name"
-    active=$(just -g _c-active); src=$(just -g _c-dir "$active")
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-dir \"$active\"" >&2; src=$(just -g _c-dir "$active")
     [ "$src" = "$dst" ] && { echo "  '$name' зараз активний — він уже живий, зміни вже там" >&2; exit 1; }
     echo "→ save '$active' → '$name'..." >&2
     echo "━━━ just ━━━  just -g _c-sync \"$src\" \"$dst\"" >&2
@@ -1018,8 +1020,8 @@ c-save name:
 c-switch name:
     #!/usr/bin/env bash
     set -euo pipefail
-    name="{{name}}"
-    case "$name" in ""|*/*|*" "*) echo "  назва недопустима (не порожня, без / і пробілів)" >&2; exit 1 ;; esac
+    name="$1"
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-]" >&2; exit 1; }
     if [ "$name" != default ] && [ ! -d "$HOME/.claude-profiles/$name" ]; then
         echo "  профіль '$name' не існує — створи: jg c-setup $name" >&2
         exit 1
@@ -1033,11 +1035,12 @@ c-switch name:
 c-delete name:
     #!/usr/bin/env bash
     set -euo pipefail
-    name="{{name}}"
+    name="$1"
     [ "$name" = default ] && { echo "  'default' видалити не можна — це живий ~/.claude" >&2; exit 1; }
+    [[ "$name" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "  назва недопустима: лише [A-Za-z0-9_-] (блокує ../ поза ~/.claude-profiles)" >&2; exit 1; }
     dst="$HOME/.claude-profiles/$name"
     [ -d "$dst" ] || { echo "  профіль '$name' не існує" >&2; exit 1; }
-    active=$(just -g _c-active)
+    echo "━━━ just ━━━  just -g _c-active" >&2; active=$(just -g _c-active)
     [ "$active" = "$name" ] && { echo "  '$name' зараз активний — спершу: jg c-switch default" >&2; exit 1; }
     sz=$(du -sh "$dst" 2>/dev/null | cut -f1)
     if command -v gum >/dev/null 2>&1; then
@@ -1101,6 +1104,11 @@ _c-sync src dst:
     rc=0; rsync -aL --delete "${excludes[@]}" "$src/" "$dst/" || rc=$?
     if [ "$rc" -ne 0 ] && [ "$rc" -ne 24 ]; then
         echo "  ✗ rsync впав (rc=$rc)" >&2; exit "$rc"
+    fi
+    # default тримає стан (MCP, trust, onboarding) у ~/.claude.json — ПОЗА ~/.claude;
+    # профіль з CLAUDE_CONFIG_DIR читає $dst/.claude.json. Логін на macOS — у Keychain.
+    if [ "$src" = "$HOME/.claude" ] && [ -f "$HOME/.claude.json" ]; then
+        echo "  + ~/.claude.json → $dst/.claude.json" >&2; cp "$HOME/.claude.json" "$dst/.claude.json"
     fi
     sz=$(du -sh "$dst" 2>/dev/null | cut -f1)
     echo "  OK — $dst (${sz})" >&2
