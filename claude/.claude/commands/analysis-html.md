@@ -33,7 +33,7 @@ Collect and keep the raw material; you will paste it verbatim later:
 ## Step 2 — build the page from the template
 
 ```bash
-cp ~/dotfiles/claude/.claude/scripts/report/template.html <OUT>/<slug>-<YYYY-MM-DD>.html
+cp ~/dotfiles/claude/.claude/scripts/report/template.html <OUT>/<slug>-<YYYY-MM-DD>.html   # template loads /_assets/diff-hl.js → every pre.diff gets syntax highlighting (language from the .file line); keep pre.diff lines as span.add/.del/.ctx
 ```
 
 Fill `{{TITLE}}`, `{{H1_EN}}`, `{{H1_UA}}`, `{{SUBTITLE}}`, `{{SECTIONS}}`, `{{EXTRA_CSS}}`.
