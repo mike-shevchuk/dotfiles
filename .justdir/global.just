@@ -1063,6 +1063,16 @@ disk-pick min="50":
     add "🟡CARE" "iOS Simulators"                         "$HOME/Library/Developer/CoreSimulator/Devices"       contents
     # 🟠 DOCKER — special: prune unused, never rm the whole store
     add "🟠DOCK" "Docker images/volumes (prune -a)" "$HOME/Library/Containers/com.docker.docker" docker 1
+    # 🟢 SAFE (sudo) — macOS Aerial wallpaper/screensaver downloads pile up in ROOT's TMPDIR
+    # (idleassetsd bug: filled the disk with 78G on 2026-09-29). Root-owned → measured via sudo.
+    # root's T/ is drwx------ → a user-side glob sees nothing; resolve it as root (asks sudo password once)
+    echo "  · sudo — checking Aerial cache in root TMPDIR (idleassetsd)..." >&2
+    for ia in $(sudo sh -c 'ls -d /private/var/folders/zz/*/T/com.apple.idleassetsd 2>/dev/null'); do
+        kb=$(sudo du -sk "$ia" 2>/dev/null | cut -f1); [ -z "$kb" ] && kb=0
+        [ "$kb" -lt $((MIN_MB*1024)) ] && continue
+        sz=$(sudo du -sh "$ia" 2>/dev/null | cut -f1)
+        printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$kb" "$sz" "🟢SAFE" "Aerial videos (idleassetsd, sudo) — then set a static wallpaper" "$ia" rootcontents >> "$tmp"
+    done
 
     [ -s "$tmp" ] || { echo "  nothing ≥${MIN_MB}MB to clean 🎉" >&2; rm -f "$tmp"; exit 0; }
     sort -rn "$tmp" -o "$tmp"   # biggest first
@@ -1118,6 +1128,12 @@ disk-pick min="50":
             contents)
                 echo "  [$i/$n] wiping $path/* ..." >&2
                 rm -rf "$path"/* 2>/dev/null && echo "      OK" >&2 || echo "      FAIL (in use / perms)" >&2 ;;
+            rootcontents)
+                # stop the downloader first, else it refills while we delete; glob expands as root
+                echo "  [$i/$n] sudo: stop idleassetsd + wipe $path/* ..." >&2
+                echo "━━━ sudo ━━━  sudo killall idleassetsd; sudo sh -c 'rm -rf \"$path\"/*'" >&2
+                sudo killall idleassetsd 2>/dev/null || true
+                sudo sh -c 'rm -rf "$1"/*' _ "$path" && echo "      OK — now System Settings → Wallpaper + Screen Saver: pick a non-Aerial one, or it refills" >&2 || echo "      FAIL" >&2 ;;
         esac
     done <<< "$sel"
     after=$(df -k /System/Volumes/Data | awk 'END{print $4}')
