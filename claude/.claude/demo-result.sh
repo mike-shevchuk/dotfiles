@@ -63,7 +63,9 @@ case "$cmd" in
     [ "$failed" = "0" ] || { echo "✗ DEMO: last run failed ($failed)" >&2; exit 1; }
     now=$(gh pr view "$pr" -R "$REPO" --json headRefOid -q .headRefOid)
     # Fresh = no non-merge commits between the demoed build and the PR head.
-    ahead=$(gh api "repos/$REPO/compare/$dsha...$now" -q '[.commits[]|select(.parents|length==1)]|length' 2>/dev/null || echo "?")
+    # only the PR's own non-merge commits after the demoed build — commits that arrived via a main merge don't count
+    git -C "$HOME/code/b2b/rescue-serverless" fetch -q origin 2>/dev/null
+    ahead=$(git -C "$HOME/code/b2b/rescue-serverless" rev-list --no-merges --count "$dsha..$now" --not origin/main 2>/dev/null || echo "?")
     if [ "$ahead" = "0" ]; then
       echo "✓ DEMO: $(jq -r '"\(.passed) passed · \(.operator) · \(.finished) · dev \(.dev_sha[0:9])"' "$file")" >&2
     else
