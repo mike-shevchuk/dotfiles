@@ -561,18 +561,20 @@ fi
 # (~/.claude/pipeline-stamp.sh). Each stamp carries an anchor commit (`head`);
 # we show how many commits landed AFTER the check ran (staleness).
 # Glyph per step: green ✓ = done & fresh, yellow ✓-N = done N commits ago,
-# dim · = pending. Order: CR SMP RPR JT.
+# dim · = pending. Order: CR SMP RPR JT FE DEMO (FE/DEMO appended, existing order unchanged).
 # Skipped in GSD mode (_gsd_mode=1) — the 🛠 GSD slot above takes the slot instead.
 if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
-  _pl_file="/tmp/claude/pipeline-${local_branch//\//-}.json"
+  # Durable state (survives reboot); /tmp is the legacy mirror.
+  _pl_file="$HOME/.claude/pipeline-state/pipeline-${local_branch//\//-}.json"
+  [ -f "$_pl_file" ] || _pl_file="/tmp/claude/pipeline-${local_branch//\//-}.json"
   if [ -f "$_pl_file" ]; then
     # One line per badge step: "<done 1/0> <anchor-sha or ->"
     _pl_steps=$(jq -r '
-      ["code-review","simplify","review-pr","just-test"][] as $k
+      ["code-review","simplify","review-pr","just-test","just-fe","demo"][] as $k
       | [ (if .steps[$k].done == true then "1" else "0" end),
           (.steps[$k].head // "-") ] | join(" ")' "$_pl_file" 2>/dev/null)
     _pl=""
-    _pl_labels=(CR SMP RPR JT)
+    _pl_labels=(CR SMP RPR JT FE DEMO)
     _pl_i=0
     _pl_next=""   # first step needing attention (stale or pending) = next action
     while read -r _pf _ph; do
@@ -580,7 +582,8 @@ if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
       if [ "$_pf" = "1" ]; then
         _ago=""
         if [ "$_ph" != "-" ] && [ -n "$cwd" ]; then
-          _ago=$(git -C "$cwd" --no-optional-locks rev-list --count "${_ph}..HEAD" 2>/dev/null || true)
+          # Own commits only: a merge of main does not make a check stale.
+          _ago=$(git -C "$cwd" --no-optional-locks rev-list --count --first-parent --no-merges "${_ph}..HEAD" 2>/dev/null || true)
         fi
         if [ -n "$_ago" ] && [ "$_ago" -gt 0 ] 2>/dev/null; then
           _pl+=" ${yellow}${_plabel}✓-${_ago}${reset}"   # done, but N commits behind
