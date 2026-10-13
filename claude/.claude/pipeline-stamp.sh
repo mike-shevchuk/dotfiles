@@ -2,27 +2,33 @@
 # pipeline-stamp.sh — read/write the per-branch PR-pipeline state file that the
 # `/pr-state` command builds and the statusline renders as compact badges.
 #
-# State lives at /tmp/claude/pipeline-<sanitized-branch>.json (matches the
-# statusline's /tmp/claude cache convention). Keyed by git BRANCH, so every
-# worktree on the same branch shares one state file.
+# State lives at ~/.claude/pipeline-state/pipeline-<sanitized-branch>.json (durable:
+# survives a reboot). Every write is mirrored to /tmp/claude/ for older readers. Keyed by
+# git BRANCH, so every worktree on the same branch shares one state file.
+# Override the dir with PIPELINE_STATE_DIR.
 #
 # Schema:
 #   { "branch": "card-zone-clamp", "pr": 1535, "updated": "<iso>",
-#     "steps": { "code-review": {"done": true, "ts": "<iso>", "src": "marker"},
-#                "simplify":    {"done": true, "ts": "<iso>", "src": "commit:abc"},
+#     "steps": { "code-review": {"done": true, "ts": "<iso>", "src": "marker", "head": "<sha>"},
+#                "simplify":    {"done": true, "ts": "<iso>", "src": "commit:abc", "head": "abc"},
 #                ... } }
 #
-# Known steps (badge order on the statusline): brainstorm code-review simplify
-# review-pr just-test pr-summary merged
+# Known steps (badge order on the statusline): code-review simplify review-pr just-test
+# just-fe demo  (+ brainstorm pr-summary merged, not shown as badges)
 #
 # Usage:
 #   pipeline-stamp.sh stamp <step> [src] [pr]   # mark step done = now
 #   pipeline-stamp.sh unstamp <step>            # clear a step
 #   pipeline-stamp.sh set-pr <pr>               # record the PR number
+#   pipeline-stamp.sh detect                    # stamp code-review/simplify from commit subjects (src=heuristic)
+#   pipeline-stamp.sh fleet [days=3]            # one row per open PR of mine (both repos) + recent local-only branches
 #   pipeline-stamp.sh refresh-pr                # force-refresh the statusline PR/bugbot cache (no TTL)
-#   pipeline-stamp.sh path                      # print the state file path
-#   pipeline-stamp.sh show                      # cat the JSON (pretty)
-#   pipeline-stamp.sh branch                    # print the resolved branch
+#   pipeline-stamp.sh migrate                   # copy /tmp/claude/pipeline-*.json into the durable dir (also runs on every call)
+#   pipeline-stamp.sh path | show | branch
+#
+# Teammate one-liners (run in the PR worktree):
+#   after /code-review:  ~/.claude/pipeline-stamp.sh stamp code-review commit:$(git rev-parse --short HEAD)
+#   after /simplify:     ~/.claude/pipeline-stamp.sh stamp simplify commit:$(git rev-parse --short HEAD)
 #
 # `src` is a free-text provenance tag (marker | commit:<sha> | pr-comment | heuristic).
 set -euo pipefail
@@ -32,14 +38,21 @@ step="${2:-}"
 arg3="${3:-}"
 arg4="${4:-}"
 
+dir="${PIPELINE_STATE_DIR:-$HOME/.claude/pipeline-state}"
+mirror="/tmp/claude"
+mkdir -p "$dir" "$mirror"
+
+# One-time (idempotent) rescue of state written before the durable dir existed: copy a
+# /tmp file only when the durable copy is missing, so a durable stamp is never overwritten.
+for f in "$mirror"/pipeline-*.json; do
+  [ -f "$f" ] && [ ! -f "$dir/${f##*/}" ] && cp "$f" "$dir/"
+done
+
 # Resolve the current git branch (worktree-aware) and sanitize for a filename.
 branch=$(git -C "$PWD" --no-optional-locks branch --show-current 2>/dev/null || true)
 [ -z "$branch" ] && branch="_detached"
-safe_branch="${branch//\//-}"
-
-dir="/tmp/claude"
-mkdir -p "$dir"
-file="$dir/pipeline-${safe_branch}.json"
+state_file() { local b="$1"; echo "$dir/pipeline-${b//\//-}.json"; }
+file=$(state_file "$branch")
 
 iso_now() { date -u +"%Y-%m-%dT%H:%M:%SZ"; }
 
@@ -50,49 +63,198 @@ ensure_file() {
   fi
 }
 
+# Atomic write from a jq filter, then mirror to /tmp for readers that still look there.
+jq_write() {
+  local tmp="${file}.tmp"
+  jq "$@" "$file" > "$tmp" && mv "$tmp" "$file"
+  cp "$file" "$mirror/"
+}
+
+stamp_step() {  # stamp_step <step> <src> [pr]
+  local s="$1" src="$2" pr="${3:-}" anchor
+  ensure_file
+  # Anchor commit for staleness ("how many commits ago was this check?").
+  # src=commit:<sha> pins the anchor to that sha; otherwise anchor = HEAD now.
+  case "$src" in
+    commit:*|heuristic:commit:*) anchor="${src##*commit:}" ;;
+    *)        anchor=$(git -C "$PWD" --no-optional-locks rev-parse --short HEAD 2>/dev/null || true) ;;
+  esac
+  jq_write --arg s "$s" --arg ts "$(iso_now)" --arg src "$src" --arg pr "$pr" --arg head "$anchor" '
+     .steps[$s] = {done: true, ts: $ts, src: $src, head: $head}
+     | .updated = $ts
+     | (if ($pr != "") then .pr = ($pr|tonumber) else . end)'
+  echo "✓ stamped '$s' (src=$src head=$anchor) → $file" >&2
+}
+
+# ── fleet helpers ──────────────────────────────────────────────────────────────
+# Local clone for each GitHub repo (worktrees of a clone share its objects).
+repo_root() {
+  case "$1" in
+    back2back-team/rescue-serverless) echo "$HOME/code/b2b/rescue-serverless" ;;
+    back2back-team/workflow-engine)   echo "$HOME/code/b2b/workflow-engine" ;;
+  esac
+}
+
+linear_id() {  # PUN-1872 from the title, else from the branch (pun-1872-…)
+  local t
+  t=$(grep -oE '[A-Z]{2,5}-[0-9]+' <<<"$1" | head -1 || true)
+  [ -z "$t" ] && t=$(grep -oiE '(pun|eng)-[0-9]+' <<<"$2" | head -1 | tr '[:lower:]' '[:upper:]' || true)
+  echo "${t:--}"
+}
+
+# Fields are never empty: bash `read` with IFS=$'\t' collapses empty TSV fields and shifts columns.
+# Badge for one step: ✓ fresh · ✓-N stale by N commits · · pending · ✓? anchor unknown locally.
+badge() {  # badge <state file> <step> <label> <repo root> <head sha>
+  local f="$1" s="$2" label="$3" root="$4" head="$5" is_done anchor ago
+  is_done=$( [ -f "$f" ] && jq -r --arg s "$s" '.steps[$s].done // false' "$f" || echo false)
+  [ "$is_done" != true ] && { printf '%s·' "$label"; return; }
+  anchor=$(jq -r --arg s "$s" '.steps[$s].head // ""' "$f")
+  ago=""
+  # Own commits only: merging main into the branch does not make a check stale.
+  [ -n "$anchor" ] && [ -n "$head" ] && ago=$(git -C "$root" rev-list --count --first-parent --no-merges "${anchor}..${head}" 2>/dev/null || true)
+  if [ -z "$ago" ]; then printf '%s✓?' "$label"
+  elif [ "$ago" -gt 0 ]; then printf '%s✓-%s' "$label" "$ago"
+  else printf '%s✓' "$label"; fi
+}
+
+worktree_of() {  # worktree_of <repo root> <branch> → path or empty
+  git -C "$1" worktree list --porcelain 2>/dev/null | awk -v b="refs/heads/$2" '
+    /^worktree /{p=substr($0,10)} $0=="branch " b {print p; exit}'
+}
+
+_fleet_rows() {
+  local days=3 a
+  for a in "$@"; do case "$a" in days=*) days="${a#days=}" ;; esac; done
+  local repos="back2back-team/rescue-serverless back2back-team/workflow-engine"
+  local seen=" "
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    "PR" "LINEAR" "CR SMP JT FE" "BEHIND" "CI" "DEMO pre/mike" "MERGEABLE" "DEPLOY" "TRAIN" "LOCAL+"
+  for repo in $repos; do
+    local root; root=$(repo_root "$repo")
+    [ -d "$root" ] || { echo "  (no local clone for $repo — skipped)" >&2; continue; }
+    git -C "$root" fetch -q origin 2>/dev/null || true   # one fetch per repo: main + every PR branch
+    local prs
+    prs=$(gh pr list -R "$repo" --author @me --state open \
+      --json number,title,headRefName,headRefOid,mergeable,labels,statusCheckRollup,comments 2>/dev/null || echo '[]')
+    while IFS=$'\t' read -r num title br head mergeable labels ci jt fe; do
+      [ -z "$num" ] && continue
+      seen+="$br "
+      local f; f=$(state_file "$br")
+      local cr smp jtb feb
+      cr=$(badge "$f" code-review CR "$root" "$head"); smp=$(badge "$f" simplify SMP "$root" "$head")
+      jtb=$(badge "$f" just-test JT "$root" "$head"); feb=$(badge "$f" just-fe FE "$root" "$head")
+      # A posted JT / FE comment counts even when nobody stamped it.
+      case "$jtb" in JT·) [ "$jt" -gt 0 ] && jtb="JT✓c" ;; esac
+      case "$feb" in FE·) [ "$fe" -gt 0 ] && feb="FE✓c" ;; esac
+      local behind; behind=$(git -C "$root" rev-list --count "${head}..origin/main" 2>/dev/null || echo "?")
+      local demo="-/-" pre mike
+      if [ "$repo" = back2back-team/rescue-serverless ]; then
+        pre=$(~/.claude/demo-result.sh check "$num" --preflight >/dev/null 2>&1 && echo "✓" || echo "·")
+        mike=$(~/.claude/demo-result.sh check "$num" >/dev/null 2>&1 && echo "✓" || echo "·")
+        demo="$pre/$mike"
+        [ "$mike" = "✓" ] && demo="$demo merge"   # Mike approved, PR still open → the next action is the merge
+      fi
+      local deploy="·"; grep -qw deploy <<<"$labels" && deploy="🚀"
+      local train; train=$(git -C "$root" branch -r --contains "$head" 2>/dev/null | grep -c 'origin/train' || true)
+      [ "${train:-0}" -gt 0 ] && train="yes" || train="·"
+      local wt local_ahead="·"; wt=$(worktree_of "$root" "$br")
+      [ -n "$wt" ] && local_ahead=$(git -C "$wt" rev-list --count "origin/${br}..HEAD" 2>/dev/null || echo "?")
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "#$num ${repo##*/}" "$(linear_id "$title" "$br")" "$cr $smp $jtb $feb" "$behind" "$ci" "$demo" \
+        "${mergeable:-?}" "$deploy" "$train" "$local_ahead"
+    done < <(jq -r '.[] | [
+        .number, .title, .headRefName, .headRefOid, (.mergeable // "?"),
+        ([.labels[].name] | join(",") | if . == "" then "-" else . end),
+        ([.statusCheckRollup[]? | (.conclusion // .state // .status // "")] as $c
+          | "✓\([$c[]|select(.=="SUCCESS")]|length) ✗\([$c[]|select(.=="FAILURE" or .=="TIMED_OUT" or .=="CANCELLED")]|length) ⏳\([$c[]|select(.=="IN_PROGRESS" or .=="QUEUED" or .=="PENDING")]|length) ↷\([$c[]|select(.=="SKIPPED" or .=="NEUTRAL")]|length)"),
+        ([.comments[].body | select(test("End-to-end smoke trace|/just-test|Smoke trace|smoke trace"; "i"))] | length),
+        ([.comments[].body | select(test("API for the frontend|FE hand-off|/just-fe|Frontend hand-off"; "i"))] | length)
+      ] | @tsv' <<<"$prs")
+
+    # Local-only: worktree branches with no open PR, ahead of main, touched in the last $days days.
+    local since; since=$(( $(date +%s) - days * 86400 ))
+    while read -r wt wbr; do
+      [ -z "$wbr" ] && continue
+      case "$seen" in *" $wbr "*) continue ;; esac
+      case "$wbr" in main|train-*|worktree-agent-*) continue ;; esac
+      local ts; ts=$(git -C "$wt" log -1 --format=%ct 2>/dev/null || echo 0)
+      [ "$ts" -lt "$since" ] && continue
+      local ahead; ahead=$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+      [ "$ahead" -eq 0 ] && continue
+      local head f; head=$(git -C "$wt" rev-parse HEAD); f=$(state_file "$wbr")
+      local cr smp jtb feb behind upstream
+      cr=$(badge "$f" code-review CR "$root" "$head"); smp=$(badge "$f" simplify SMP "$root" "$head")
+      jtb=$(badge "$f" just-test JT "$root" "$head"); feb=$(badge "$f" just-fe FE "$root" "$head")
+      behind=$(git -C "$wt" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
+      upstream=$(git -C "$wt" rev-list --count "origin/${wbr}..HEAD" 2>/dev/null || echo "$ahead (no origin)")
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "— ${repo##*/}" "$(linear_id "" "$wbr")" "$cr $smp $jtb $feb" "$behind" "no PR" "-" "-" "·" "·" "$upstream  ($wbr)"
+    done < <(git -C "$root" worktree list --porcelain 2>/dev/null | awk '/^worktree /{p=substr($0,10)} /^branch /{sub("refs/heads/","",$2); print p, $2}')
+  done
+}
+
+fleet() {
+  _fleet_rows "$@" | column -t -s $'\t'
+  echo
+  echo "legend: ✓ fresh · ✓-N N own commits after the check · ✓c comment posted, not stamped · ✓? anchor not in the local clone · · pending" >&2
+  echo "        CI ✓ ok ✗ failed/cancelled ⏳ running ↷ skipped" >&2
+  echo "        DEMO pre/mike = agent preflight / Mike's approval (demo-result.sh check [--preflight]) · LOCAL+ = local commits not on origin" >&2
+}
+
 case "$cmd" in
-  path)   echo "$file" ;;
-  branch) echo "$branch" ;;
+  path)    echo "$file" ;;
+  branch)  echo "$branch" ;;
+  migrate) ls "$dir"/pipeline-*.json 2>/dev/null | wc -l | xargs -I{} echo "✓ {} state file(s) in $dir" >&2 ;;
   show)
     [ -f "$file" ] && jq '.' "$file" 2>/dev/null || echo "{}  (no pipeline state for branch '$branch')"
     ;;
   stamp)
     [ -z "$step" ] && { echo "usage: pipeline-stamp.sh stamp <step> [src] [pr]" >&2; exit 2; }
-    ensure_file
-    src="${arg3:-marker}"
-    pr="${arg4:-}"
-    # Anchor commit for staleness ("how many commits ago was this check?").
-    # src=commit:<sha> pins the anchor to that sha; otherwise anchor = HEAD now.
-    case "$src" in
-      commit:*) anchor="${src#commit:}" ;;
-      *)        anchor=$(git -C "$PWD" --no-optional-locks rev-parse --short HEAD 2>/dev/null || true) ;;
-    esac
-    tmp="${file}.tmp"
-    jq --arg s "$step" --arg ts "$(iso_now)" --arg src "$src" --arg up "$(iso_now)" \
-       --arg pr "$pr" --arg head "$anchor" '
-       .steps[$s] = {done: true, ts: $ts, src: $src, head: $head}
-       | .updated = $up
-       | (if ($pr != "") then .pr = ($pr|tonumber) else . end)
-    ' "$file" > "$tmp" && mv "$tmp" "$file"
-    echo "✓ stamped '$step' (src=$src head=$anchor) → $file" >&2
+    stamp_step "$step" "${arg3:-marker}" "$arg4"
     ;;
   unstamp)
     [ -z "$step" ] && { echo "usage: pipeline-stamp.sh unstamp <step>" >&2; exit 2; }
     ensure_file
-    tmp="${file}.tmp"
-    jq --arg s "$step" --arg up "$(iso_now)" 'del(.steps[$s]) | .updated = $up' \
-       "$file" > "$tmp" && mv "$tmp" "$file"
+    jq_write --arg s "$step" --arg up "$(iso_now)" 'del(.steps[$s]) | .updated = $up'
     echo "✓ cleared '$step'" >&2
     ;;
   set-pr)
     ensure_file
     pr="${2:-}"
     [ -z "$pr" ] && { echo "usage: pipeline-stamp.sh set-pr <pr>" >&2; exit 2; }
-    tmp="${file}.tmp"
-    jq --arg pr "$pr" --arg up "$(iso_now)" '.pr = ($pr|tonumber) | .updated = $up' \
-       "$file" > "$tmp" && mv "$tmp" "$file"
+    jq_write --arg pr "$pr" --arg up "$(iso_now)" '.pr = ($pr|tonumber) | .updated = $up'
     echo "✓ pr=$pr" >&2
     ;;
+  detect)
+    # Heuristic stamps from commit subjects on origin/main..HEAD (newest match wins). Never
+    # overwrites a manual/evidence stamp that is at least as recent as the matched commit.
+    shopt -s nocasematch
+    for s in simplify code-review; do
+      case "$s" in
+        simplify)    rx='^(refactor|simplify)|simplif' ;;
+        code-review) rx='review fixes|from code-review|code-review|review-fix|^fix[^:]*: .*review' ;;
+      esac
+      sha=""
+      while IFS=$'\t' read -r h subj; do
+        [[ "$subj" =~ ^Merge ]] && continue
+        [[ "$subj" =~ $rx ]] && { sha="$h"; break; }
+      done < <(git -C "$PWD" --no-optional-locks log --format='%h%x09%s' origin/main..HEAD 2>/dev/null)
+      [ -z "$sha" ] && { echo "· $s: no matching commit subject" >&2; continue; }
+      cur=$( [ -f "$file" ] && jq -r --arg s "$s" '.steps[$s].head // ""' "$file" || true)
+      cur_src=$( [ -f "$file" ] && jq -r --arg s "$s" '.steps[$s].src // ""' "$file" || true)
+      # A real stamp (command / commit: / pr-comment) always beats a guess; a heuristic one is only
+      # replaced by a newer match.
+      if [ -n "$cur_src" ] && [[ "$cur_src" != heuristic:* ]]; then
+        echo "· $s: stamped by evidence (src=$cur_src) — heuristic skipped" >&2; continue
+      fi
+      if [ -n "$cur" ] && git -C "$PWD" merge-base --is-ancestor "$sha" "$cur" 2>/dev/null; then
+        echo "· $s: already stamped at $cur (newer or equal)" >&2; continue
+      fi
+      stamp_step "$s" "heuristic:commit:$sha"
+    done
+    shopt -u nocasematch
+    ;;
+  fleet) shift; fleet "$@" ;;
   refresh-pr)
     # Force-refresh the statusline PR/bugbot cache the SAME way statusline.sh does
     # (lines "number|state|isDraft|mirror|bugbot"), bypassing its 120s TTL. This is
@@ -146,7 +308,7 @@ case "$cmd" in
     echo "✓ pr-cache refreshed: ${line}  (${count} file(s) under ${canon})" >&2
     ;;
   *)
-    echo "unknown command: $cmd (use stamp|unstamp|set-pr|path|show|branch)" >&2
+    echo "unknown command: $cmd (use stamp|unstamp|set-pr|detect|fleet|refresh-pr|migrate|path|show|branch)" >&2
     exit 2
     ;;
 esac

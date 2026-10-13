@@ -1,6 +1,6 @@
 ---
 description: "Reconstruct the current PR branch's pipeline state — recent git activity + which workflow steps (code-review, simplify, review-pr, just-test, bugbot, CI) ran — and refresh the statusline badges"
-argument-hint: "[stamp <step> | unstamp <step>]  (no args = show full state)"
+argument-hint: "[all | detect | stamp <step> | unstamp <step>]  (no args = show full state of this branch)"
 ---
 
 # PR-State: pipeline status for the current branch
@@ -12,18 +12,40 @@ per-branch state file the statusline reads.
 **Terminal language:** match Mike (Ukrainian or English).
 **No Mermaid in terminal** — use ASCII/Unicode boxes and tables (per project rule).
 
-The badge order shown on the statusline is **CR · SMP · RPR · JT · DEMO**
-(code-review, simplify, review-pr, just-test, demo). The detailed
+The badge order shown on the statusline is **CR · SMP · RPR · JT · FE · DEMO**
+(code-review, simplify, review-pr, just-test, just-fe, demo). The detailed
 output below also covers the rest of the 12-step pipeline.
+
+**State is durable:** `~/.claude/pipeline-state/pipeline-<branch>.json` (survives a reboot;
+`pipeline-stamp.sh` mirrors every write to `/tmp/claude/` for older readers and copies any
+`/tmp` file that has no durable copy yet). "Commits ago" counts the branch's **own** commits
+(`--first-parent --no-merges`), so merging main does not make a check stale.
 
 ## Argument modes
 
-- **no args** → full reconstruction + print + statusline refresh (the default).
+- **no args** → full reconstruction + print + statusline refresh (the default). Works on a
+  branch **without a PR** too: print `PR —`, skip the GitHub-only checks, still show git
+  activity, stamps and heuristics. Never error out for "no PR".
+- **`all`** → the fleet view: run `~/.claude/pipeline-stamp.sh fleet` and print its table
+  verbatim (one row per open PR of mine in rescue-serverless **and** workflow-engine, plus
+  local-only worktree branches touched in the last 3 days: PR#, Linear id, CR/SMP/JT/FE with
+  commits-ago, behind main, CI, DEMO preflight/Mike, mergeable, `deploy` label, in a train,
+  local commits not on origin). Then 3–5 bullets: which rows need action first — a row whose DEMO
+  column says `✓/✓ merge` (Mike approved, still open) goes first with its exact
+  `gh pr merge <N> -R back2back-team/rescue-serverless --merge --delete-branch=false`. Read-only.
+- **`detect`** → `~/.claude/pipeline-stamp.sh detect`: stamps code-review / simplify from
+  commit subjects (`src=heuristic:commit:<sha>`), never over a newer stamp.
 - **`stamp <step>`** → mark a step done manually, e.g. `/pr-state stamp code-review`.
   Run `~/.claude/pipeline-stamp.sh stamp <step> marker` then re-print.
 - **`unstamp <step>`** → clear a step: `~/.claude/pipeline-stamp.sh unstamp <step>`.
 
-Known steps: `brainstorm code-review simplify review-pr just-test demo pr-summary merged`.
+Known steps: `brainstorm code-review simplify review-pr just-test just-fe demo pr-summary merged`.
+
+**Teammate one-liners** (run in the PR worktree, right after the step):
+```bash
+~/.claude/pipeline-stamp.sh stamp code-review commit:$(git rev-parse --short HEAD)   # after /code-review (+ its fixes)
+~/.claude/pipeline-stamp.sh stamp simplify    commit:$(git rev-parse --short HEAD)   # after /simplify
+```
 
 **DEMO is MANDATORY before merge (Mike, 2026-09-29).** Every PR has a guided demo recipe
 `jb2b <topic>-try` whose RESULT box calls
@@ -152,10 +174,16 @@ stamps persist, then add what you can detect now.
 ~/.claude/pipeline-stamp.sh show     # existing state (may be empty)
 ```
 
-**0. DEMO** ⟶ `~/.claude/demo-result.sh check "$PR"` (exit 0 = ✓; stale/failed/missing = pending, print its reason).
+**0. DEMO — two records, show both** (rescue-serverless PRs only):
+- agent preflight ⟶ `~/.claude/demo-result.sh check "$PR" --preflight`
+- Mike's approval ⟶ `~/.claude/demo-result.sh check "$PR"` (this one is the merge gate)
+Print each line's own ✓/✗ reason, e.g. `DEMO pre ✓ (6 passed, dev 1ca9b28f5) · Mike ✗ not run yet`.
 
 **A. GitHub (PR comments + checks)** — `gh pr view "$PR" --json comments,reviews` then:
-- **just-test** ⟶ any comment body contains `End-to-end smoke trace`.
+- **just-test** ⟶ a comment matching (case-insensitive) `End-to-end smoke trace`, `Smoke trace`,
+  `## /just-test` or `/just-test ·` → `stamp just-test pr-comment "$PR"`.
+- **just-fe** ⟶ a comment matching `API for the frontend`, `FE hand-off`, `Frontend hand-off` or
+  `/just-fe` → `stamp just-fe pr-comment "$PR"` (the FE badge).
 - **review-pr** ⟶ a substantial review comment: contains severity scores
   (`/100`, `🟠`/`🔴`/`🟡`) or a `### `/`## ` review structure with findings.
 - **pr-summary** ⟶ an English summary comment (a `## Summary`-style or
@@ -165,13 +193,14 @@ stamps persist, then add what you can detect now.
   `gh pr view $((PR+1)) --json comments` for Cursor findings, plus the
   `Cursor Bugbot` check bucket on this PR.
 
-**B. Git commit heuristics (local steps)** — over `origin/main..HEAD`:
-- **simplify** ⟶ a commit whose subject starts with `refactor:`/`simplify`
-  or mentions "simplify". Stamp `src=commit:<short-sha>`.
-- **code-review** ⟶ evidence that review ran: a commit fixing review/bugbot
-  findings (`fix: <cursor|review> …`), or simplify present (simplify follows
-  code-review in the pipeline). If there's no signal, leave it **pending** and
-  tell Mike he can `/pr-state stamp code-review` — never fabricate it.
+**B. Git commit heuristics (local steps)** — run `~/.claude/pipeline-stamp.sh detect`. Over
+`origin/main..HEAD` (merges skipped), newest match wins:
+- **simplify** ⟶ subject starts with `refactor`/`simplify` or mentions "simplif".
+- **code-review** ⟶ subject says `review fixes`, `from code-review`, `code-review`, `review-fix`,
+  or `fix(...): … review`.
+It stamps `src=heuristic:commit:<sha>` and never overwrites a stamp anchored at the same or a
+newer commit. No match ⇒ leave it **pending** and point to the teammate one-liner above —
+never fabricate it.
 
 **C. Marker file** — anything already stamped stays stamped (manual truth wins).
 
@@ -179,6 +208,7 @@ For every step you positively detect, stamp it (idempotent):
 ```bash
 ~/.claude/pipeline-stamp.sh set-pr "$PR"
 ~/.claude/pipeline-stamp.sh stamp just-test      pr-comment "$PR"
+~/.claude/pipeline-stamp.sh stamp just-fe        pr-comment "$PR"
 ~/.claude/pipeline-stamp.sh stamp review-pr      pr-comment
 ~/.claude/pipeline-stamp.sh stamp simplify       "commit:<sha>"
 # … only the ones with real evidence
@@ -251,6 +281,9 @@ Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps don
    `🧭  CR ✓   SMP ✓-2   RPR ·   JT ✓   DEMO ✓`
    (`✓-N` = done but N commits behind, rendered yellow on the statusline).
 4. **CI / merge readiness** line: checks summary + `mergeable`/`mergeStateStatus` + DEMO gate (`demo-result.sh check`) — no DEMO ✓ ⇒ not merge-ready.
+   **Mike-approved, not merged** (Mike 2026-10-06): if `demo-result.sh check` exits 0 (pr-N.mike.json `approved:true`) AND the PR is still OPEN,
+   print a separate bold line FIRST in this section: `✅ Mike апрувнув (DEMO <passed>/0, <local Kyiv time>), НЕ змерджено → gh pr merge <N> -R <repo> --merge --delete-branch=false`.
+   Note: his «так» lives in the DEMO gate, not as a GitHub review — `reviewDecision` stays empty; never report it as "not approved".
 5. **Stale-check warnings** — for any step with commits-ago > 0, flag it
    explicitly: per Mike's rule, code-review must re-run after EVERY fix, so
    `CR✓-3` means "3 unreviewed commits — re-run /code-review". Same logic for JT.
@@ -278,7 +311,7 @@ per the analysis-summary rule.
 ### Step 5 — confirm statusline refresh
 
 Step 3 refreshed BOTH halves the statusline reads:
-1. `/tmp/claude/pipeline-<branch>.json` — the pipeline-step badges (`CR·SMP·RPR·JT`).
+1. `~/.claude/pipeline-state/pipeline-<branch>.json` (+ `/tmp/claude` mirror) — the pipeline-step badges (`CR·SMP·RPR·JT·FE·DEMO`).
 2. `/tmp/claude/pr-cache-<cwd>.txt` — the `🔀 PR#N … 🐛<n>` badge (via `refresh-pr`).
 
 Tell Mike both are updated and show the pipeline file path
@@ -295,7 +328,7 @@ just forced an immediate refresh on top of it. If `🐛<n>` is still non-zero, t
   `/pr-state stamp <step>` escape hatch.
 - **Branch-keyed.** State lives per branch, so each worktree/PR has its own
   badges. Switching branches switches the badge set automatically.
-- **Helper:** `~/.claude/pipeline-stamp.sh` (stamp|unstamp|set-pr|refresh-pr|show|path|branch).
+- **Helper:** `~/.claude/pipeline-stamp.sh` (stamp|unstamp|set-pr|detect|fleet|refresh-pr|migrate|show|path|branch).
 - The stamping skills (`/just-test`, `/review-pr-eng`, `/review-pr-ukr`) also
   stamp their own step after they post, so the state stays fresh between
   `/pr-state` runs.

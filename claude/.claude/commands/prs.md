@@ -45,7 +45,7 @@ For each PR:
      --jq '[.data.repository.pullRequest.reviewThreads.nodes[]|select(.isResolved|not)]|length'
    ```
    Show `🐛N` when >0, `—` when clean or no mirror.
-3. **Pipeline badges** — read `/tmp/claude/pipeline-<branch>.json` (branch with
+3. **Pipeline badges** — read `~/.claude/pipeline-state/pipeline-<branch>.json` (durable; `/tmp/claude/` is only a mirror) (branch with
    `/`→`-`). Render `CR✓ SMP✓-2 RPR· JT✓ REV✓` (✓-N = done N commits ago via
    the stamp's `head` anchor + `git rev-list --count`, computable only if the
    branch exists locally). No state file → `(no state — run /pr-state there)`.

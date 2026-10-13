@@ -237,6 +237,61 @@ alias cl='clear'
 alias cc='claude'
 alias cx='codex'
 
+# Claude Code via local OmniRoute (fallback when Anthropic tokens run out)
+claude-free() {
+  if ! lsof -nP -iTCP:20128 -sTCP:LISTEN >/dev/null 2>&1; then
+    echo "━━━ omniroute ━━━  (cd ~ && omniroute serve --daemon --no-open --no-tray)" >&2
+    (cd ~ && omniroute serve --daemon --no-open --no-tray) || return 1
+  fi
+  local OMNIROUTE_API_KEY=$(grep '^OMNIROUTE_API_KEY=' ~/dotfiles/.env | cut -d= -f2-)
+  export OMNIROUTE_API_KEY
+  local model=${OMNIROUTE_MODEL:-$(omni-pick)} || return 1
+  [[ -n $model ]] || return 1
+  [[ -n $OMNIROUTE_MODEL ]] && { omni-test "$model" || return 1; }
+  echo "━━━ omniroute ━━━  omniroute run claude --model $model --api-key-env OMNIROUTE_API_KEY -- $*" >&2
+  omniroute run claude --model "$model" --api-key-env OMNIROUTE_API_KEY -- "$@"
+}
+
+# Send "reply OK" to one OmniRoute model; exit 0 only if it answered
+omni-test() {
+  local key=${OMNIROUTE_API_KEY:-$(grep '^OMNIROUTE_API_KEY=' ~/dotfiles/.env | cut -d= -f2-)}
+  zmodload zsh/datetime
+  local m=${1:?model}
+  echo "━━━ xh ━━━  xh -b --ignore-stdin --timeout 60 POST http://127.0.0.1:20128/v1/chat/completions \"Authorization:Bearer \$OMNIROUTE_API_KEY\" model=$m 'messages:=[{\"role\":\"user\",\"content\":\"reply OK\"}]' max_tokens:=20" >&2
+  local t0=$EPOCHREALTIME r
+  r=$(xh -b --ignore-stdin --timeout 60 POST http://127.0.0.1:20128/v1/chat/completions \
+      "Authorization:Bearer $key" model="$m" 'messages:=[{"role":"user","content":"reply OK"}]' max_tokens:=20 2>/dev/null)
+  local dt=$(printf '%.1f' $((EPOCHREALTIME - t0)))
+  local ok=$(jq -r '.choices[0].message.content // empty' <<<"$r" 2>/dev/null)
+  if [[ -n $ok ]]; then
+    echo "  OK ${dt}s  $m → ${${ok//$'\n'/ }:0:60}" >&2
+  else
+    echo "  FAIL ${dt}s  $m → $(jq -r '.error.message // .' <<<"$r" 2>/dev/null | head -c 120)" >&2
+    return 1
+  fi
+}
+
+# fzf over OmniRoute chat models, test the pick, re-open picker until one answers
+omni-pick() {
+  local key=${OMNIROUTE_API_KEY:-$(grep '^OMNIROUTE_API_KEY=' ~/dotfiles/.env | cut -d= -f2-)}
+  local list m
+  list=$(xh -b --ignore-stdin GET http://127.0.0.1:20128/v1/models "Authorization:Bearer $key" \
+    | jq -r '.data[] | select(.owned_by != "aihorde") | "\(.id)\t\(.owned_by)"') || return 1
+  while m=$(fzf --prompt='omniroute model> ' --delimiter='\t' --with-nth=1,2 \
+      --header='Enter = test + use · Esc = cancel' <<<"$list" | cut -f1); [[ -n $m ]]; do
+    omni-test "$m" && { echo "$m"; return 0; }
+  done
+  return 1
+}
+
+# Stop the OmniRoute daemon (claude-free starts it again on demand)
+omni-stop() {
+  echo "━━━ omniroute ━━━  (cd ~ && omniroute stop)" >&2
+  (cd ~ && omniroute stop)
+  lsof -nP -iTCP:20128 -sTCP:LISTEN >/dev/null 2>&1 && { echo "  FAIL: still listening on :20128" >&2; return 1; }
+  echo "  OK: OmniRoute stopped" >&2
+}
+
 # File operations
 alias l='ls'
 alias ls='ls --color=auto'
