@@ -392,15 +392,16 @@ _one action name:
     set -uo pipefail
     export PATH="{{_path}}:$PATH"
     [ -f "{{_conf}}" ] || { echo "registry empty" >&2; exit 1; }
-    while IFS='|' read -r name dir session port extra enabled || [ -n "$name" ]; do
+    # registry on fd 3: stdin must stay the terminal for interactive recipes (tmux attach)
+    while IFS='|' read -r name dir session port extra enabled <&3 || [ -n "$name" ]; do
       case "$name" in ''|\#*) continue ;; esac
       [ "$name" = "{{name}}" ] || continue
       dir="${dir/#\~/$HOME}"
       act="{{action}}"; recipe="$act"        # prefer proj_<action>, fall back to <action>
       ( cd "$dir" && just --summary 2>/dev/null | tr ' ' '\n' | grep -qx "proj_$act" ) && recipe="proj_$act"
       echo "━━━ just ━━━  cd $dir && just $recipe" >&2
-      exec bash -c "cd '$dir' && just '$recipe'"
-    done < "{{_conf}}"
+      exec bash -c "cd '$dir' && just '$recipe'" 3<&-
+    done 3< "{{_conf}}"
     echo "unknown project: {{name}}" >&2; exit 1
 
 # ─── internals used by the TUI ──────────────────────────────────────────────
