@@ -312,7 +312,12 @@ refresh_tokens_usage
 
 # ===== LINE 2: Model | PR | tokens | thinking =====
 line2=""
-line2+="🤖 ${blue}${model_name}${reset}"
+# Session launched via claude-free → backend is local OmniRoute, not Anthropic
+if [[ "$ANTHROPIC_BASE_URL" == *:20128* ]]; then
+    line2+="🔀 ${yellow}OmniRoute:${ANTHROPIC_MODEL:-$model_name}${reset}"
+else
+    line2+="🤖 ${blue}${model_name}${reset}"
+fi
 
 # PR number + state from git remote (cached to avoid slowdown).
 # Cache line format: "number|state|isDraft|mirror|bugbot|bugsha|bugurl" (state =
