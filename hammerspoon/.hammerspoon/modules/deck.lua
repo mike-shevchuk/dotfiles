@@ -6,6 +6,7 @@
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
+-- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
 local M = {}
 
@@ -21,6 +22,7 @@ local REMINDERS = HOME .. "/.claude/reminders.sh"
 local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
 local VOICE_FILE = "/tmp/deck-voice.txt"
 local CAL_FILE = "/tmp/deck-cal.json"
+local FW_SHA = "/tmp/deck-ota.sha" -- written by `just ota`; the board updates when it differs from its own
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" .. HOME .. "/.local/bin"
 
 -- Typed into the open session (row on the session screen)
@@ -155,6 +157,14 @@ local function micUp()
   end)
 end
 
+local function readFile(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local data = f:read("a")
+  f:close()
+  return data
+end
+
 -- next meetings: "● now 10:00 Standup", then "Tue 14:00 Review · in 25 min" for the next one
 local function calendarLines()
   local f = io.open(CAL_FILE)
@@ -192,7 +202,7 @@ local function state()
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
-    recipes = recipes, slash = SLASH, voice = voice,
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
   }
 end
 
