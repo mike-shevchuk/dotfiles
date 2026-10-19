@@ -272,46 +272,74 @@ local function sgr(params, fg)
   return fg
 end
 
-local function recolor(line, fg)
-  local out, pos = {}, 1
-  local function emit(text)
-    text = clean(text, true)
-    if text == "" then return end
-    if fg then out[#out + 1] = "#" .. fg .. " " .. text:gsub("#", "####" .. fg .. " ") .. "#"
-    else out[#out + 1] = (text:gsub("#", "##")) end
+-- one tmux line → { {fg, text}, … } (fg nil = default colour), and the colour carried into the next line
+local function segments(line, fg, colors)
+  local segs, pos = {}, 1
+  local function add(t)
+    t = clean(t, true)
+    if t ~= "" then segs[#segs + 1] = { colors and fg or nil, t } end
   end
   while true do
     local s, e, params = line:find("\27%[([%d;]*)m", pos)
     if not s then break end
-    emit(line:sub(pos, s - 1))
+    add(line:sub(pos, s - 1))
     fg = sgr(params, fg)
     pos = e + 1
   end
-  emit(line:sub(pos))
-  return table.concat(out), fg
+  add(line:sub(pos))
+  return segs, fg
 end
 
-local function pane(id, colors)
+-- LVGL recolor ("#rrggbb text#", literal # = "##"); the board's label always has recolor on, so escape even plain text
+local function span(fg, text)
+  if fg then return "#" .. fg .. " " .. text:gsub("#", "####" .. fg .. " ") .. "#" end
+  return (text:gsub("#", "##"))
+end
+
+-- cut into ≤ width-column lines, every line closing its own colour spans: LVGL resets recolor at each
+-- line break, so a span it wrapped itself would spill "#949494"-style garbage onto the screen
+local function wrap(segs, width, out)
+  local parts, n = {}, 0
+  local function flush() out[#out + 1] = table.concat(parts); parts, n = {}, 0 end
+  for _, sg in ipairs(segs) do
+    local text = sg[2]
+    while text ~= "" do
+      local len = utf8.len(text)
+      if len <= width - n then
+        parts[#parts + 1] = span(sg[1], text)
+        n = n + len
+        text = ""
+      else
+        local cut = utf8.offset(text, width - n + 1)
+        if cut > 1 then parts[#parts + 1] = span(sg[1], text:sub(1, cut - 1)) end
+        text = text:sub(cut)
+        flush()
+      end
+    end
+  end
+  flush()
+end
+
+local function pane(id, colors, width)
+  width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
   local out = hs.execute(TMUX .. " capture-pane -p -e -J -S -120 -t '" .. id .. "'") or ""
   out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
   local lines, blank, fg = {}, false, nil
   for line in (out .. "\n"):gmatch("(.-)\n") do
     line = line:gsub("%s+$", "")
     local plain = line:gsub("\27%[[%d;]*m", "")
-    if isRule(plain) and utf8.len(plain) > 64 then line = plain:sub(1, utf8.offset(plain, 65) - 1) end
     local empty = plain:match("^%s*$") ~= nil
+    if isRule(plain) then -- a ─── rule: one screen wide, no colour
+      line = utf8.len(plain) > width and plain:sub(1, utf8.offset(plain, width + 1) - 1) or plain
+    end
     if not empty or not blank then
-      if colors then
-        local colored
-        colored, fg = recolor(line, fg)
-        lines[#lines + 1] = colored
-      else
-        lines[#lines + 1] = clean(plain:gsub("   +", "  "), true)
-      end
+      local segs
+      segs, fg = segments(line, fg, colors)
+      if #segs == 0 then lines[#lines + 1] = "" else wrap(segs, width, lines) end
     end
     blank = empty
   end
-  while #lines > 100 do table.remove(lines, 1) end
+  while #lines > 150 do table.remove(lines, 1) end
   return { t = id, text = table.concat(lines, "\n") }
 end
 
@@ -360,7 +388,7 @@ local function handle(method, path, headers, body)
   local id = p.t and p.t:match("^@%d+$")
 
   if method == "GET" and route == "/state" then return reply(state(), 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1"), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w)), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
       if p.enter == "1" then task(TMUX, { "send-keys", "-t", id, "Enter" }) end
