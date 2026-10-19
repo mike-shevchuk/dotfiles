@@ -4,7 +4,7 @@
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
 -- POST /key?t=@ID&k=Enter   → one whitelisted tmux key
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
--- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckListen.app, 0 stops it → text in /state.voice
+-- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
 local M = {}
@@ -18,8 +18,9 @@ local HOME = os.getenv("HOME")
 local TMUX = "/opt/homebrew/bin/tmux"
 local STATUSLINE = HOME .. "/.claude/statusline.sh"
 local REMINDERS = HOME .. "/.claude/reminders.sh"
-local LISTEN_APP = HOME .. "/code/esp-deck/voice/DeckListen.app"
+local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
 local VOICE_FILE = "/tmp/deck-voice.txt"
+local CAL_FILE = "/tmp/deck-cal.json"
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" .. HOME .. "/.local/bin"
 
 -- Typed into the open session (row on the session screen)
@@ -70,8 +71,13 @@ end
 
 -- ── slow sources, refreshed in the background ──
 local limits, rem = {}, {}
+local slowTick = 0
 
 local function refreshSlow()
+  slowTick = slowTick + 1
+  if slowTick % 5 == 1 then -- calendar: DeckHelper writes CAL_FILE, state() reads it
+    task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
+  end
   -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
   task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. STATUSLINE }, function(out)
     out = out:gsub("\27%[[%d;]*m", "")
@@ -123,19 +129,19 @@ local function sessions()
   return list
 end
 
--- ── voice: DeckListen.app records until SIGINT, then writes the transcript to VOICE_FILE ──
+-- ── voice: DeckHelper.app records until SIGINT, then writes the transcript to VOICE_FILE ──
 local voice = { state = "idle", text = "" }
 local voiceTimer
 
 local function micDown(lang)
   os.remove(VOICE_FILE)
   voice = { state = "rec", text = "" }
-  task("/usr/bin/open", { "-g", "-n", "-a", LISTEN_APP, "--args", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
+  task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "listen", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
 end
 
 local function micUp()
   voice.state = "busy"
-  task("/usr/bin/pkill", { "-INT", "-x", "DeckListen" })
+  task("/usr/bin/pkill", { "-INT", "-x", "DeckHelper" })
   local tries = 0
   if voiceTimer then voiceTimer:stop() end
   voiceTimer = hs.timer.doEvery(0.3, function()
@@ -147,6 +153,29 @@ local function micUp()
       voiceTimer:stop()
     end
   end)
+end
+
+-- next meetings: "● now 10:00 Standup", then "Tue 14:00 Review · in 25 min" for the next one
+local function calendarLines()
+  local f = io.open(CAL_FILE)
+  if not f then return {} end
+  local ok, events = pcall(hs.json.decode, f:read("a"))
+  f:close()
+  local now, lines, next = os.time(), {}, false
+  for _, e in ipairs(ok and events or {}) do
+    if e["end"] > now then
+      local line = e.hm .. "  " .. clean(e.title)
+      if e.start <= now then line = "● " .. line
+      elseif not next then
+        local m = math.floor((e.start - now) / 60)
+        line = line .. " · in " .. (m < 60 and (m .. " min") or string.format("%dh %02dm", m // 60, m % 60))
+        next = true
+      end
+      lines[#lines + 1] = line
+    end
+    if #lines == 5 then break end
+  end
+  return lines
 end
 
 -- ── endpoints ──
@@ -162,7 +191,7 @@ local function state()
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, sessions = sessions(),
+    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
     recipes = recipes, slash = SLASH, voice = voice,
   }
 end
