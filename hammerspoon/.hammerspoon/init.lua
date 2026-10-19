@@ -164,7 +164,7 @@ guard.bind(hyper, "Z", gitpanel.toggle)
 
 -- ─── Launcher (command palette) ─────────────────────────────────
 -- Space = app launcher + commands with fuzzy search
-guard.bind(hyper, "Space", launcher.show)
+guard.bind(hyper, "Space", palette.open) -- one palette; launcher.lua now only feeds it
 
 -- ─── Bookmarks ──────────────────────────────────────────────────
 -- Q = quick URL bookmarks with fuzzy search
