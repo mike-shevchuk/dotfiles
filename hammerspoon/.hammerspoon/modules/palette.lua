@@ -1272,4 +1272,7 @@ function M.reload()
   hs.alert.show(("Palette: %d commands in %d categories"):format(#M.entries, #M.categories), 2)
 end
 
+-- modules/pal.lua (the webview palette) runs on the same data and verbs
+M.runEntry, M.iconFor, M.statusLine, M.parseJustfile = run, iconFor, statusLine, parseJustfile
+
 return M

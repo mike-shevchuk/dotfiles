@@ -1,0 +1,666 @@
+<!doctype html>
+<html lang="en" data-theme="night">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>pal</title>
+<style>
+:root{--font:-apple-system,BlinkMacSystemFont,"SF Pro Text","Helvetica Neue",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,monospace;--shade:rgba(0,0,0,.18);--shadow:0 18px 50px rgba(0,0,0,.45)}
+/* themes: bg fg dim sel accent border (+shade for light ones) */
+[data-theme=night]{--bg:rgba(28,28,30,.97);--fg:#ececee;--dim:#8d8d93;--sel:rgba(255,255,255,.085);--accent:#ff6363;--border:rgba(255,255,255,.11)}
+[data-theme=paper]{--bg:rgba(251,251,250,.98);--fg:#1d1d1f;--dim:#86868b;--sel:#dde8fb;--accent:#2f6fe4;--border:rgba(0,0,0,.12);--shade:rgba(0,0,0,.035);--shadow:0 18px 50px rgba(0,0,0,.22)}
+[data-theme=terminal]{--bg:rgba(8,12,8,.97);--fg:#b8f5b8;--dim:#4f8a4f;--sel:rgba(57,255,20,.12);--accent:#39ff14;--border:rgba(57,255,20,.22);--font:ui-monospace,"SF Mono",Menlo,monospace}
+[data-theme=catppuccin-mocha]{--bg:rgba(30,30,46,.97);--fg:#cdd6f4;--dim:#7f849c;--sel:#313244;--accent:#cba6f7;--border:#45475a}
+[data-theme=tokyo-night]{--bg:rgba(26,27,38,.97);--fg:#c0caf5;--dim:#565f89;--sel:#283457;--accent:#7aa2f7;--border:#292e42}
+[data-theme=nord]{--bg:rgba(46,52,64,.97);--fg:#eceff4;--dim:#7b88a1;--sel:#3b4252;--accent:#88c0d0;--border:#434c5e}
+[data-theme=gruvbox-dark]{--bg:rgba(40,40,40,.97);--fg:#ebdbb2;--dim:#928374;--sel:#3c3836;--accent:#fe8019;--border:#504945}
+[data-theme=dracula]{--bg:rgba(40,42,54,.97);--fg:#f8f8f2;--dim:#6272a4;--sel:#44475a;--accent:#bd93f9;--border:#44475a}
+[data-theme=rose-pine]{--bg:rgba(25,23,36,.97);--fg:#e0def4;--dim:#6e6a86;--sel:#26233a;--accent:#ebbcba;--border:#2a273f}
+[data-theme=solarized-light]{--bg:rgba(253,246,227,.98);--fg:#586e75;--dim:#93a1a1;--sel:#eee8d5;--accent:#268bd2;--border:#e4dcc4;--shade:rgba(0,0,0,.03);--shadow:0 18px 50px rgba(0,0,0,.2)}
+[data-theme=kanagawa]{--bg:rgba(31,31,40,.97);--fg:#dcd7ba;--dim:#727169;--sel:#2d4f67;--accent:#7e9cd8;--border:#363646}
+[data-theme=everforest]{--bg:rgba(45,53,59,.97);--fg:#d3c6aa;--dim:#859289;--sel:#3d484d;--accent:#a7c080;--border:#475258}
+
+html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+body{font:13px/1.35 var(--font);color:var(--fg);-webkit-font-smoothing:antialiased;user-select:none;-webkit-user-select:none;cursor:default}
+#pal{position:fixed;inset:0;display:grid;grid-template-rows:50px 30px minmax(0,1fr) 30px;background:var(--bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:var(--shadow);font-family:var(--font)}
+kbd{font:500 11px/1 var(--font);padding:3px 6px;border-radius:5px;background:color-mix(in srgb,var(--fg) 8%,transparent);border:1px solid var(--border);color:var(--dim);white-space:nowrap}
+
+#bar{display:flex;align-items:center;gap:10px;padding:0 16px;border-bottom:1px solid var(--border)}
+#bar svg{flex:none;stroke:var(--dim)}
+#q{flex:1;min-width:0;background:transparent;border:0;outline:0;color:var(--fg);font:17px var(--font);caret-color:var(--accent);padding:0}
+#q::placeholder{color:var(--dim)}
+#tname{font-size:11px;color:var(--dim);cursor:pointer;white-space:nowrap}
+#tname:hover{color:var(--accent)}
+
+#hdr{display:flex;align-items:center;gap:6px;padding:0 14px;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;border-bottom:1px solid var(--border);background:var(--shade)}
+#hdr .line{overflow:hidden;text-overflow:ellipsis}
+.chip{padding:2px 8px;border-radius:10px;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg);font-size:11.5px;flex:none}
+
+#body{display:grid;grid-template-columns:44px minmax(0,1fr) 38%;min-height:0}
+#rail{display:flex;flex-direction:column;align-items:center;gap:4px;padding:6px 0;background:var(--shade);border-right:1px solid var(--border);overflow-y:auto}
+#rail button{width:32px;height:32px;flex:none;border-radius:8px;border:1px solid transparent;background:none;font-size:16px;padding:0;color:var(--fg);display:grid;place-items:center;transition:background-color .1s,border-color .1s}
+#rail button:hover{background:var(--sel)}
+#rail button.on{border-color:var(--accent);background:var(--sel)}
+#rail img{width:20px;height:20px}
+
+#lw{position:relative;min-width:0;min-height:0}
+#list{height:100%;overflow-y:auto;padding:6px;box-sizing:border-box}
+.row{display:flex;align-items:center;gap:10px;height:36px;padding:0 10px;border-radius:8px;transition:background-color .08s}
+.row.sel,.tile.sel{background:var(--sel)}
+.ic{width:22px;height:22px;flex:none;border-radius:6px;display:grid;place-items:center;font-size:14px;background:color-mix(in srgb,var(--fg) 8%,transparent);overflow:hidden}
+.ic.img{background:none}
+.ic img{width:100%;height:100%;object-fit:contain}
+.row .t{flex:none;max-width:62%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .s{flex:1;min-width:0;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.star{color:var(--accent);font-size:11px}
+.row kbd{flex:none}
+#list.tiles{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;align-content:start}
+.tile{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px 4px 8px;border-radius:10px;min-width:0;transition:background-color .08s}
+.tile .ic{width:44px;height:44px;border-radius:10px;font-size:26px}
+.tile .t{font-size:11px;text-align:center;max-width:100%;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.25;height:2.5em}
+.empty{height:100%;display:grid;place-items:center;color:var(--dim);grid-column:1/-1}
+
+#pv{border-left:1px solid var(--border);padding:16px;overflow-y:auto;display:flex;flex-direction:column;gap:10px;min-width:0;user-select:text;-webkit-user-select:text}
+.pvh{display:flex;align-items:center;gap:12px;min-width:0}
+.pvh .ic{width:52px;height:52px;border-radius:12px;font-size:30px}
+.pvt{font-size:15px;font-weight:600;word-break:break-word}
+.pvk{display:inline-block;margin-top:3px;font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--accent)}
+.pvs{color:var(--dim);word-break:break-word}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;margin:0;font-size:12px}
+dt{color:var(--dim)}dd{margin:0;word-break:break-word}
+pre{margin:0;padding:10px;border-radius:8px;border:1px solid var(--border);background:color-mix(in srgb,var(--fg) 4%,transparent);white-space:pre-wrap;word-break:break-word;font:12px/1.45 var(--font)}
+pre.mono{font:11.5px/1.45 var(--mono)}
+.pvw{color:var(--dim);font-size:12px}
+
+#acts{position:absolute;right:10px;bottom:10px;width:270px;max-height:calc(100% - 20px);overflow-y:auto;box-sizing:border-box;padding:6px;border-radius:10px;border:1px solid var(--border);background:var(--bg);-webkit-backdrop-filter:blur(24px);backdrop-filter:blur(24px);box-shadow:0 12px 36px rgba(0,0,0,.4);animation:pop .12s ease-out}
+#acts[hidden]{display:none}
+#acts .ph{padding:4px 8px 6px;font-size:11px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid var(--border);margin-bottom:4px}
+.arow{display:flex;align-items:center;justify-content:space-between;gap:8px;height:30px;padding:0 8px;border-radius:6px}
+.arow.sel{background:var(--sel)}
+.arow span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@keyframes pop{from{opacity:0;transform:translateY(4px)}}
+
+#foot{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 14px;font-size:11.5px;color:var(--dim);border-top:1px solid var(--border);background:var(--shade);white-space:nowrap;overflow:hidden}
+#foot b{font-weight:500;color:var(--fg)}
+#ctx{overflow:hidden;text-overflow:ellipsis}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--fg) 18%,transparent);border-radius:4px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="pal">
+  <div id="bar">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg>
+    <input id="q" placeholder="Search apps, commands, notes…" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" autofocus>
+    <span id="tname" title="⌘T next theme"></span>
+  </div>
+  <div id="hdr"></div>
+  <div id="body">
+    <div id="rail"></div>
+    <div id="lw"><div id="list"></div><div id="acts" hidden></div></div>
+    <div id="pv"></div>
+  </div>
+  <div id="foot"><span><b>↑↓</b> move · <b>↵</b> open · <b>⇥</b> folders · <b>⌘K</b> actions</span><span id="ctx"></span></div>
+</div>
+<script>
+'use strict';
+const $ = s => document.querySelector(s);
+const input = $('#q'), list = $('#list'), pv = $('#pv'), rail = $('#rail'), hdr = $('#hdr'), panelEl = $('#acts'), ctx = $('#ctx');
+const THEMES = ['night','paper','terminal','catppuccin-mocha','tokyo-night','nord','gruvbox-dark','dracula','rose-pine','solarized-light','kanagawa','everforest'];
+const LUA_PREFIX = ['$ ', '? ', 'f ', 'p ', 'rem ', 'td '];
+const S = {folders: [], home: 'home', cur: null, cache: {}, homeItems: [], usage: {}, abbrev: {}, keywords: [],
+  settings: {theme: 'night', header: 'line'}, favs: new Set(), q: '', results: [], sel: 0,
+  luaQ: null, luaItems: null, panel: null, pvCache: {}};
+
+const bridge = window.webkit?.messageHandlers?.pal;
+const MOCK = !bridge;
+function send(msg) {
+  if (MOCK) return mock(msg);
+  try { bridge.postMessage(msg); } catch (e) { console.error('pal send', e); }
+}
+
+// ---------- utils ----------
+const ESC = {'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'};
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ESC[c]);
+function icon(ic) {
+  ic = String(ic || '•');
+  return /^data:image\//.test(ic) ? `<span class="ic img"><img src="${esc(ic)}" alt=""></span>` : `<span class="ic">${esc(ic)}</span>`;
+}
+const toSec = t => { t = +t || 0; return t > 1e12 ? t / 1000 : t; };
+function ago(t) {
+  const s = Date.now() / 1000 - toSec(t);
+  if (!t || s < 0) return '';
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  return Math.floor(s / 86400) + 'd ago';
+}
+let favStore = null;
+try { favStore = window.localStorage; } catch (e) { /* blocked */ }
+
+// ---------- calculator: tiny recursive-descent parser, no eval ----------
+function calc(src) {
+  const toks = src.match(/\d+\.?\d*|\.\d+|\S/g) || [];
+  let i = 0;
+  const peek = () => toks[i];
+  const atom = () => {
+    const t = toks[i++];
+    if (t === '(') { const v = expr(); if (toks[i++] !== ')') throw 0; return v; }
+    if (t !== undefined && /^[\d.]/.test(t)) return parseFloat(t);
+    throw 0;
+  };
+  const power = () => { const b = atom(); if (peek() === '^') { i++; return b ** unary(); } return b; };
+  const unary = () => peek() === '-' ? (i++, -unary()) : peek() === '+' ? (i++, unary()) : power();
+  const term = () => {
+    let v = unary();
+    while ('*/%'.includes(peek() ?? 'x')) { const op = toks[i++], r = unary(); v = op === '*' ? v * r : op === '/' ? v / r : v % r; }
+    return v;
+  };
+  function expr() {
+    let v = term();
+    while (peek() === '+' || peek() === '-') { const op = toks[i++], r = term(); v = op === '+' ? v + r : v - r; }
+    return v;
+  }
+  const v = expr();
+  if (i < toks.length) throw 0;
+  return v;
+}
+function calcRow(q) {
+  let e = q.trim(), forced = false;
+  if (e.startsWith('=')) { e = e.slice(1).trim(); forced = true; }
+  if (!e || !/^[\d\s.+\-*/()%^]+$/.test(e)) return null;
+  if (!forced && !/[\d)]\s*[+\-*/%^]\s*[\d(.+-]/.test(e)) return null;
+  let v;
+  try { v = calc(e); } catch (_) { return null; }
+  if (!Number.isFinite(v)) return null;
+  const r = String(+v.toPrecision(12));
+  return {id: '__calc', t: r, s: e + ' =', ic: '🧮', k: 'calc', _syn: 'calc', _text: r};
+}
+function webRow(q) {
+  const m = /^(\S+) ([\s\S]*)$/.exec(q);
+  if (!m) return null;
+  const kw = S.keywords.find(k => k.url && k.kw === m[1]);
+  if (!kw) return null;
+  const url = kw.url.replace(/%s/g, encodeURIComponent(m[2]));
+  return {id: '__web', t: `Search ${kw.t} for “${m[2]}”`, s: url.replace(/^https?:\/\//, '').split('/')[0], ic: '🌐', k: 'web', _syn: 'web', _url: url};
+}
+function isLua(q) {
+  if (/^:\d+$/.test(q)) return true;
+  if (LUA_PREFIX.some(p => q.startsWith(p))) return true;
+  return S.keywords.some(k => !k.url && k.kw && q.startsWith(k.kw + ' '));
+}
+
+// ---------- ranking (CONTRACT) ----------
+// tiers: title starts-with 800 > every word a word-prefix 600 > substring 400 > tight subsequence 200
+const WB = /[\s\-_./:#@()[\]]/;
+function wordPrefix(t, w) {
+  for (let i = t.indexOf(w); i >= 0; i = t.indexOf(w, i + 1)) if (i === 0 || WB.test(t[i - 1])) return i;
+  return -1;
+}
+function subseqSpan(t, w) { // shortest window of t containing w as a subsequence
+  let best = Infinity;
+  for (let s = t.indexOf(w[0]); s >= 0; s = t.indexOf(w[0], s + 1)) {
+    let j = s, qi = 0;
+    for (; j < t.length && qi < w.length; j++) if (t[j] === w[qi]) qi++;
+    if (qi < w.length) break;
+    best = Math.min(best, j - s);
+  }
+  return best;
+}
+function isInitials(q, t) { // q letters = first letters of title words, in order
+  let qi = 0;
+  for (const w of t.split(WB)) if (w && w[0] === q[qi] && ++qi === q.length) return true;
+  return false;
+}
+function match(ql, text) {
+  const t = String(text || '').toLowerCase();
+  const words = ql.split(/\s+/).filter(Boolean);
+  if (!t || !words.length) return -1;
+  const short = -Math.min(t.length, 100) * 0.3; // shorter text wins inside a tier
+  if (t.startsWith(ql)) return 800 + short;
+  const wp = words.map(w => wordPrefix(t, w));
+  if (wp.every(i => i >= 0)) return 600 + short - Math.min(wp[0], 60) * 0.3;
+  if (words.length === 1 && ql.length >= 2 && ql.length <= 5 && isInitials(ql, t)) return 500 + short; // "gs" → git status
+  if (t.includes(ql) || words.every(w => t.includes(w))) return 400 + short;
+  if (words.every(w => subseqSpan(t, w) <= 3 * w.length)) return 200 + short;
+  return -1;
+}
+function frec(id) {
+  const u = S.usage[id];
+  if (!u || !u.n) return 0;
+  const days = u.last ? Math.max(0, (Date.now() / 1000 - toSec(u.last)) / 86400) : 30;
+  return 8 * Math.log2(1 + u.n) * Math.pow(0.5, days / 14); // half-life 14d
+}
+function score(it, q, ql) {
+  const ds = it.s ? match(ql, it.s) : -1; // description: word-prefix/substring only, below any title hit
+  const f = Math.max(match(ql, it.t), it.kw ? match(ql, it.kw) : -1, ds >= 400 ? ds - 300 : -1);
+  const kwx = it.kw && String(it.kw).toLowerCase() === ql ? 1000 : 0;
+  const ab = ((S.abbrev[q] || S.abbrev[ql] || {})[it.id] || 0) * 400;
+  if (f < 0 && !kwx && !ab) return -1;
+  return Math.max(f, 0) + kwx + ab + frec(it.id);
+}
+const curFolder = () => S.folders.find(f => f.id === S.cur);
+const curItems = () => S.cur === S.home ? S.homeItems : (S.cache[S.cur]?.items || []);
+const loading = () => S.cur !== S.home && !S.cache[S.cur];
+const isTiles = () => curFolder()?.view === 'tiles' && !isLua(S.q);
+
+function compute() {
+  const q = S.q, out = [];
+  const c = calcRow(q); if (c) out.push(c);
+  const w = webRow(q); if (w) out.push(w);
+  if (isLua(q)) {
+    if (S.luaQ === q && S.luaItems) out.push(...S.luaItems);
+    else out.push({id: '__wait', t: '…', s: 'asking Hammerspoon', ic: '⏳', k: 'sys', _syn: 'wait'});
+    return out;
+  }
+  const items = curItems();
+  const qt = q.trim();
+  let ranked;
+  if (!qt) {
+    ranked = items.map((it, i) => ({it, i, s: (S.favs.has(it.id) ? 1e6 : 0) + frec(it.id)}));
+  } else {
+    const ql = qt.toLowerCase();
+    ranked = [];
+    items.forEach((it, i) => { const s = score(it, qt, ql); if (s >= 0) ranked.push({it, i, s}); });
+  }
+  ranked.sort((a, b) => b.s - a.s || a.i - b.i);
+  // ponytail: render cap 300 rows, virtualize if folders ever get bigger
+  for (const r of ranked.slice(0, 300)) out.push(r.it);
+  return out;
+}
+
+// ---------- rendering ----------
+function rowHtml(it, i) {
+  return `<div class="row" data-i="${i}">${icon(it.ic)}<span class="t">${esc(it.t)}</span><span class="s">${esc(it.s)}</span>` +
+    (S.favs.has(it.id) ? '<span class="star">★</span>' : '') + (it.hk ? `<kbd>${esc(it.hk)}</kbd>` : '') + '</div>';
+}
+const tileHtml = (it, i) => `<div class="tile" data-i="${i}" title="${esc(it.t)}">${icon(it.ic)}<span class="t">${esc(it.t)}</span></div>`;
+
+function render(keep) {
+  const prevId = keep ? S.results[S.sel]?.id : null;
+  S.results = compute();
+  S.sel = prevId ? Math.max(0, S.results.findIndex(r => r.id === prevId)) : 0;
+  const tiles = isTiles();
+  list.className = tiles ? 'tiles' : '';
+  if (!S.results.length) {
+    list.innerHTML = `<div class="empty">${loading() ? 'Loading…' : S.q.trim() ? `No results for “${esc(S.q.trim())}”` : 'Nothing here yet'}</div>`;
+  } else {
+    list.innerHTML = S.results.map(tiles ? tileHtml : rowHtml).join('');
+  }
+  markSel(true);
+}
+function markSel(scroll) {
+  list.querySelector('.sel')?.classList.remove('sel');
+  const el = list.querySelector(`[data-i="${S.sel}"]`);
+  if (el) { el.classList.add('sel'); if (scroll) el.scrollIntoView({block: 'nearest'}); }
+  schedulePreview();
+  drawCtx();
+}
+function move(d) {
+  const n = S.results.length;
+  if (!n) return;
+  const j = S.sel + d;
+  if (isTiles() && (j < 0 || j >= n)) return; // 2D: stay put at grid edge
+  S.sel = Math.min(n - 1, Math.max(0, j));
+  markSel(true);
+}
+
+function drawRail() {
+  rail.innerHTML = S.folders.map((f, i) => {
+    const ic = String(f.icon || '•');
+    const inner = /^data:image\//.test(ic) ? `<img src="${esc(ic)}" alt="">` : esc(ic);
+    return `<button class="${f.id === S.cur ? 'on' : ''}" data-id="${esc(f.id)}" title="${esc(f.name)}${i < 9 ? '  ⌘' + (i + 1) : ''}">${inner}</button>`;
+  }).join('');
+}
+function drawHeader() {
+  const st = S.cache[S.cur]?.status, f = curFolder();
+  if (!st) { hdr.innerHTML = `<span class="line">${esc(((f?.icon || '') + '  ' + (f?.name || '')).trim())}</span>`; return; }
+  if (S.settings.header === 'chips' && st.chips?.length) hdr.innerHTML = st.chips.map(c => `<span class="chip">${esc(c)}</span>`).join('');
+  else hdr.innerHTML = `<span class="line">${esc(st.line || (st.chips || []).join('   '))}</span>`;
+}
+let flashTimer = 0;
+function drawCtx(msg) {
+  if (msg) { clearTimeout(flashTimer); ctx.textContent = msg; flashTimer = setTimeout(() => { flashTimer = 0; drawCtx(); }, 1800); return; }
+  if (flashTimer) return;
+  const it = S.results[S.sel];
+  const h = [];
+  if (it?._syn === 'calc') h.push('↵ copy result');
+  else if (it?._syn === 'web') h.push('↵ open in browser');
+  else if (it?.acts?.length) h.push('⌘↵ ' + it.acts[0].t);
+  if (isTiles()) h.push('←→ grid');
+  h.push('⌘T theme', '⌘H header');
+  ctx.textContent = h.join(' · ');
+}
+
+// ---------- preview ----------
+const KIND = {cmd: 'Command', app: 'Application', zsh: 'Shell alias', just: 'Just recipe', rem: 'Reminder', note: 'Note', task: 'Task', pr: 'Pull request', proj: 'Project', clip: 'Clipboard', snip: 'Snippet', proc: 'Process', file: 'File', theme: 'Theme', folder: 'Folder', sys: 'System', calc: 'Calculator', web: 'Web search'};
+let pvTimer = 0;
+function schedulePreview() {
+  const it = S.results[S.sel];
+  renderPreview(it);
+  clearTimeout(pvTimer);
+  if (!it || it._syn) return;
+  pvTimer = setTimeout(() => {
+    send({type: 'preview', id: it.id});
+    // one retry if the reply got lost (first open race)
+    pvTimer = setTimeout(() => { if (!S.pvCache[it.id] && S.results[S.sel]?.id === it.id) send({type: 'preview', id: it.id}); }, 1500);
+  }, 120);
+}
+function renderPreview(it) {
+  if (!it) { pv.innerHTML = ''; return; }
+  const p = S.pvCache[it.id], u = S.usage[it.id], f = S.folders.find(x => x.id === it.f);
+  const meta = [];
+  if (it.hk) meta.push(['Hotkey', `<kbd>${esc(it.hk)}</kbd>`]);
+  if (it.kw) meta.push(['Keyword', esc(it.kw)]);
+  if (f) meta.push(['Folder', esc(((f.icon && !/^data:/.test(f.icon) ? f.icon + ' ' : '') + f.name))]);
+  if (u?.n) meta.push(['Used', `${u.n}×${u.last ? ' · ' + esc(ago(u.last)) : ''}`]);
+  if (S.favs.has(it.id)) meta.push(['Favourite', '★']);
+  if (it._url) meta.push(['URL', esc(it._url)]);
+  let body = '';
+  if (p) body = p.body == null || p.body === '' ? '' : `<pre class="${p.mono ? 'mono' : ''}">${esc(p.body)}</pre>`;
+  else if (!it._syn) body = '<div class="pvw">loading preview…</div>';
+  pv.innerHTML = `<div class="pvh">${icon(it.ic)}<div style="min-width:0"><div class="pvt">${esc(p?.title || it.t)}</div><span class="pvk">${esc(KIND[it.k] || it.k || '')}</span></div></div>` +
+    (it.s ? `<div class="pvs">${esc(it.s)}</div>` : '') +
+    (meta.length ? `<dl>${meta.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('')}</dl>` : '') + body;
+}
+
+// ---------- actions ----------
+function actionsFor(it) {
+  if (!it || it._syn === 'wait') return [];
+  if (it._syn === 'calc') return [{id: 'run', t: 'Copy result', hk: '↵'}];
+  if (it._syn === 'web') return [{id: 'run', t: 'Open in browser', hk: '↵'}];
+  return [{id: 'run', t: 'Open', hk: '↵'},
+    ...(it.acts || []).map((a, i) => ({id: a.id, t: a.t, hk: a.hk || (i === 0 ? '⌘↵' : '')})),
+    {id: 'copy', t: 'Copy', hk: '⌘C'},
+    {id: 'fav', t: S.favs.has(it.id) ? 'Remove from favourites' : 'Add to favourites', hk: '⌘F'}];
+}
+function run(action = 'run', it = S.results[S.sel]) {
+  if (!it || it._syn === 'wait') return;
+  if (it._syn === 'calc') return send({type: 'copy', text: it._text});
+  if (it._syn === 'web') return send({type: 'open', url: it._url});
+  if (action === 'fav') {
+    S.favs.has(it.id) ? S.favs.delete(it.id) : S.favs.add(it.id);
+    try { favStore?.setItem('pal.favs', JSON.stringify([...S.favs])); } catch (e) { /* ignore */ }
+    render(true);
+  }
+  send({type: 'run', id: it.id, q: S.q, action});
+}
+function openPanel() {
+  const it = S.results[S.sel], acts = actionsFor(it);
+  if (!acts.length) return;
+  S.panel = {it, acts, sel: 0};
+  drawPanel();
+}
+function closePanel() { if (S.panel) { S.panel = null; drawPanel(); } }
+function drawPanel() {
+  const P = S.panel;
+  panelEl.hidden = !P;
+  if (!P) return;
+  panelEl.innerHTML = `<div class="ph">${esc(P.it.t)}</div>` + P.acts.map((a, i) =>
+    `<div class="arow${i === P.sel ? ' sel' : ''}" data-a="${i}"><span>${esc(a.t)}</span>${a.hk ? `<kbd>${esc(a.hk)}</kbd>` : ''}</div>`).join('');
+  panelEl.querySelector('.sel')?.scrollIntoView({block: 'nearest'});
+}
+function panelRun(i) {
+  const P = S.panel, a = P?.acts[i];
+  if (!a) return;
+  closePanel();
+  run(a.id, P.it);
+}
+
+// ---------- folders / settings ----------
+function setFolder(id) {
+  if (!S.folders.some(f => f.id === id)) return;
+  S.cur = id;
+  closePanel();
+  send({type: 'folder', id});
+  drawRail(); drawHeader(); render();
+}
+function cycleFolder(d) {
+  const n = S.folders.length;
+  if (!n) return;
+  const i = S.folders.findIndex(f => f.id === S.cur);
+  setFolder(S.folders[(i + d + n) % n].id);
+}
+function applySettings(s) {
+  if (!s) return;
+  if (THEMES.includes(s.theme)) S.settings.theme = s.theme;
+  if (s.header === 'line' || s.header === 'chips') S.settings.header = s.header;
+  document.documentElement.dataset.theme = S.settings.theme;
+  $('#tname').textContent = S.settings.theme;
+  drawHeader();
+}
+function cycleTheme(d) {
+  const i = THEMES.indexOf(S.settings.theme);
+  const v = THEMES[(i + d + THEMES.length) % THEMES.length];
+  applySettings({theme: v});
+  send({type: 'set', k: 'theme', v});
+}
+function toggleHeader() {
+  const v = S.settings.header === 'chips' ? 'line' : 'chips';
+  applySettings({header: v});
+  send({type: 'set', k: 'header', v});
+}
+
+// ---------- input & keys ----------
+let qTimer = 0;
+input.addEventListener('input', () => {
+  S.q = input.value;
+  closePanel();
+  clearTimeout(qTimer);
+  if (isLua(S.q)) {
+    const q = S.q;
+    qTimer = setTimeout(() => send({type: 'query', q}), 200);
+  }
+  render();
+});
+document.addEventListener('keydown', e => {
+  if (e.isComposing) return;
+  // physical keys (e.code) so shortcuts work on any layout (UA: ⌘T arrives as key "е")
+  const c = e.code, m = e.metaKey && !e.ctrlKey && !e.altKey;
+  const lk = c.startsWith('Key') ? c.slice(3).toLowerCase() : '';
+  const digit = /^Digit([1-9])$/.exec(c)?.[1];
+  const k = c === 'NumpadEnter' ? 'Enter' : c;
+  const stop = () => e.preventDefault();
+  if (S.panel) {
+    const P = S.panel;
+    if (k === 'ArrowDown' || k === 'ArrowUp') { stop(); P.sel = (P.sel + (k === 'ArrowDown' ? 1 : -1) + P.acts.length) % P.acts.length; drawPanel(); return; }
+    if (k === 'Enter') { stop(); panelRun(P.sel); return; }
+    if (k === 'Escape' || (m && lk === 'k')) { stop(); closePanel(); return; }
+  }
+  if (m) {
+    if (lk === 'k') { stop(); openPanel(); return; }
+    if (lk === 't') { stop(); cycleTheme(e.shiftKey ? -1 : 1); return; }
+    if (lk === 'h') { stop(); toggleHeader(); return; }
+    if (lk === 'f') { stop(); run('fav'); return; }
+    if (lk === 'c' && input.selectionStart === input.selectionEnd && !window.getSelection().toString()) { stop(); run('copy'); return; }
+    if (digit) { stop(); const f = S.folders[+digit - 1]; if (f) setFolder(f.id); return; }
+    if (k === 'Enter') { stop(); const a = S.results[S.sel]?.acts?.[0]; a ? run(a.id) : run(); return; }
+    return;
+  }
+  const tiles = isTiles();
+  if (e.ctrlKey && (lk === 'n' || lk === 'p')) { stop(); move(lk === 'n' ? (tiles ? 6 : 1) : (tiles ? -6 : -1)); return; }
+  switch (k) {
+    case 'ArrowDown': stop(); move(tiles ? 6 : 1); return;
+    case 'ArrowUp': stop(); move(tiles ? -6 : -1); return;
+    case 'ArrowRight': case 'ArrowLeft': if (tiles) { stop(); move(k === 'ArrowRight' ? 1 : -1); } return;
+    case 'Enter': stop(); run(); return;
+    case 'Tab': stop(); cycleFolder(e.shiftKey ? -1 : 1); return;
+    case 'Escape':
+      stop();
+      if (S.q) { input.value = ''; input.dispatchEvent(new Event('input')); } else send({type: 'hide'});
+      return;
+  }
+  if (e.key.length === 1 && !e.ctrlKey && document.activeElement !== input) input.focus();
+}, true);
+
+// ---------- mouse ----------
+document.addEventListener('mousedown', e => { if (e.target !== input && !e.target.closest('#pv')) e.preventDefault(); });
+list.addEventListener('mousemove', e => {
+  const el = e.target.closest('[data-i]');
+  if (el && +el.dataset.i !== S.sel) { S.sel = +el.dataset.i; markSel(false); }
+});
+list.addEventListener('click', e => {
+  const el = e.target.closest('[data-i]');
+  if (!el) return;
+  S.sel = +el.dataset.i; closePanel(); run();
+});
+panelEl.addEventListener('click', e => { const el = e.target.closest('[data-a]'); if (el) panelRun(+el.dataset.a); });
+rail.addEventListener('click', e => { const b = e.target.closest('button'); if (b) setFolder(b.dataset.id); });
+$('#tname').addEventListener('click', () => cycleTheme(1));
+
+// ---------- Lua → JS ----------
+function recv(p) {
+  if (typeof p === 'string') { try { p = JSON.parse(p); } catch (e) { return; } }
+  switch (p?.type) {
+    case 'init': {
+      S.folders = Array.isArray(p.folders) ? p.folders.slice() : [];
+      if (!S.folders.some(f => f.id === 'home')) S.folders.unshift({id: 'home', name: 'Home', icon: '🏠'});
+      S.home = 'home';
+      S.homeItems = p.items || [];
+      S.usage = p.usage || {};
+      S.abbrev = p.abbrev || {};
+      S.keywords = p.keywords || [];
+      let favs = p.favs;
+      if (!favs) { try { favs = JSON.parse(favStore?.getItem('pal.favs') || '[]'); } catch (e) { favs = []; } }
+      S.favs = new Set(favs);
+      applySettings(p.settings);
+      if (!S.folders.some(f => f.id === S.cur)) S.cur = S.home;
+      drawRail(); drawHeader(); render(true);
+      send({type: 'folder', id: S.cur});
+      break;
+    }
+    case 'folder':
+      S.cache[p.id] = {items: p.items || [], status: p.status};
+      if (p.id === S.home && p.items?.length) S.homeItems = p.items;
+      if (p.id === S.cur) { drawHeader(); render(true); }
+      break;
+    case 'preview': {
+      const keys = Object.keys(S.pvCache);
+      if (keys.length > 300) S.pvCache = {}; // ponytail: crude cap, LRU if previews get heavy
+      S.pvCache[p.id] = p;
+      if (S.results[S.sel]?.id === p.id) renderPreview(S.results[S.sel]);
+      break;
+    }
+    case 'provide':
+      if (p.q === input.value) { S.luaQ = p.q; S.luaItems = p.items || []; render(true); }
+      break;
+    case 'settings': applySettings(p); break;
+    case 'open':
+      // Raycast behaviour: every open starts on Home with an empty query
+      closePanel();
+      input.value = ''; S.q = ''; S.luaItems = null;
+      S.cur = S.home;
+      input.focus();
+      send({type: 'folder', id: S.cur});
+      drawRail(); drawHeader(); render();
+      break;
+  }
+}
+window.PAL = {recv};
+
+// ---------- MOCK MODE (plain browser, no webkit bridge) ----------
+let MD = null;
+function mockData() {
+  const now = Date.now() / 1000, d = 86400;
+  const app = (n, ic) => ({id: 'app.' + n.toLowerCase(), t: n, ic, f: 'apps', k: 'app', s: '/Applications/' + n + '.app'});
+  const items = [
+    app('Safari', '🧭'), app('Ghostty', '👻'), app('Slack', '💬'), app('Obsidian', '💎'), app('Spotify', '🎧'), app('Finder', '📁'),
+    app('Mail', '✉️'), app('Calendar', '📅'), app('Notes', '🗒️'), app('Music', '🎵'), app('Xcode', '🔨'), app('Figma', '🎨'), app('Google Chrome', '🌐'),
+    {id: 'just.test', t: 'just test', s: 'run the full test suite', ic: '🧪', f: 'just', k: 'just', kw: 'jt'},
+    {id: 'just.deploy', t: 'just deploy-dev', s: 'sam build + deploy to dev', ic: '🚀', f: 'just', k: 'just'},
+    {id: 'just.fleet', t: 'just fleet-status', s: 'tmux fleet overview', ic: '🛰️', f: 'just', k: 'just'},
+    {id: 'just.lint', t: 'just lint', s: 'ruff + stylua + shellcheck', ic: '🧹', f: 'just', k: 'just'},
+    {id: 'zsh.gs', t: 'gs', s: 'git status -sb', ic: '🐚', f: 'zsh', k: 'zsh', kw: 'gs'},
+    {id: 'zsh.gco', t: 'gco', s: 'git checkout (fzf branch)', ic: '🐚', f: 'zsh', k: 'zsh', kw: 'gco'},
+    {id: 'zsh.ll', t: 'll', s: 'eza -la --git', ic: '🐚', f: 'zsh', k: 'zsh'},
+    {id: 'zsh.dots', t: 'dots', s: 'cd ~/dotfiles && nvim', ic: '🐚', f: 'zsh', k: 'zsh', kw: 'dots'},
+    {id: 'zsh.kp', t: 'killport', s: 'kill whatever listens on a port', ic: '🐚', f: 'zsh', k: 'zsh'},
+    {id: 'note.sprint', t: 'Sprint W41', s: 'zettelkasten/claude_code/sprints', ic: '📝', f: 'notes', k: 'note'},
+    {id: 'note.pal', t: 'pal contract', s: 'hammerspoon/pal/CONTRACT.md', ic: '📜', f: 'notes', k: 'note'},
+    {id: 'note.til', t: 'TIL: hs.webview transparency', s: 'needs transparent(true) + body bg none', ic: '💡', f: 'notes', k: 'note'},
+    {id: 'pr.73', t: '#73 feat/pal-webview', s: 'Raycast-style palette in hs.webview', ic: '🔀', f: 'prs', k: 'pr',
+      acts: [{id: 'gh', t: 'Open on GitHub'}, {id: 'checkout', t: 'Checkout branch', hk: '⌘B'}]},
+    {id: 'pr.72', t: '#72 fix/projctl-logs-tty', s: 'merged · projctl logs without a tty', ic: '✅', f: 'prs', k: 'pr', acts: [{id: 'gh', t: 'Open on GitHub'}]},
+    {id: 'sys.lock', t: 'Lock screen', s: 'pmset displaysleepnow', ic: '🔒', f: 'sys', k: 'sys', hk: '⌥⇧L'},
+    {id: 'sys.sleep', t: 'Sleep', ic: '😴', f: 'sys', k: 'sys'},
+    {id: 'sys.dark', t: 'Toggle dark mode', s: 'System appearance', ic: '🌓', f: 'sys', k: 'sys', hk: '⌥⇧D'},
+    {id: 'sys.trash', t: 'Empty trash', ic: '🗑️', f: 'sys', k: 'sys'},
+    {id: 'sys.tileL', t: 'PaperWM: tile left', s: 'move window one column left', ic: '🪟', f: 'sys', k: 'cmd', hk: '⌥⇧←'},
+    {id: 'sys.evil', t: '<b>escaped</b> & "quoted" title', s: '<img src=x onerror=alert(1)>', ic: '🧪', f: 'sys', k: 'file'},
+  ];
+  const st = (line, chips) => ({line, chips});
+  return {
+    folders: [{id: 'home', name: 'Home', icon: '🏠'}, {id: 'apps', name: 'Apps', icon: '🚀', view: 'tiles'}, {id: 'just', name: 'Just', icon: '⚙️'},
+      {id: 'zsh', name: 'Shell', icon: '🐚'}, {id: 'notes', name: 'Notes', icon: '📝'}, {id: 'prs', name: 'PRs', icon: '🔀'}, {id: 'sys', name: 'System', icon: '🖥️'}],
+    items,
+    usage: {'app.ghostty': {n: 120, last: now - 600}, 'app.slack': {n: 40, last: now - 3 * d}, 'zsh.gs': {n: 60, last: now - 2 * 3600},
+      'just.test': {n: 12, last: now - d}, 'pr.73': {n: 5, last: now - 1800}, 'app.obsidian': {n: 30, last: now - 9 * d}},
+    abbrev: {sl: {'app.slack': 3}, ob: {'app.obsidian': 2}},
+    settings: {theme: 'night', header: 'line'},
+    keywords: [{kw: 'g', t: 'Google', url: 'https://www.google.com/search?q=%s'}, {kw: 'gh', t: 'GitHub', url: 'https://github.com/search?q=%s'},
+      {kw: 'yt', t: 'YouTube', url: 'https://www.youtube.com/results?search_query=%s'}, {kw: 'w', t: 'Wikipedia', url: 'https://en.wikipedia.org/w/index.php?search=%s'},
+      {kw: 'tr', t: 'Translate', url: 'https://translate.google.com/?text=%s'}, {kw: 'lin', t: 'Linear', url: 'https://linear.app/search?q=%s'},
+      {kw: '$', t: 'Shell'}, {kw: '?', t: 'Ask Claude'}, {kw: 'f', t: 'Files'}, {kw: 'p', t: 'Processes'}, {kw: 'rem', t: 'Reminder'}, {kw: 'td', t: 'Todoist'}],
+    status: {
+      home: st('🏠 Home  ·  🔔 6  ·  ⏱ 3 PRs open', ['🏠 Home', '🔔 6', '⏱ 3 PRs']),
+      just: st('📁 dotfiles  🌿 master → origin  ✏️ 35  🕐 6d ago  ·  🔔6', ['📁 dotfiles', '🌿 master', '✏️ 35', '🕐 6d ago', '🔔 6']),
+      prs: st('🔀 2 open  ·  ✅ CI green  ·  👀 1 review', ['🔀 2 open', '✅ CI', '👀 1 review']),
+      apps: st('🚀 13 apps', ['🚀 13 apps']),
+    },
+    extra: {},
+  };
+}
+function mockProvide(q) {
+  let items;
+  if (q.startsWith('$ ')) items = [{id: 'sh:' + q.slice(2), t: q.slice(2) || '(empty)', s: 'run in zsh', ic: '💲', k: 'cmd'}];
+  else if (q.startsWith('? ')) items = [{id: 'ask:' + q.slice(2), t: 'Ask Claude: ' + q.slice(2), ic: '✨', k: 'cmd'}];
+  else if (/^:\d+$/.test(q)) items = [{id: 'proc:node', t: 'node (pid 4242)', s: 'listening on ' + q, ic: '⚙️', k: 'proc', acts: [{id: 'kill', t: 'Kill process'}]}];
+  else if (q.startsWith('f ')) items = ['index.html', 'CONTRACT.md'].filter(n => n.includes(q.slice(2))).map(n => ({id: 'file:' + n, t: n, s: '~/.hammerspoon/pal/' + n, ic: '📄', k: 'file'}));
+  else items = [{id: 'kw:' + q, t: q, s: 'Lua keyword', ic: '⏎', k: 'cmd'}];
+  items.forEach(it => { MD.extra[it.id] = it; });
+  return items;
+}
+function mock(m) {
+  if (!MD) MD = mockData();
+  const reply = (p, ms) => setTimeout(() => recv(p), ms);
+  switch (m.type) {
+    case 'ready': reply({type: 'init', ...MD}, 40); reply({type: 'open'}, 80); break;
+    case 'folder': reply({type: 'folder', id: m.id, items: m.id === 'home' ? MD.items : MD.items.filter(i => i.f === m.id),
+      status: MD.status[m.id] || {line: '', chips: []}}, 150); break;
+    case 'preview': {
+      const it = MD.items.find(i => i.id === m.id) || MD.extra[m.id];
+      if (!it) break;
+      const mono = ['zsh', 'just', 'proc', 'cmd', 'file'].includes(it.k);
+      const body = it.id.startsWith('sh:') ? `$ ${it.t}\ntotal 8\n-rw-r--r--  CONTRACT.md\n-rw-r--r--  index.html` :
+        mono ? `# ${it.t}\n${it.s || ''}\n\nline 1\nline 2 <script>not executed<\/script>` : `${it.t}\n\n${it.s || 'No description.'}`;
+      reply({type: 'preview', id: m.id, title: it.t, body, mono}, 180);
+      break;
+    }
+    case 'query': reply({type: 'provide', q: m.q, items: mockProvide(m.q)}, 350); break;
+    case 'set': MD.settings[m.k] = m.v; reply({type: 'settings', ...MD.settings}, 20); drawCtx(`mock → set ${m.k}=${m.v}`); break;
+    default: console.log('pal →', m); drawCtx('mock → ' + JSON.stringify(m));
+  }
+}
+
+// ranker self-check (mock mode only) — fails loudly in the console
+function selfCheck() {
+  const ok = (c, m) => { if (!c) { console.error('pal selfCheck FAIL:', m); drawCtx('selfCheck FAIL: ' + m); } };
+  ok(match('sprint', 'show migrated hooks, skills, prompts') < 0, 'sprint matched scattered subsequence');
+  ok(match('sprint', 'sprint w41') > match('sprint', 'open sprint note'), 'starts-with beats word-prefix');
+  ok(match('copy sprint', 'copy sprint link') > match('copy sprint', '#88 copy everything from the sprint board'), 'multi-word: short title first');
+  ok(match('pal web', 'feat/pal-webview') >= 0 && match('web pal', 'feat/pal-webview') >= 0, 'any word order');
+  ok(match('pal zz', 'feat/pal-webview') < 0, 'every word must match');
+  ok(match('gs', 'git status') > 450 && match('wlh', 'window left half') > 450, 'initials tier');
+  ok(match('gs', 'gs') > match('gs', 'git status'), 'exact title beats initials');
+  const items = mockData().items, sc = it => score(it, 'gs', 'gs');
+  const top = items.filter(it => sc(it) >= 0).sort((a, b) => sc(b) - sc(a))[0];
+  ok(top?.id === 'zsh.gs', '"gs" alias first, got ' + top?.id);
+}
+render();
+if (MOCK) selfCheck();
+send({type: 'ready'});
+</script>
+</body>
+</html>
