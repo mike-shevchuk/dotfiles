@@ -150,6 +150,7 @@ function M.start(autostart)
   -- keep the floating HS panels (scratchpad, gitpanel, notetaker, …) untiled
   M.pwm.window_filter:rejectApp("Hammerspoon")
 
+  require("modules.paperwmmove").install(M.pwm)
   paperwmfit.init(M)
   bindHotkeys()
 
