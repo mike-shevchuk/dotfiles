@@ -35,7 +35,13 @@ local RECIPES = {
   { "disk hogs",  "just -g disk-hogs" },
 }
 
-local KEYS = { Enter = true, Escape = true, Up = true, Down = true, Tab = true, BSpace = true, ["C-c"] = true }
+-- tmux key names the board may send: named keys, F1–F12, or one ASCII char, each optionally C-/M- prefixed
+local NAMED = { Enter = 1, Escape = 1, Tab = 1, BTab = 1, BSpace = 1, Space = 1, Up = 1, Down = 1, Left = 1, Right = 1,
+  Home = 1, End = 1, PageUp = 1, PageDown = 1, DC = 1 }
+local function validKey(k)
+  local base = (k or ""):gsub("^C%-", ""):gsub("^M%-", ""):gsub("^C%-", "")
+  return NAMED[base] or base:match("^F%d%d?$") or (base:match("^[%g]$") and base ~= ";") -- tmux: ; splits commands
+end
 
 -- ── text cleanup: board fonts carry ASCII + Cyrillic + a few symbols, drop the rest ──
 local KEEP = { [0x25CB] = true, [0x25CF] = true, [0x26A1] = true, [0x2192] = true, [0x2713] = true, [0xB7] = true }
@@ -232,7 +238,7 @@ local function handle(method, path, headers, body)
     end)
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/key" and id and KEYS[p.k] then
+  if method == "POST" and route == "/key" and id and validKey(p.k) then
     task(TMUX, { "send-keys", "-t", id, p.k })
     return reply("ok", 200)
   end
