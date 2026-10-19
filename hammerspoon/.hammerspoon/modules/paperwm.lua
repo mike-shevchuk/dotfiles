@@ -151,6 +151,26 @@ function M.start(autostart)
   M.pwm.window_filter:rejectApp("Hammerspoon")
 
   require("modules.paperwmmove").install(M.pwm)
+
+  -- Tiling anchors on the focused window. When that is a window PaperWM does
+  -- not manage (Brave's Picture in Picture, a panel) it logs "anchor index not
+  -- found", refreshes and bails WITHOUT tiling. Anchor on a managed window of
+  -- that space instead; a real-but-unadopted window still gets adopted first.
+  local tile = M.pwm.tiling.tileSpace
+  M.pwm.tiling.tileSpace = function(space, anchor)
+    local st = M.pwm.state
+    if not anchor and space then
+      local f = hs.window.focusedWindow()
+      if f and not st.windowIndex(f) and not M.pwm.floating.isFloating(f) then
+        if M.pwm.window_filter:isWindowAllowed(f) then
+          return M.pwm.windows.refreshWindows() -- adopts it, then tiles
+        end
+        local col = st.windowList(space, 1)
+        anchor = col and col[1]
+      end
+    end
+    return tile(space, anchor)
+  end
   paperwmfit.init(M)
   bindHotkeys()
 
