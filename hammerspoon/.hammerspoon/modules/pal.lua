@@ -43,21 +43,26 @@ end
 -- Background shell, output to a callback. A login zsh so PATH matches the
 -- terminal; nothing here may block the webview's main thread.
 -- Running tasks are pinned in `running`: an hs.task nothing references gets
--- garbage-collected mid-flight and its callback simply never fires. Output is
--- drained as it streams: without a streaming callback a task writing more than
--- the 64KB pipe buffer (Todoist's task list) blocks forever.
+-- garbage-collected mid-flight and its callback simply never fires. Output
+-- goes to temp files, read once the task exits: a pipe blocks forever past
+-- 64KB (Todoist's task list), and a streaming callback can still deliver
+-- chunks after the exit callback, truncating `just --dump` under load.
 local running = {}
+local function slurp(path)
+  local f = io.open(path)
+  local s = f and f:read("a") or ""
+  if f then f:close() end
+  os.remove(path)
+  return s
+end
+
 local function sh(cmd, cb, env)
-  local out, err, t = {}, {}, nil
-  t = hs.task.new("/bin/zsh", function(code, o, e)
+  local o, e, t = os.tmpname(), os.tmpname(), nil
+  t = hs.task.new("/bin/zsh", function(code)
     running[t] = nil
-    out[#out + 1], err[#err + 1] = o, e
-    local ok, x = pcall(cb or function() end, table.concat(out), table.concat(err), code)
+    local ok, x = pcall(cb or function() end, slurp(o), slurp(e), code)
     if not ok then print("pal: " .. tostring(x)) end
-  end, function(_, o, e)
-    out[#out + 1], err[#err + 1] = o, e
-    return true
-  end, { "-lc", cmd })
+  end, { "-lc", ("{ %s\n} >%s 2>%s"):format(cmd, o, e) })
   running[t] = true
   if env then
     env.PATH, env.HOME = env.PATH or PATH, env.HOME or HOME
@@ -179,7 +184,7 @@ end
 
 local function revealActs(path)
   return {
-    { id = "reveal", t = "Reveal in Finder", fn = function() hs.execute("open -R " .. q1(path)) end },
+    { id = "reveal", t = "Reveal in Finder", fn = function() sh("open -R " .. q1(path)) end },
     { id = "path",   t = "Copy path", fn = function() hs.pasteboard.setContents(path) end },
   }
 end
@@ -218,7 +223,7 @@ local function procItem(pid, cpu, name, f)
       sh("ps -o pid,ppid,pcpu,pmem,etime,command -p " .. pid, function(out) preview(id, out, name, true) end)
     end,
     acts = { { id = "kill", t = "Kill (TERM)", hk = "⌘⌫", fn = function()
-      hs.execute("kill " .. pid); hs.alert.show("killed " .. name, 1.5) end } },
+      sh("kill " .. pid, function() hs.alert.show("killed " .. name, 1.5) end) end } },
   })
 end
 
@@ -245,19 +250,20 @@ local function cmdItems()
   return out
 end
 
--- Apps with real icons. Encoding ~150 PNGs costs a second or two, so it is
--- paid once per Hammerspoon load and every open after that reads the cache.
+-- Apps with real icons. Encoding ~150 PNGs costs a second or two, so warm()
+-- pays it in small chunks after Hammerspoon starts; until then a placeholder.
 local iconURL = {}
+local function encodeIcon(a)
+  local img = launcher.appIcon(a.path)
+  iconURL[a.path] = img and img:setSize({ w = 64, h = 64 }):encodeAsURLString() or "🧭"
+end
+
 local function appItems()
   local out = {}
   M._apps = M._apps or launcher.apps()
   for _, a in ipairs(M._apps) do
-    if not iconURL[a.path] then
-      local img = launcher.appIcon(a.path)
-      iconURL[a.path] = img and img:setSize({ w = 64, h = 64 }):encodeAsURLString() or "🧭"
-    end
     out[#out + 1] = item({ id = "app:" .. a.path, t = a.text, s = a.path:match("^(.*)/[^/]+$"),
-                           ic = iconURL[a.path], f = "apps", k = "app" }, {
+                           ic = iconURL[a.path] or "🧭", f = "apps", k = "app" }, {
       run = function() hs.application.launchOrFocus(a.path) end,
       preview = a.text .. "\n\n" .. a.path,
       acts = revealActs(a.path),
@@ -337,6 +343,9 @@ local function themeItems()
   return out
 end
 
+-- Folder builders take a callback; the cheap file-only ones answer at once.
+local function now(fn) return function(done) done(fn()) end end
+
 local function snippetItems()
   local f = io.open(hs.configdir .. "/pal/snippets.json")
   if not f then return {} end
@@ -364,20 +373,57 @@ local function clipItems()
   return out
 end
 
--- Recipes of one justfile, cached by mtime: `just --dump` is a process spawn.
+-- `just --dump`, cut down by jq to one TSV line per recipe and rebuilt here
+-- as the table palette.parseJustfile reads. Never hs.json.decode: the rescue
+-- justfile dumps 4.7MB and LuaSkin's decode of that blocks for tens of seconds.
+local JQ = [[.recipes | to_entries[] | .value as $r | [.key, ($r.doc // ""),
+  ([$r.attributes[]? | objects | .group] | first // ""),
+  (if $r.private or any($r.attributes[]?; . == "private") then "1" else "" end),
+  ([$r.parameters[]? | .name + (if .default == null then "" else "=" + (.default | if type == "string" then . else tojson end) end)] | join(""))
+] | @tsv]]
+
+local function justDump(path, done)
+  sh(("just --justfile %s --dump --dump-format json 2>/dev/null | jq -r %s"):format(q1(path), q1(JQ)), function(out)
+    local recipes = {}
+    for name, doc, group, priv, params in out:gmatch("([^\t\n]*)\t([^\t\n]*)\t([^\t\n]*)\t([^\t\n]*)\t([^\t\n]*)") do
+      local attrs, ps = {}, {}
+      if group ~= "" then attrs[#attrs + 1] = { group = group } end
+      if priv == "1" then attrs[#attrs + 1] = "private" end
+      for p in params:gmatch("[^\31]+") do
+        local n, d = p:match("^([^=]+)=(.*)$")
+        ps[#ps + 1] = { name = n or p, default = d }
+      end
+      recipes[name] = { doc = doc ~= "" and doc or nil, attributes = attrs, parameters = ps }
+    end
+    done({ recipes = recipes })
+  end)
+end
+
+-- Recipes of one justfile, cached by mtime: `just --dump` is a process spawn,
+-- so it runs in the background and done(items) gets them.
 local justCache = {}
-local function justItems(path, f)
+local function justItems(path, f, done)
   local mt = hs.fs.attributes(path, "modification")
-  if not mt then return {} end
+  if not mt then return done({}) end
   local c = justCache[path]
-  if not c or c.mt ~= mt then
-    local entries = {}
-    palette.parseJustfile(path, entries, {})
-    c = { mt = mt, entries = entries }
-    justCache[path] = c
+  -- rows are cached too: rescue has ~1350 recipes, too many to rebuild per open
+  if c and c.mt == mt then
+    c.rows[f] = c.rows[f] or M._justRows(path, f, c.entries)
+    return done(c.rows[f])
   end
+  justDump(path, function(data)
+    local entries = {}
+    palette.parseJustfile(path, entries, {}, data)
+    local rows = M._justRows(path, f, entries)
+    -- a failed dump is not cached, or the folder stays empty until the next edit
+    if #entries > 0 then justCache[path] = { mt = mt, entries = entries, rows = { [f] = rows } } end
+    done(rows)
+  end)
+end
+
+function M._justRows(path, f, entries)
   local dir, out = path:match("^(.*)/[^/]+$"), {}
-  for _, e in ipairs(c.entries) do
+  for _, e in ipairs(entries) do
     local cmd = ("just --justfile %s %s"):format(path, e.recipe)
     -- Required arguments are asked for in the terminal itself: the webview has
     -- no place to type them, and running without them only prints an error.
@@ -431,9 +477,9 @@ local function folderCmds(name, f)
 end
 
 -- palette.EXTRA builds chooser rows; keep their text and their tmux command.
-local function extraItems(kind, f, k, acts)
+local function extraItems(rows, f, k, acts)
   local out = {}
-  for _, r in ipairs(palette.EXTRA[kind](launcher)) do
+  for _, r in ipairs(rows) do
     local sub = type(r.subText) == "userdata" and r.subText:getString() or tostring(r.subText or "")
     local slug = r.tmux:match("rem%-show (%S+)$")
     out[#out + 1] = item({ id = k .. ":" .. (slug or r.title), t = r.text, s = trim(sub),
@@ -448,23 +494,31 @@ local function extraItems(kind, f, k, acts)
   return out
 end
 
-local function reminderItems()
-  return extraItems("reminders", "reminders", "rem", function(slug)
-    return {
-      { id = "show", t = "Show here", stay = true, fn = function()
-          sh(HOME .. "/.claude/reminders.sh show " .. slug, function(o) preview("rem:" .. slug, o, slug) end) end },
-      { id = "done", t = "Mark done", fn = function()
-          hs.alert.show(trim(hs.execute(HOME .. "/.claude/reminders.sh done " .. slug)), 1.5) end },
-    }
+local function reminderItems(done)
+  sh(HOME .. "/.claude/reminders.sh list 2>/dev/null", function(o)
+    done(extraItems(palette.EXTRA.reminders(launcher, o), "reminders", "rem", M._remActs))
   end)
+end
+
+function M._remActs(slug)
+  return {
+    { id = "show", t = "Show here", stay = true, fn = function()
+        sh(HOME .. "/.claude/reminders.sh show " .. slug, function(o) preview("rem:" .. slug, o, slug) end) end },
+    { id = "done", t = "Mark done", fn = function()
+          sh(HOME .. "/.claude/reminders.sh done " .. slug, function(o) hs.alert.show(trim(o), 1.5) end) end },
+  }
 end
 
 -- Same rows as palette.EXTRA.projects, but one `tmux ls` instead of a login
 -- shell per project: that loop costs ~4s for 15 projects, far too slow here.
-local function projectItems()
+local function projectItems(done)
+  sh("/opt/homebrew/bin/tmux ls -F '#S' 2>/dev/null", function(o) done(M._projectRows(o)) end)
+end
+
+function M._projectRows(ls)
   local out = folderCmds("projctl", "projects")
   local up = {}
-  for name in (hs.execute("/opt/homebrew/bin/tmux ls -F '#S' 2>/dev/null") or ""):gmatch("[^\n]+") do up[name] = true end
+  for name in ls:gmatch("[^\n]+") do up[name] = true end
   local f = io.open(HOME .. "/code/projctl/registry.conf")
   if not f then return out end
   for line in f:lines() do
@@ -483,16 +537,21 @@ local function projectItems()
   return out
 end
 
-local function rescueItems()
-  local out = folderCmds("rescue-serverless", "rescue")
-  for _, it in ipairs(justItems(FAST .. "/justfile.v2", "rescue")) do out[#out + 1] = it end
-  return out
+local function rescueItems(done)
+  justItems(FAST .. "/justfile.v2", "rescue", function(list)
+    local out = folderCmds("rescue-serverless", "rescue")
+    for _, it in ipairs(list) do out[#out + 1] = it end
+    done(out)
+  end)
 end
 
-local function zettelItems()
+local function zettelItems(done)
+  sh(("find %s -name '*.md' -type f -print0 | xargs -0 stat -f '%%m\t%%N' | sort -rn | head -40"):format(q1(ZETTEL)),
+    function(o) done(M._noteRows(o)) end)
+end
+
+function M._noteRows(list)
   local out = {}
-  local list = hs.execute(("find %s -name '*.md' -type f -print0 | xargs -0 stat -f '%%m\t%%N' | sort -rn | head -40")
-    :format(q1(ZETTEL))) or ""
   for mt, path in list:gmatch("(%d+)\t([^\n]+)") do
     local rel = path:sub(#ZETTEL + 2)
     out[#out + 1] = item({ id = "note:" .. path, t = rel:match("([^/]+)%.md$"),
@@ -512,17 +571,18 @@ local function zettelItems()
 end
 
 local SYSTEM_CATS = { System = true, Shell = true, Trackpad = true, Screenshot = true }
-local function systemItems()
-  if #palette.entries == 0 then palette.parse() end
-  local out = {}
-  for _, e in ipairs(palette.entries) do
-    if e.kind == "action" and SYSTEM_CATS[e.category] then out[#out + 1] = cmdItem(e, "system") end
-  end
-  local ps = hs.execute("ps -Ao pid=,pcpu=,comm= -r | head -15") or ""
-  for pid, cpu, comm in ps:gmatch("%s*(%d+)%s+([%d%.]+)%s+([^\n]+)") do
-    out[#out + 1] = procItem(pid, cpu, comm:match("([^/]+)$"), "system")
-  end
-  return out
+local function systemItems(done)
+  sh("ps -Ao pid=,pcpu=,comm= -r | head -15", function(ps)
+    if #palette.entries == 0 then palette.parse() end
+    local out = {}
+    for _, e in ipairs(palette.entries) do
+      if e.kind == "action" and SYSTEM_CATS[e.category] then out[#out + 1] = cmdItem(e, "system") end
+    end
+    for pid, cpu, comm in ps:gmatch("%s*(%d+)%s+([%d%.]+)%s+([^\n]+)") do
+      out[#out + 1] = procItem(pid, cpu, comm:match("([^/]+)$"), "system")
+    end
+    done(out)
+  end)
 end
 
 -- ─── Network-backed folders (async) ─────────────────────────────
@@ -552,13 +612,26 @@ end
 
 local TD = "https://api.todoist.com/api/v1/tasks"
 
+-- One TSV line per task from jq, not hs.json.decode: the 200-task response is
+-- ~240KB and LuaSkin's decode of it blocks the main thread ~300ms.
+local TD_JQ = [[.results[] | [.id, .content, (.priority // 1), (.due.date // ""), (.due.string // ""),
+  ((.labels // []) | join("\u001f")), (.description // "")] | @tsv]]
+local UNTSV = { t = "\t", n = "\n", r = "\r", ["\\"] = "\\" }
+
 local function fetchTodoist(done)
-  todoist(('xh -bI "%s?limit=200" "Authorization:Bearer $TODOIST_TOKEN"'):format(TD), function(out, err)
-    local data = decode(out)
-    local tasks = type(data) == "table" and data.results or nil
-    if not tasks then
+  todoist(('set -o pipefail; xh -bI "%s?limit=200" "Authorization:Bearer $TODOIST_TOKEN" | jq -r %s'):format(TD, q1(TD_JQ)), function(out, err, code)
+    if code ~= 0 then
       return done({ item({ id = "task:error", t = "Todoist: no tasks", s = trim(err ~= "" and err or out):sub(1, 200),
                            ic = "⚠️", f = "todoist", k = "task" }, { preview = out .. "\n" .. err }) })
+    end
+    local tasks = {}
+    for line in out:gmatch("[^\n]+") do
+      local f = {}
+      for v in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = v:gsub("\\(.)", UNTSV) end
+      local labels = {}
+      for l in (f[6] or ""):gmatch("[^\31]+") do labels[#labels + 1] = l end
+      tasks[#tasks + 1] = { id = f[1], content = f[2], priority = tonumber(f[3]), labels = labels, description = f[7],
+                            due = (f[4] or "") ~= "" and { date = f[4], string = f[5] ~= "" and f[5] or nil } or nil }
     end
     -- ponytail: first page only (200); follow next_cursor if the inbox ever grows past it
     local today = os.date("%Y-%m-%d")
@@ -610,44 +683,69 @@ end
 
 M.FOLDERS = {
   { id = "home",      name = "Home",      icon = "🏠" },
-  { id = "apps",      name = "Apps",      icon = "🧭", view = "tiles", build = appItems },
+  { id = "apps",      name = "Apps",      icon = "🧭", view = "tiles", build = now(appItems) },
   { id = "dotfiles",  name = "dotfiles",  icon = "📁", path = DOT },
   { id = "rescue",    name = "rescue",    icon = "🚑", path = HOME .. "/code/b2b/rescue-serverless", build = rescueItems },
   { id = "projects",  name = "projects",  icon = "🛠", path = HOME .. "/code/projctl", noGit = true, build = projectItems },
   { id = "reminders", name = "reminders", icon = "🔔", build = reminderItems },
   { id = "zettel",    name = "zettel",    icon = "🗂", path = ZETTEL, build = zettelItems },
-  { id = "todoist",   name = "todoist",   icon = "☑️", fetch = fetchTodoist },
-  { id = "prs",       name = "PRs",       icon = "🔀", fetch = fetchPRs },
+  { id = "todoist",   name = "todoist",   icon = "☑️", build = fetchTodoist, net = true },
+  { id = "prs",       name = "PRs",       icon = "🔀", build = fetchPRs, net = true },
   { id = "system",    name = "system",    icon = "🖥", build = systemItems },
-  { id = "shell",     name = "shell",     icon = "💻", build = zshItems },
-  { id = "clipboard", name = "clipboard", icon = "📋", build = clipItems },
-  { id = "snippets",  name = "snippets",  icon = "✂️", build = snippetItems },
+  { id = "shell",     name = "shell",     icon = "💻", build = now(zshItems) },
+  { id = "clipboard", name = "clipboard", icon = "📋", build = now(clipItems) },
+  { id = "snippets",  name = "snippets",  icon = "✂️", build = now(snippetItems) },
 }
 local byId = {}
 for _, f in ipairs(M.FOLDERS) do byId[f.id] = f end
 
-M._cache = {}   -- folder id → last items, so Home and async folders have something at once
+M._cache  = {}   -- folder id → last items, so Home and async folders have something at once
+M._status = {}   -- folder id → last status
+local loading = {}   -- folder id → os.time() a load started; one load per folder at a time
 
--- Folder-specific items, then the generic ones every folder with a path gets:
--- its justfile's recipes and, for a repo, git status/log.
-local function folderItems(f)
-  local out = f.build and f.build() or {}
-  if f.path then
-    for _, it in ipairs(justItems(f.path .. "/justfile", f.id)) do out[#out + 1] = it end
-    if not f.noGit then for _, it in ipairs(gitItems(f.path, f.id)) do out[#out + 1] = it end end
+-- Run jobs side by side; done(results) once every one has called back.
+local function join(jobs, done)
+  local res, left = {}, #jobs
+  if left == 0 then return done(res) end
+  for i, job in ipairs(jobs) do
+    job(function(v)
+      res[i], left = v, left - 1
+      if left == 0 then done(res) end
+    end)
   end
-  M._cache[f.id] = out
-  return out
 end
 
--- palette's statusLine, also cut into chips for the header's chip mode.
-local function status(f, n)
-  local line
+-- palette's status line, its facts gathered in one background shell.
+local function statusLine(f, done)
+  local git = (f.path and not f.noGit)
+    and ("cd %s && echo \"$(git rev-parse --abbrev-ref HEAD 2>/dev/null)\"; echo \"$(git status --porcelain | wc -l)\"; git log -1 --format=%%cr"):format(q1(f.path))
+    or "echo"
+  sh(("echo \"$(%s/.claude/reminders.sh count 2>/dev/null)\"; %s"):format(HOME, git), function(o)
+    local bell, branch, dirty, age = (o .. "\n\n\n\n"):match("^([^\n]*)\n([^\n]*)\n([^\n]*)\n([^\n]*)")
+    done(palette.formatStatus(f, trim(bell), trim(branch), tonumber(dirty) or 0, trim(age)))
+  end)
+end
+
+-- Folder-specific items, then the generic ones every folder with a path gets:
+-- its justfile's recipes and, for a repo, git status/log. done(items, line).
+local function loadFolder(f, done)
+  local jobs = { f.build or function(cb) cb({}) end }
   if f.path then
-    line = palette.statusLine({ icon = f.icon, name = f.name, path = f.path, noGit = f.noGit })
-  else
-    line = ("%s %s  ·  %d items"):format(f.icon, f.name, n)
+    jobs[2] = function(cb) justItems(f.path .. "/justfile", f.id, cb) end
+    jobs[3] = function(cb) cb(f.noGit and {} or gitItems(f.path, f.id)) end
+    jobs[4] = function(cb) statusLine(f, cb) end
   end
+  join(jobs, function(r)
+    local out = {}
+    for i = 1, 3 do for _, it in ipairs(r[i] or {}) do out[#out + 1] = it end end
+    done(out, r[4])
+  end)
+end
+
+-- The line (a folder without a path counts its items), also cut into chips for
+-- the header's chip mode.
+local function status(f, n, line)
+  line = line or ("%s %s  ·  %d items"):format(f.icon, f.name, n)
   local chips = {}
   for part in (line .. "  "):gmatch("(.-)%s%s+") do
     local c = trim(part)
@@ -658,44 +756,106 @@ end
 
 -- Home: commands, apps, shell, themes, snippets — the cheap, cached sets — plus
 -- whatever other folders have already loaded. Dedup by id: system re-lists
--- some palette commands.
+-- some palette commands. Also returns the parts it was made of, keyed like
+-- the folders, so sendFolder can reuse each folder's encoded JSON.
 function M.homeItems()
-  local seen, out = {}, {}
-  local function add(list)
+  local seen, out, parts = {}, {}, {}
+  local function add(key, list)
+    local part = {}
     for _, it in ipairs(list) do
-      if not seen[it.id] then seen[it.id], out[#out + 1] = true, it end
+      if not seen[it.id] then seen[it.id], out[#out + 1], part[#part + 1] = true, it, it end
     end
+    parts[#parts + 1] = { key, part }
   end
   M._static = M._static or {}
   if not M._static.cmd then M._static.cmd = cmdItems() end
-  add(M._static.cmd)
-  add(appItems())
-  add(zshItems())
-  add(themeItems())
-  add(snippetItems())
+  add("cmd", M._static.cmd)
+  add("apps", appItems())
+  add("shell", zshItems())
+  add("themes", themeItems())
+  add("snippets", snippetItems())
   for _, f in ipairs(M.FOLDERS) do
-    if f.id ~= "home" and f.id ~= "clipboard" and M._cache[f.id] then add(M._cache[f.id]) end
+    if f.id ~= "home" and f.id ~= "clipboard" and M._cache[f.id] then add(f.id, M._cache[f.id]) end
   end
   M._cache.home = out
-  return out
+  return out, parts
+end
+
+-- The page keeps every folder it was sent, so a set it already has is not
+-- sent again (every resend also resets the page's selection). And a list is
+-- encoded only when it changed: hs.json.encode costs ~45ms per MB, and Home
+-- (~2000 rows, the app icons) is the union of every folder's list.
+local function sigOf(items)
+  local sig = {}
+  for i, it in ipairs(items) do
+    local ic = it.ic or ""
+    sig[i] = table.concat({ it.id, it.t or "", it.s or "", #ic > 64 and #ic or ic, it.fav and "★" or "" }, "\0")
+  end
+  return table.concat(sig, "\1")
+end
+
+local sent  = {}   -- folder id → signature of the last items+status sent
+local jsons = {}   -- list key → { sig, json } of its last encoding
+
+-- parts: { {key, items}, … }, concatenated in order.
+local function partSigs(parts)
+  local sigs = {}
+  for i, p in ipairs(parts) do sigs[i] = sigOf(p[2]) end
+  return sigs
+end
+
+-- The parts as one JSON array, each part from cache unless its signature moved.
+local function itemsJSON(parts, sigs)
+  local arr = {}
+  for i, p in ipairs(parts) do
+    local c = jsons[p[1]]
+    if not (c and c.sig == sigs[i]) then
+      c = { sig = sigs[i], json = #p[2] > 0 and hs.json.encode(p[2]):sub(2, -2) or "" }
+      jsons[p[1]] = c
+    end
+    if c.json ~= "" then arr[#arr + 1] = c.json end
+  end
+  return "[" .. table.concat(arr, ",") .. "]"
+end
+
+-- send(), with payload.items spliced in from the cached part JSON.
+local function sendItems(payload, parts, sigs)
+  if M._sink then   -- headless tests get the plain table
+    local items = {}
+    for _, p in ipairs(parts) do for _, it in ipairs(p[2]) do items[#items + 1] = it end end
+    payload.items = items
+    return M._sink(payload)
+  end
+  if M.wv then
+    M.wv:evaluateJavaScript("PAL.recv(" .. hs.json.encode(payload):sub(1, -2) .. ',"items":' .. itemsJSON(parts, sigs) .. "})")
+  end
+end
+
+local function sendFolder(id, parts, st)
+  local sigs = partSigs(parts)
+  local sig = st.line .. "\2" .. table.concat(sigs, "\2")
+  if sent[id] == sig then return end
+  sent[id] = sig
+  sendItems({ type = "folder", id = id, status = st }, parts, sigs)
 end
 
 function M.folder(id)
   local f = byId[id] or byId.home
   if f.id == "home" then
-    local items = M.homeItems()
-    return send({ type = "folder", id = "home", items = items, status = status(f, #items) })
+    local items, parts = M.homeItems()
+    return sendFolder("home", parts, status(f, #items))
   end
-  if f.fetch then
-    local cached = M._cache[f.id] or {}
-    send({ type = "folder", id = f.id, items = cached, status = status(f, #cached) })
-    return f.fetch(function(items)
-      M._cache[f.id] = items
-      send({ type = "folder", id = f.id, items = items, status = status(f, #items) })
-    end)
-  end
-  local items = folderItems(f)
-  send({ type = "folder", id = f.id, items = items, status = status(f, #items) })
+  -- What we have now, then the fresh set from the background.
+  local cached = M._cache[f.id]
+  sendFolder(f.id, { { f.id, cached or {} } }, M._status[f.id] or status(f, 0, ("%s %s  ·  loading…"):format(f.icon, f.name)))
+  -- a load that died in its callback would pin this forever, hence the 30s
+  if loading[f.id] and os.time() - loading[f.id] < 30 then return end
+  loading[f.id] = os.time()
+  loadFolder(f, function(items, line)
+    loading[f.id] = nil
+    M._cache[f.id], M._status[f.id] = items, status(f, #items, line)
+    sendFolder(f.id, { { f.id, items } }, M._status[f.id])
+  end)
 end
 
 -- ─── Keywords ───────────────────────────────────────────────────
@@ -781,7 +941,7 @@ function M.query(q)
             run = function()
               if path:match("^" .. HOME .. "/zettelkasten/.*%.md$") then
                 hs.urlevent.openURL("obsidian://open?path=" .. urlencode(path))
-              else hs.execute("open " .. q1(path)) end
+              else sh("open " .. q1(path)) end
             end,
             preview = function(id)
               sh("head -c 4000 " .. q1(path) .. " 2>/dev/null || ls -la " .. q1(path), function(o) preview(id, o, path, true) end)
@@ -804,13 +964,15 @@ function M.query(q)
 
   local pname = q:match("^p%s+(.-)%s*$")
   if pname and pname ~= "" then
-    local items = {}
-    for pid, cpu, comm in (hs.execute("ps -Ao pid=,pcpu=,comm= -r") or ""):gmatch("%s*(%d+)%s+([%d%.]+)%s+([^\n]+)") do
-      if comm:lower():find(pname:lower(), 1, true) and #items < 40 then
-        items[#items + 1] = procItem(pid, cpu, comm:match("([^/]+)$"))
+    return single(sh("ps -Ao pid=,pcpu=,comm= -r", function(out)
+      local items = {}
+      for pid, cpu, comm in out:gmatch("%s*(%d+)%s+([%d%.]+)%s+([^\n]+)") do
+        if comm:lower():find(pname:lower(), 1, true) and #items < 40 then
+          items[#items + 1] = procItem(pid, cpu, comm:match("([^/]+)$"))
+        end
       end
-    end
-    return provide(q, items)
+      provide(q, items)
+    end))
   end
 
   local rem = q:match("^rem%s+(.-)%s*$")
@@ -819,7 +981,8 @@ function M.query(q)
     return provide(q, { item({ id = "remadd:" .. slug, t = "Add reminder: " .. rem, s = slug, ic = "🔔", k = "rem" }, {
       run = function()
         -- stdin is the body; empty, or cat waits forever
-        hs.alert.show(trim(hs.execute(("%s/.claude/reminders.sh add %s %s </dev/null"):format(HOME, q1(slug), q1(rem)))), 1.5)
+        sh(("%s/.claude/reminders.sh add %s %s </dev/null"):format(HOME, q1(slug), q1(rem)),
+          function(o) hs.alert.show(trim(o), 1.5) end)
       end,
     }) })
   end
@@ -840,19 +1003,20 @@ end
 -- ─── Window ─────────────────────────────────────────────────────
 
 local function init()
-  local items = M.homeItems()
+  sent = {}   -- a (re)loaded page has nothing yet
+  local _, parts = M.homeItems()
   local folders = {}
   for _, f in ipairs(M.FOLDERS) do folders[#folders + 1] = { id = f.id, name = f.name, icon = f.icon, view = f.view } end
-  local payload = { type = "init", folders = folders, items = items, usage = M.usage(), abbrev = M.abbrev(),
+  local payload = { type = "init", folders = folders, usage = M.usage(), abbrev = M.abbrev(),
                     keywords = M.KEYWORDS, themes = M.THEMES }
   local s = settings()
   payload.settings = { theme = s.theme, header = s.header }
   payload.favs = s.favs
-  send(payload)
+  sendItems(payload, parts, partSigs(parts))
   -- Warm the network folders so Home and their first open are not empty;
   -- only the cache is filled, the page is not told until it asks.
   for _, f in ipairs(M.FOLDERS) do
-    if f.fetch then f.fetch(function(list) M._cache[f.id] = list end) end
+    if f.net then f.build(function(list) M._cache[f.id] = list end) end
   end
 end
 
@@ -957,5 +1121,39 @@ function M.toggle()
   if win then win:focus() end
   send({ type = "open" })
 end
+
+-- Warm Home after Hammerspoon starts so the first ⌥⇧Space is instant. The
+-- justfile dumps (most of palette.parse) run in the background, the parse and
+-- the app list each get their own tick, then app icons a few per tick. Timers
+-- live on M, or they get garbage-collected before they fire.
+local function warmIcons(i)
+  for j = i, math.min(i + 3, #M._apps) do if not iconURL[M._apps[j].path] then encodeIcon(M._apps[j]) end end
+  if i + 4 <= #M._apps then M._warm = hs.timer.doAfter(0.02, function() warmIcons(i + 4) end); return end
+  -- then encode Home's parts once, so init and Home only splice cached JSON
+  M._warm = hs.timer.doAfter(0.02, function()
+    local _, parts = M.homeItems()
+    itemsJSON(parts, partSigs(parts))
+  end)
+end
+
+M._warm = hs.timer.doAfter(2, function()
+  sh("whence -p claude || /bin/zsh -ic 'whence -p claude' 2>/dev/null", function(o) claudeBin = trim(o):match("[^\n]*$") end)
+  local jobs, dumps = {}, {}
+  for _, path in ipairs(palette.justfiles) do
+    jobs[#jobs + 1] = function(cb)
+      justDump(path, function(data) dumps[path] = data; cb() end)
+    end
+  end
+  join(jobs, function()
+    palette.dumps = dumps
+    M._static = M._static or {}
+    M._static.cmd = M._static.cmd or cmdItems()
+    palette.dumps = nil
+    M._warm = hs.timer.doAfter(0.02, function()
+      M._apps = M._apps or launcher.apps()
+      M._warm = hs.timer.doAfter(0.02, function() warmIcons(1) end)
+    end)
+  end)
+end)
 
 return M

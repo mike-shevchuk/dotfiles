@@ -225,16 +225,22 @@ end
 M.justfiles = hs.settings.get("PaletteJustfiles")
   or { os.getenv("HOME") .. "/dotfiles/.justdir/global.just" }
 
-local function parseJustfile(path, entries, seen)
+-- data: the decoded dump, when the caller already has it (pal builds it in a
+-- background task: hs.json.decode of a big dump blocks for seconds); nil
+-- means run and decode `just --dump` here.
+local function parseJustfile(path, entries, seen, data)
   local probe = io.open(path, "r")
   if not probe then return end
   probe:close()
 
-  local out, ok = hs.execute(
-    ("just --justfile %s --dump --dump-format json 2>/dev/null"):format(path), true)
-  if not ok or not out or out == "" then return end
-  local decoded, data = pcall(hs.json.decode, out)
-  if not decoded or type(data) ~= "table" or type(data.recipes) ~= "table" then return end
+  if data == nil then
+    local out, ok = hs.execute(("just --justfile %s --dump --dump-format json 2>/dev/null"):format(path), true)
+    if not ok or not out or out == "" then return end
+    local decoded
+    decoded, data = pcall(hs.json.decode, out)
+    if not decoded then return end
+  end
+  if type(data) ~= "table" or type(data.recipes) ~= "table" then return end
 
   local names = {}
   for name in pairs(data.recipes) do names[#names + 1] = name end
@@ -278,9 +284,11 @@ local function parseJustfile(path, entries, seen)
   end
 end
 
+-- M.dumps: path → decoded `just --dump` a caller built in the background
+-- (pal's warm-up); set only for the one parse() that uses it.
 local function parseJust(entries)
   local seen = {}
-  for _, path in ipairs(M.justfiles) do parseJustfile(path, entries, seen) end
+  for _, path in ipairs(M.justfiles) do parseJustfile(path, entries, seen, M.dumps and M.dumps[path]) end
 end
 
 -- ─── Source 3: launcher.lua's system / shell / daily commands ───
@@ -1093,16 +1101,22 @@ local function git(path, args)
 end
 
 -- 📁 dotfiles  🌿 master → origin  ✏️ 35  🕐 6 days ago
+-- The text only, from facts gathered elsewhere: pal gathers them in a
+-- background task, statusLine below with hs.execute.
+local function formatStatus(f, bell, branch, dirty, age)
+  bell = (bell ~= "" and bell ~= "0") and ("  ·  🔔" .. bell) or ""
+  if branch == "" then return f.icon .. " " .. f.name .. bell end
+  age = age:gsub(" ago", ""):gsub(" days?", "d"):gsub(" hours?", "h"):gsub(" minutes?", "m"):gsub(" weeks?", "w")
+  return ("%s %s  🌿 %s → origin  ✏️ %d  🕐 %s ago%s"):format(f.icon, f.name, branch, dirty, age, bell)
+end
+
 local function statusLine(f)
   local bell = trim(hs.execute(HOME .. "/.claude/reminders.sh count 2>/dev/null") or "")
-  bell = (bell ~= "" and bell ~= "0") and ("  ·  🔔" .. bell) or ""
   local branch = f.noGit and "" or git(f.path, "rev-parse --abbrev-ref HEAD")
-  if branch == "" then return f.icon .. " " .. f.name .. bell end
-  local dirty = #git(f.path, "status --porcelain") > 0
-      and select(2, git(f.path, "status --porcelain"):gsub("\n", "\n")) + 1 or 0
-  local age = git(f.path, "log -1 --format=%cr"):gsub(" ago", ""):gsub(" days?", "d"):gsub(" hours?", "h")
-      :gsub(" minutes?", "m"):gsub(" weeks?", "w")
-  return ("%s %s  🌿 %s → origin  ✏️ %d  🕐 %s ago%s"):format(f.icon, f.name, branch, dirty, age, bell)
+  if branch == "" then return formatStatus(f, bell, "") end
+  local porcelain = git(f.path, "status --porcelain")
+  local dirty = #porcelain > 0 and select(2, porcelain:gsub("\n", "\n")) + 1 or 0
+  return formatStatus(f, bell, branch, dirty, git(f.path, "log -1 --format=%cr"))
 end
 
 -- tmux window, because these want a real terminal; waits for a key so a fast
@@ -1117,9 +1131,10 @@ end
 -- Live rows a folder shows beneath its commands, read fresh on every open.
 M.EXTRA = {}
 
-function M.EXTRA.reminders(launcher)
+-- out: `reminders.sh list` output already fetched by the caller; nil runs it here.
+function M.EXTRA.reminders(launcher, out)
   local rows = {}
-  local out = hs.execute(HOME .. "/.claude/reminders.sh list 2>/dev/null") or ""
+  out = out or hs.execute(HOME .. "/.claude/reminders.sh list 2>/dev/null") or ""
   for line in out:gmatch("[^\n]+") do
     local slug, state, title = line:match("^(%S+)%s+%[(%w+)%]%s+(.*)$")
     if slug then
@@ -1274,5 +1289,6 @@ end
 
 -- modules/pal.lua (the webview palette) runs on the same data and verbs
 M.runEntry, M.iconFor, M.statusLine, M.parseJustfile = run, iconFor, statusLine, parseJustfile
+M.formatStatus = formatStatus
 
 return M
