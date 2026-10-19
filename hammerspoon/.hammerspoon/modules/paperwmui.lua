@@ -19,6 +19,7 @@ local CHEATSHEET = "file://" .. os.getenv("HOME") ..
     "/zettelkasten/claude_code/tools/paperwm-cheatsheet.html"
 
 local FLASH_SEC = 1.6
+local UNPINNED_ALPHA = 0.45
 
 M.menubar = nil
 M.pinned = false
@@ -172,6 +173,14 @@ function M.draw()
   local g = render.draw(s, { pinned = M.pinned, screen = M.screenForDraw() })
   M._geom = g
   interact.ensureAttached(render.canvas(), M.ctx)
+  -- the flash (unpinned) is a glanceable HUD: see-through and click-through so
+  -- it never steals a click from the window underneath. Pinned = full control.
+  local c = render.canvas()
+  c:alpha(M.pinned and 1 or UNPINNED_ALPHA)
+  if M.pinned ~= M.interactive then
+    M.interactive = M.pinned
+    if M.pinned then interact.attach(c, M.ctx) else c:mouseCallback(nil) end
+  end
 end
 
 -- ── refresh ─────────────────────────────────────────────────────

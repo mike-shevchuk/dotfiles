@@ -31,6 +31,7 @@ local KEY_LABEL = { ["return"] = "↩", space = "Space", delete = "⌫",
 local INTERNAL = {
   init = true, start = true, stop = true, load = true, save = true,
   parse = true, buildChoices = true, setup = true, bind = true,
+  commands = true, apps = true, -- launcher.lua feeds the palette; not commands themselves
 }
 
 -- Verbs that mean nothing alone: "Toggle" what? The module is the missing
@@ -282,6 +283,34 @@ local function parseJust(entries)
   for _, path in ipairs(M.justfiles) do parseJustfile(path, entries, seen) end
 end
 
+-- ─── Source 3: launcher.lua's system / shell / daily commands ───
+--
+-- The old launcher is merged in here. Its module toggles (Window, Audio,
+-- Display, Tools…) are skipped: Source 2 already finds those functions.
+local LAUNCHER_CATEGORY = {
+  Daily = "Daily", System = "System", Shell = "Shell",
+  Screenshot = "Screenshot", Trackpad = "Trackpad",
+}
+
+M._actions = {}
+
+local function addLauncherCommands(out)
+  local ok, launcher = pcall(require, "modules.launcher")
+  if not ok then return end
+  for _, c in ipairs(launcher.commands()) do
+    local head, tail = (c.subText or ""):match("^(%S+)%s*—?%s*(.*)$")
+    local cat = LAUNCHER_CATEGORY[head or ""]
+    if cat then
+      out[#out + 1] = {
+        kind = "action", title = c.text, category = cat, detail = tail ~= "" and tail or nil,
+        source = "launcher: " .. c.text,
+      }
+      -- functions cannot ride inside a chooser row (LuaSkin rejects the table)
+      M._actions["launcher: " .. c.text] = c.fn
+    end
+  end
+end
+
 -- ─── Build ──────────────────────────────────────────────────────
 
 function M.parse()
@@ -301,6 +330,7 @@ function M.parse()
   end
 
   parseJust(entries)
+  addLauncherCommands(entries)
 
   -- Remember where each command started out, so equally-used ones keep the
   -- order the files give them instead of shuffling on every parse.
@@ -505,8 +535,9 @@ local CATEGORY_ICON = {
   ["mirror"] = "🪞", ["disk"] = "💾", ["cheat"] = "📄", ["til"] = "💡",
   ["search"] = "🔍", ["night"] = "🌙", ["keyboard"] = "⌨️", ["archive"] = "🗄",
   ["launcher"] = "🚀", ["sidecar"] = "🪞", ["todoist"] = "☑️", ["linear"] = "📊",
+  ["daily"] = "⭐", ["shell"] = "💻", ["trackpad"] = "👆",
 }
-local KIND_ICON = { key = "⌨️", fn = "🔧", just = "▶️" }
+local KIND_ICON = { key = "⌨️", fn = "🔧", just = "▶️", action = "⚡" }
 
 local function iconFor(e)
   local name = (e.category or ""):lower()
@@ -517,9 +548,11 @@ local function iconFor(e)
 end
 
 local function rowFor(e)
+  local launcher = require("modules.launcher")
   local tail = e.detail and (e.category .. "  ·  " .. e.detail) or (e.category .. "  ·  " .. e.source)
   return {
-    text    = ("%s  %s%s"):format(iconFor(e), e.fav and "★ " or "", e.title),
+    text    = (e.fav and "★ " or "") .. e.title,
+    image   = launcher.emojiImage(iconFor(e)),
     subText = styled(e.chord or "no hotkey", e.chord and BLUE or GREY, tail),
     entry   = e,
   }
@@ -606,6 +639,12 @@ local function run(e)
     return M.runRecipe(e, "")
   end
 
+  if e.kind == "action" then
+    local ran, err = pcall(M._actions[e.source])
+    if not ran then hs.alert.show("Palette: " .. tostring(err), 4) end
+    return
+  end
+
   if e.kind == "key" then
     -- Replay the chord instead of calling the function, so guard and every
     -- other wrapper behaves exactly as when the keys are pressed.
@@ -648,6 +687,9 @@ function M.refresh()
   if v.kind == "windows" then M.showWindows()
   elseif v.kind == "cat" then M.showCategory(v.name)
   elseif v.kind == "all" then M.showAll()
+  elseif v.kind == "cats" then M.showCategories()
+  elseif v.kind == "folders" then M.showFolders()
+  elseif v.kind == "folder" then M.showFolder(v.idx)
   else M.show() end
 end
 
@@ -681,8 +723,9 @@ local MODES = {
 -- ⌥1…⌥6 jump straight to one and Tab walks them in order.
 
 M.TABS = {
-  { key = "1", name = "Categories", sigil = nil, root = true },
-  { key = "2", name = "All",        sigil = nil },
+  { key = "1", name = "Home",       sigil = nil, root = true },
+  { key = "2", name = "Folders",    folders = true },
+  { key = "3", name = "Categories", sigil = nil, cats = true },
   { key = "3", name = "Windows",    windows = true },
   { key = "4", name = "★ Starred",  sigil = "*" },
   { key = "5", name = "? Hotkeys",  sigil = "?" },
@@ -692,11 +735,7 @@ M.TABS = {
 M._tab = 1
 
 local function tabBar()
-  local out = {}
-  for i, t in ipairs(M.TABS) do
-    out[#out + 1] = (i == M._tab) and ("[" .. t.name .. "]") or t.name
-  end
-  return table.concat(out, "  ")
+  return ("%s  ·  Tab ⇥ views  ·  $ shell"):format(M.TABS[M._tab].name)
 end
 
 M._filter = nil
@@ -777,7 +816,7 @@ local function startTap()
       M.showTab(((M._tab - 1 + step) % #M.TABS) + 1)
       return true
     end
-    if flags.alt and key and key:match("^[1-6]$") then
+    if flags.alt and key and key:match("^[1-8]$") then
       M.showTab(tonumber(key))
       return true
     end
@@ -833,6 +872,17 @@ local function chooser()
       if w then w:focus() else hs.alert.show("That window is gone", 2) end
       return
     end
+    if choice.folder then
+      M._folder = choice.folder
+      hs.settings.set("PaletteFolder", M._folder)
+      return hs.timer.doAfter(0.05, function() M.showFolder(choice.folder) end)
+    end
+    if choice.goFolders then return hs.timer.doAfter(0.05, M.showFolders) end
+    if choice.tmux then return M.runInTmux(choice.tmux, choice.dir, choice.title) end
+    if choice.appPath then return hs.application.launchOrFocus(choice.appPath) end
+    if choice.shellCmd then
+      return hs.timer.doAfter(0.05, function() require("modules.launcher").runShell(choice.shellCmd) end)
+    end
     if choice.expose then return M.showAllWindows() end
     if choice.call then
       -- Pinned rows name their target rather than holding a reference, so the
@@ -870,6 +920,25 @@ local function chooser()
   end)
 
   M._chooser:queryChangedCallback(function(q)
+    -- "$ cmd" runs a shell command (the old launcher's ">" — ">" is "move" here)
+    local cmd = q:match("^%$%s*(.-)%s*$")
+    if cmd then
+      local launcher = require("modules.launcher")
+      local rows = {}
+      if cmd ~= "" then
+        rows[1] = { text = "Run: " .. cmd, image = launcher.emojiImage("💻"),
+                    subText = styled("Enter", BLUE, "run in a shell and show the output"), shellCmd = cmd }
+      end
+      for _, h in ipairs(hs.settings.get("launcher_shell_history") or {}) do
+        if cmd == "" or h:lower():find(cmd:lower(), 1, true) then
+          rows[#rows + 1] = { text = h, image = launcher.emojiImage("🕘"),
+                              subText = styled("history", GREY, ""), shellCmd = h }
+        end
+      end
+      M._shown = rows
+      M._chooser:choices(rows)
+      return
+    end
     local sigil, rest = q:match("^([%*!%?#/%+%->])(.*)$")
     if not sigil then
       -- Plain typing: filter the current view's rows ourselves.
@@ -887,9 +956,9 @@ local function chooser()
 
     M._filter = SIGILS[sigil]
     M._view = { kind = "all" }
-    local rows = { tabRow() }
+    local rows = {}
     for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
-    present(M._chooser, rows, ("%s — %d commands"):format(M._filter.name, #rows - 1))
+    present(M._chooser, rows, ("%s — %d commands"):format(M._filter.name, #rows))
     -- Dropping the sigil re-enters this callback with a plain query, which no
     -- longer matches here — so the filter stays and the typing filters within it.
     M._chooser:query(rest)
@@ -915,6 +984,8 @@ function M.showTab(i)
   if not tab then return end
   M._tab = i
   if tab.root then return M.show() end
+  if tab.cats then return M.showCategories() end
+  if tab.folders then return M.showFolders() end
   if tab.windows then return M.showWindows() end
   M._filter = tab.sigil and SIGILS[tab.sigil] or nil
   M.showAll()
@@ -925,7 +996,7 @@ end
 -- from a parse would be wrong within seconds.
 function M.showWindows()
   M._view = { kind = "windows" }
-  local rows = { tabRow() }
+  local rows = {}
 
   for _, w in ipairs(hs.window.orderedWindows()) do
     local app    = w:application() and w:application():name() or "?"
@@ -943,39 +1014,23 @@ function M.showWindows()
   end
 
   local ch = chooser()
-  present(ch, rows, tabBar() .. ("   ·   %d windows"):format(#rows - 1))
+  present(ch, rows, tabBar() .. ("   ·   %d windows"):format(#rows))
   ch:show()
 end
 
--- Root: the categories themselves.
-function M.show()
+-- Root categories view: the folders, for browsing instead of searching.
+function M.showCategories()
   if #M.entries == 0 then M.parse() end
-  M._view = { kind = "root" }
+  M._view = { kind = "cats" }
   local favs = M.favourites_list()
-
-  -- The things worth reaching for first, before the categories: someone who
-  -- remembers only this one chord should still find their way from here.
-  local rows = {
-    { text = "Cheatsheet — all commands and their keys", goTo = "all",
-      subText = styled(("%d"):format(#M.entries), BLUE, "one flat list; type a name, a chord or a module") },
-    { text = "Open a cheatsheet", call = { "cheatsheets", "show" },
-      subText = styled("⌃⌥⇧H", BLUE, "README sections, zettelkasten sheets, and this palette's own") },
-    { text = "Menu of this app", call = { "keyboard", "menuPalette" },
-      subText = styled("no mouse", BLUE, "every menu command of the front app, searchable") },
-    { text = "Click anything by keyboard", call = { "keyboard", "clickHints" },
-      subText = styled("⌃⌥⇧F", BLUE, "labels every button and link — type a label to press it") },
-    { text = "Move the cursor with keys", call = { "keyboard", "mouseKeys" },
-      subText = styled("no mouse", BLUE, "hjkl to move, space to click, esc to leave") },
-    { text = "Show all windows", expose = true,
-      subText = styled("Exposé", BLUE, "every window as a thumbnail, whatever the tiler did") },
-  }
-  table.insert(rows, 1, tabRow())
+  local rows = {}
 
   if #favs > 0 then
-    table.insert(rows, 2, { text = M.FAVOURITE, goTo = M.FAVOURITE,
-      subText = styled(("%d starred"):format(#favs), BLUE, "the ones you pinned with ⌘⇧F") })
+    rows[#rows + 1] = { text = M.FAVOURITE, goTo = M.FAVOURITE,
+      subText = styled(("%d starred"):format(#favs), BLUE, "the ones you pinned with → or ⌘⇧F") }
   end
 
+  local launcher = require("modules.launcher")
   for _, c in ipairs(M.categories) do
     -- A taste of what is inside, clipped hard: a long description here wraps
     -- the row onto a second line and the list stops being scannable.
@@ -988,20 +1043,203 @@ function M.show()
     rows[#rows + 1] = {
       text    = c.name,
       goTo    = c.name,
+      image   = launcher.emojiImage(iconFor({ category = c.name })),
       subText = styled(("%d cmds"):format(#c.items), BLUE, table.concat(names, ", ")),
     }
   end
 
   local ch = chooser()
-  present(ch, rows, M._mode and M._mode.hint or (tabBar() .. "   ·   ⌥1-7 / Tab"))
+  present(ch, rows, tabBar())
   ch:show()
+end
+
+-- ─── Folders ────────────────────────────────────────────────────
+--
+-- A folder is a context (a repo plus the commands that only make sense there).
+-- The status line is the one the shell prompt shows: branch, dirty count, age.
+local HOME = os.getenv("HOME")
+local FAST = HOME .. "/code/b2b/rescue-serverless/backend/src/lambdas/api/fast"
+local LEAD = "just --justfile justfile.v2 lead "
+
+M.FOLDERS = {
+  { name = "dotfiles", path = HOME .. "/dotfiles", icon = "📁", cmds = {} },
+  { name = "rescue-serverless", path = HOME .. "/code/b2b/rescue-serverless", icon = "🚑",
+    dir = FAST, cmds = {
+      { "🙋 mine",   "mine",   "what waits for YOU: decisions, permissions, tries before merge" },
+      { "🚦 devnow", "devnow", "what is on dev now: train + PR, DEV or STAGING, try lock" },
+      { "🛰 fleet",  "fleet",  "every window: doing, state, progress, next step" },
+      { "🧱 stuck",  "stuck",  "windows on a permission / paused try / silent > 1h" },
+      { "📜 trylog", "trylog", "last try run: steps, P1–Pn, alertId, flow" },
+    } },
+  { name = "projctl", path = HOME .. "/code/projctl", icon = "🛠", extra = "projects", noGit = true,
+    cmds = {
+      { "📊 status", "just -g proj status", "state · auto-start · port for every project" },
+      { "🌿 git",    "just -g proj git",    "unpushed / unpulled / dirty per project" },
+      { "🖥 tui",     "just -g proj tui",    "interactive dashboard" },
+      { "▶️ up all", "just -g proj up-all", "start every enabled project" },
+    } },
+  { name = "reminders", path = HOME, icon = "🔔", extra = "reminders", noGit = true,
+    cmds = {
+      { "➕ add",  "read -p 'slug: ' s; read -p 'title: ' t; just -g rem-add \"$s\" \"$t\"", "new reminder" },
+      { "✅ done", "just -g rem-done", "fzf-pick one → clears from 🔔" },
+      { "📚 all",  "just -g rem-all",  "including done" },
+    } },
+}
+M._folder = hs.settings.get("PaletteFolder") or 1
+
+local function git(path, args)
+  local out = hs.execute(("git -C '%s' %s 2>/dev/null"):format(path, args))
+  return trim(out or "")
+end
+
+-- 📁 dotfiles  🌿 master → origin  ✏️ 35  🕐 6 days ago
+local function statusLine(f)
+  local bell = trim(hs.execute(HOME .. "/.claude/reminders.sh count 2>/dev/null") or "")
+  bell = (bell ~= "" and bell ~= "0") and ("  ·  🔔" .. bell) or ""
+  local branch = f.noGit and "" or git(f.path, "rev-parse --abbrev-ref HEAD")
+  if branch == "" then return f.icon .. " " .. f.name .. bell end
+  local dirty = #git(f.path, "status --porcelain") > 0
+      and select(2, git(f.path, "status --porcelain"):gsub("\n", "\n")) + 1 or 0
+  local age = git(f.path, "log -1 --format=%cr"):gsub(" ago", ""):gsub(" days?", "d"):gsub(" hours?", "h")
+      :gsub(" minutes?", "m"):gsub(" weeks?", "w")
+  return ("%s %s  🌿 %s → origin  ✏️ %d  🕐 %s ago%s"):format(f.icon, f.name, branch, dirty, age, bell)
+end
+
+-- tmux window, because these want a real terminal; waits for a key so a fast
+-- command does not vanish before it can be read (same shape as runRecipe)
+function M.runInTmux(cmd, dir, title)
+  local inner = ("%s; printf \"\\n── done ── press enter\\n\"; read x"):format(cmd)
+  local sh = ("tmux new-window -n '%s' -c '%s' '%s' 2>&1"):format(title or "palette", dir or HOME, inner)
+  local _, ok = hs.execute(sh, true)
+  if not ok then hs.alert.show("Palette: no tmux session", 2) end
+end
+
+-- Live rows a folder shows beneath its commands, read fresh on every open.
+M.EXTRA = {}
+
+function M.EXTRA.reminders(launcher)
+  local rows = {}
+  local out = hs.execute(HOME .. "/.claude/reminders.sh list 2>/dev/null") or ""
+  for line in out:gmatch("[^\n]+") do
+    local slug, state, title = line:match("^(%S+)%s+%[(%w+)%]%s+(.*)$")
+    if slug then
+      rows[#rows + 1] = { text = title, tmux = "just -g rem-show " .. slug, dir = HOME, title = "rem",
+        image = launcher.emojiImage("🔔"), subText = styled(slug, BLUE, state) }
+    end
+  end
+  return rows
+end
+
+function M.EXTRA.projects(launcher)
+  local rows = {}
+  local f = io.open(HOME .. "/code/projctl/registry.conf")
+  if not f then return rows end
+  for line in f:lines() do
+    local name, _, session, port, _, on = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|(%d)")
+    if name then
+      local _, up = hs.execute(("tmux has-session -t '%s' 2>/dev/null"):format(session), true)
+      rows[#rows + 1] = { text = (up and "● " or "○ ") .. name,
+        tmux = "just -g proj attach " .. name, dir = HOME, title = name,
+        image = launcher.emojiImage(up and "🟢" or "⚪"),
+        subText = styled(up and "running" or "stopped", up and BLUE or GREY,
+          (port ~= "" and (":" .. port .. "  ") or "") .. (on == "1" and "auto-start" or "manual") .. "  ·  Enter attaches") }
+    end
+  end
+  f:close()
+  return rows
+end
+
+function M.showFolders()
+  M._view = { kind = "folders" }
+  local launcher = require("modules.launcher")
+  local rows = {}
+  for i, f in ipairs(M.FOLDERS) do
+    rows[#rows + 1] = { text = (i == M._folder and "▸ " or "") .. f.name, folder = i,
+      image = launcher.emojiImage(f.icon),
+      subText = styled(statusLine(f):gsub("^%S+ %S+%s*", ""), BLUE, i == M._folder and "current" or "") }
+  end
+  present(chooser(), rows, tabBar())
+  chooser():show()
+end
+
+-- Inside one folder: its own commands first, then the generic ones for a repo.
+function M.showFolder(i)
+  local f = M.FOLDERS[i]
+  if not f then return M.showFolders() end
+  M._view = { kind = "folder", idx = i }
+  local launcher = require("modules.launcher")
+  local rows = {
+    { text = statusLine(f), goFolders = true, image = launcher.emojiImage("🔀"),
+      subText = styled("Enter", BLUE, "switch folder") },
+  }
+  for _, c in ipairs(f.cmds) do
+    local full = f.dir and (LEAD .. c[2]) or c[2]
+    rows[#rows + 1] = { text = c[1], tmux = full, dir = f.dir or f.path,
+      title = c[2], image = launcher.emojiImage(c[1]:match("^(%S+)")),
+      subText = styled(c[2], BLUE, c[3]) }
+  end
+  if M.EXTRA[f.extra or ""] then
+    for _, r in ipairs(M.EXTRA[f.extra](launcher)) do rows[#rows + 1] = r end
+  end
+  for _, c in ipairs(f.noGit and {} or {
+    { "🌿 git status", "git status -sb", "short status" },
+    { "🧾 git log",    "git log --oneline -15", "last 15 commits" },
+  }) do
+    rows[#rows + 1] = { text = c[1], tmux = c[2], dir = f.path, title = "git",
+      image = launcher.emojiImage(c[1]:match("^(%S+)")), subText = styled("git", BLUE, c[3]) }
+  end
+  present(chooser(), rows, f.name .. "  ·  Tab ⇥ views")
+  chooser():show()
+end
+
+-- Home: one flat list you just type into — commands, helpers and every app —
+-- most-used first. No folders to open before you can find anything.
+local HELPERS = {
+  { text = "Open a cheatsheet", call = { "cheatsheets", "show" }, icon = "📄",
+    hint = "⌃⌥⇧H", sub = "README sections, zettelkasten sheets" },
+  { text = "Menu of this app", call = { "keyboard", "menuPalette" }, icon = "📋",
+    hint = "no mouse", sub = "every menu command of the front app" },
+  { text = "Click anything by keyboard", call = { "keyboard", "clickHints" }, icon = "🎯",
+    hint = "⌃⌥⇧F", sub = "labels every button and link" },
+  { text = "Move the cursor with keys", call = { "keyboard", "mouseKeys" }, icon = "🖱",
+    hint = "no mouse", sub = "hjkl to move, space to click" },
+  { text = "Show all windows", expose = true, icon = "🪟",
+    hint = "Exposé", sub = "every window as a thumbnail" },
+}
+
+local function homeRows()
+  local launcher = require("modules.launcher")
+  local rows = {}
+  if not M._filter then
+    local f = M.FOLDERS[M._folder] or M.FOLDERS[1]
+    rows[1] = { text = statusLine(f), folder = M.FOLDERS[M._folder] and M._folder or 1,
+      image = launcher.emojiImage("📂"), subText = styled("Enter", BLUE, "open this folder · Tab ⇥ Folders to switch") }
+  end
+  for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
+  if M._filter then return rows end -- a filtered tab is commands only
+
+  for _, h in ipairs(HELPERS) do
+    rows[#rows + 1] = { text = h.text, call = h.call, expose = h.expose,
+      image = launcher.emojiImage(h.icon), subText = styled(h.hint, BLUE, h.sub) }
+  end
+  for _, a in ipairs(launcher.apps()) do
+    rows[#rows + 1] = { text = a.text, appPath = a.path, image = launcher.appIcon(a.path),
+      subText = styled("App", GREY, a.path:match("^(.*)/[^/]+$")) }
+  end
+  return rows
+end
+
+function M.show()
+  M._filter = nil
+  M.showAll()
+  M._view = { kind = "root" }
 end
 
 function M.showCategory(name)
   if #M.entries == 0 then M.parse() end
   M._view = { kind = "cat", name = name }
 
-  local rows = { tabRow() }
+  local rows = {}
   if name == M.FAVOURITE then
     for _, e in ipairs(M.favourites_list()) do rows[#rows + 1] = rowFor(e) end
   else
@@ -1014,7 +1252,7 @@ function M.showCategory(name)
 
   local ch = chooser()
   present(ch, rows, M._mode and M._mode.hint
-    or ("%s — %d   ·   → star   ← archive   ⇧→ move"):format(name, #rows - 1))
+    or ("%s — %d   ·   → star   ← archive   ⇧→ move"):format(name, #rows))
   ch:show()
 end
 
@@ -1022,12 +1260,10 @@ function M.showAll()
   if #M.entries == 0 then M.parse() end
   M._view = { kind = "all" }
 
-  local rows = { tabRow() }
-  for _, e in ipairs(filtered()) do rows[#rows + 1] = rowFor(e) end
+  local rows = homeRows()
 
   local ch = chooser()
-  present(ch, rows, M._mode and M._mode.hint
-    or (tabBar() .. ("   ·   %d   ·   → star  ← archive  ⇧→ move"):format(#rows - 1)))
+  present(ch, rows, M._mode and M._mode.hint or tabBar())
   ch:show()
 end
 
