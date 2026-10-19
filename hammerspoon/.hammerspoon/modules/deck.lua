@@ -165,6 +165,33 @@ local function readFile(path)
   return data
 end
 
+-- Claude windows as numbers for the board's gauges: used %, elapsed % of the window, pace, tokens, reset
+local USAGE_CACHE = "/tmp/claude/statusline-usage-cache.json" -- written by statusline.sh
+local TOKENS_CACHE = "/tmp/claude/tokens-usage.txt"           -- line 1 = 5h tokens, line 2 = 7d
+local function isoEpoch(iso) -- "2026-10-21T18:59:59.7+00:00" (UTC) → epoch
+  local y, mo, d, h, mi, sec = (iso or ""):match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
+  if not y then return nil end
+  local t = { year = y, month = mo, day = d, hour = h, min = mi, sec = sec }
+  return os.time(t) + (os.time() - os.time(os.date("!*t")))
+end
+
+local function limitGauges()
+  local ok, u = pcall(hs.json.decode, readFile(USAGE_CACHE) or "")
+  if not ok or not u then return {} end
+  local tok = {}
+  for line in (readFile(TOKENS_CACHE) or ""):gmatch("[^\n]+") do tok[#tok + 1] = line:gsub("%s", "") end
+  local out, now = {}, os.time()
+  for i, w in ipairs({ { "5h", u.five_hour, 5 * 3600, "%H:%M" }, { "7d", u.seven_day, 7 * 86400, "%a %H:%M" } }) do
+    local reset = w[2] and isoEpoch(w[2].resets_at)
+    while reset and reset < now do reset = reset + w[3] end -- stale cache: that window already rolled over
+    local used = math.floor(tonumber(w[2] and w[2].utilization) or 0)
+    local e = reset and math.max(0, math.min(100, math.floor((1 - (reset - now) / w[3]) * 100))) or 0
+    out[i] = { k = w[1], u = used, e = e, pace = e > 1 and math.floor(used / e * 100 + 0.5) / 100 or 0,
+               tok = tok[i] or "", reset = reset and os.date(w[4], reset) or "" }
+  end
+  return out
+end
+
 -- next meetings: "● now 10:00 Standup", then "Tue 14:00 Review · in 25 min" for the next one
 local function calendarLines()
   local f = io.open(CAL_FILE)
@@ -200,9 +227,9 @@ local function state()
   for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
-    limits = limits, cpu = cpuPct(), ram = sysmonitor.ramPct(),
+    limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), board = M.boardVer,
   }
 end
 
@@ -215,18 +242,80 @@ local function isRule(line)
   return line ~= ""
 end
 
-local function pane(id)
-  local out = hs.execute(TMUX .. " capture-pane -p -J -S -60 -t '" .. id .. "'") or ""
-  local lines, blank = {}, false
-  for line in (out .. "\n"):gmatch("(.-)\n") do
-    line = line:gsub("%s+$", ""):gsub("   +", "  ") -- TUI padding wastes the 45-column screen
-    if isRule(line) and utf8.len(line) > 40 then line = line:sub(1, utf8.offset(line, 41) - 1) end
-    if line ~= "" or not blank then lines[#lines + 1] = line end
-    blank = line == ""
-  end
-  while #lines > 40 do table.remove(lines, 1) end
-  return { t = id, text = clean(table.concat(lines, "\n"), true) }
+-- ── terminal colors: tmux SGR → LVGL label recolor ("#rrggbb text#", a literal # is "##") ──
+local ANSI16 = { [0] = "4d4d4d", "f14c4c", "23d18b", "f5f543", "3b8eea", "d670d6", "29b8db", "cccccc",
+  "808080", "ff6e6e", "5af78e", "f4f99d", "6eb5ff", "ff92df", "9aedfe", "ffffff" }
+local function xterm256(n)
+  if n < 16 then return ANSI16[n] end
+  if n >= 232 then local v = 8 + (n - 232) * 10; return string.format("%02x%02x%02x", v, v, v) end
+  n = n - 16
+  local function c(x) return x == 0 and 0 or 55 + x * 40 end
+  return string.format("%02x%02x%02x", c(n // 36), c((n // 6) % 6), c(n % 6))
 end
+
+local function sgr(params, fg)
+  local p = {}
+  for n in (params .. ";"):gmatch("(%d*);") do p[#p + 1] = tonumber(n) or 0 end
+  local i = 1
+  while i <= #p do
+    local v = p[i]
+    if v == 0 or v == 39 then fg = nil
+    elseif v >= 30 and v <= 37 then fg = ANSI16[v - 30]
+    elseif v >= 90 and v <= 97 then fg = ANSI16[v - 82]
+    elseif v == 38 and p[i + 1] == 5 then fg = xterm256(p[i + 2] or 0); i = i + 2
+    elseif v == 38 and p[i + 1] == 2 then fg = string.format("%02x%02x%02x", p[i + 2] or 0, p[i + 3] or 0, p[i + 4] or 0); i = i + 4
+    elseif v == 48 then i = i + (p[i + 1] == 5 and 2 or 4) end -- background: skip its arguments
+    i = i + 1
+  end
+  -- near-black text would vanish on the black terminal
+  if fg and tonumber(fg:sub(1, 2), 16) + tonumber(fg:sub(3, 4), 16) + tonumber(fg:sub(5, 6), 16) < 120 then fg = nil end
+  return fg
+end
+
+local function recolor(line, fg)
+  local out, pos = {}, 1
+  local function emit(text)
+    text = clean(text, true)
+    if text == "" then return end
+    if fg then out[#out + 1] = "#" .. fg .. " " .. text:gsub("#", "####" .. fg .. " ") .. "#"
+    else out[#out + 1] = (text:gsub("#", "##")) end
+  end
+  while true do
+    local s, e, params = line:find("\27%[([%d;]*)m", pos)
+    if not s then break end
+    emit(line:sub(pos, s - 1))
+    fg = sgr(params, fg)
+    pos = e + 1
+  end
+  emit(line:sub(pos))
+  return table.concat(out), fg
+end
+
+local function pane(id, colors)
+  local out = hs.execute(TMUX .. " capture-pane -p -e -J -S -120 -t '" .. id .. "'") or ""
+  out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
+  local lines, blank, fg = {}, false, nil
+  for line in (out .. "\n"):gmatch("(.-)\n") do
+    line = line:gsub("%s+$", "")
+    local plain = line:gsub("\27%[[%d;]*m", "")
+    if isRule(plain) and utf8.len(plain) > 64 then line = plain:sub(1, utf8.offset(plain, 65) - 1) end
+    local empty = plain:match("^%s*$") ~= nil
+    if not empty or not blank then
+      if colors then
+        local colored
+        colored, fg = recolor(line, fg)
+        lines[#lines + 1] = colored
+      else
+        lines[#lines + 1] = clean(plain:gsub("   +", "  "), true)
+      end
+    end
+    blank = empty
+  end
+  while #lines > 100 do table.remove(lines, 1) end
+  return { t = id, text = table.concat(lines, "\n") }
+end
+
+M.pane = pane -- debug: hs -c to inspect one window
 
 local function currentSession()
   local s = hs.execute(TMUX .. " list-clients -F '#{client_session}' | head -1"):gsub("%s+", "")
@@ -265,12 +354,13 @@ local function handle(method, path, headers, body)
   local token = env.get("DECK_TOKEN")
   if not token or headers["X-Deck-Token"] ~= token then return reply("forbidden", 403) end
 
+  if headers["X-Deck-Ver"] then M.boardVer = headers["X-Deck-Ver"] end
   local route, qs = path:match("^([^?]*)%??(.*)$")
   local p = query(qs)
   local id = p.t and p.t:match("^@%d+$")
 
   if method == "GET" and route == "/state" then return reply(state(), 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1"), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
       if p.enter == "1" then task(TMUX, { "send-keys", "-t", id, "Enter" }) end
