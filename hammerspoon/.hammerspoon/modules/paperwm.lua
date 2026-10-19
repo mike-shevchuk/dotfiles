@@ -155,16 +155,16 @@ function M.start(autostart)
   -- Tiling anchors on the focused window. When that is a window PaperWM does
   -- not manage (Brave's Picture in Picture, a panel) it logs "anchor index not
   -- found", refreshes and bails WITHOUT tiling. Anchor on a managed window of
-  -- that space instead; a real-but-unadopted window still gets adopted first.
+  -- that space instead. Never refresh from in here: tileSpace runs inside
+  -- refreshWindows and PaperWM:start, and re-entering hs.window.filter mid-start
+  -- corrupts it ("attempt to call a nil value (method 'deactivated')"). An
+  -- unadopted window is picked up by PaperWM's own window watcher.
   local tile = M.pwm.tiling.tileSpace
   M.pwm.tiling.tileSpace = function(space, anchor)
     local st = M.pwm.state
     if not anchor and space then
       local f = hs.window.focusedWindow()
       if f and not st.windowIndex(f) and not M.pwm.floating.isFloating(f) then
-        if M.pwm.window_filter:isWindowAllowed(f) then
-          return M.pwm.windows.refreshWindows() -- adopts it, then tiles
-        end
         local col = st.windowList(space, 1)
         anchor = col and col[1]
       end
