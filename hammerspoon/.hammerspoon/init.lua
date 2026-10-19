@@ -210,6 +210,10 @@ end)
 -- Menubar: RAM% | pomodoro | caffeine, click for processes + controls
 sysmonitor.start()
 
+-- ─── ESP32 deck ────────────────────────────────────────────────
+-- HTTP :7777 for the ESP32-C5 touch board: dashboard state + button presses
+require("modules.deck").start()
+
 -- ─── Ctrl-tap-as-Escape ────────────────────────────────────────
 system.startCtrlEscape()
 
