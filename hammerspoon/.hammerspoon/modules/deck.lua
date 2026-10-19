@@ -6,6 +6,7 @@
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
+-- POST /log                 → board log lines + timings, appended to ~/Library/Logs/esp-deck.log (`just logs`)
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
 local M = {}
@@ -339,7 +340,7 @@ local function pane(id, colors, width)
     end
     blank = empty
   end
-  while #lines > 150 do table.remove(lines, 1) end
+  while #lines > 60 do table.remove(lines, 1) end -- the board re-renders all of it every second: keep it light
   return { t = id, text = table.concat(lines, "\n") }
 end
 
@@ -401,6 +402,14 @@ local function handle(method, path, headers, body)
   end
   local r = RECIPES[tonumber(p.r or "")]
   if method == "POST" and route == "/run" and r then return reply({ t = runRecipe(r) }, 200, true) end
+  if method == "POST" and route == "/log" then
+    local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
+    if f then
+      for line in (body or ""):gmatch("[^\n]+") do f:write(os.date("%H:%M:%S "), line, "\n") end
+      f:close()
+    end
+    return reply("ok", 200)
+  end
   if method == "POST" and route == "/mic" then
     if p.clear == "1" then voice = { state = "idle", text = "" }
     elseif p.down == "1" then micDown(p.lang)
