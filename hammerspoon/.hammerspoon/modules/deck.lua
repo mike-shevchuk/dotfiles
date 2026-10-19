@@ -7,6 +7,10 @@
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
 -- POST /log                 → board log lines + timings, appended to ~/Library/Logs/esp-deck.log (`just logs`)
+-- /state.hub, /state.proj    → recent hub pages, projctl projects (with their tmux state)
+-- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
+-- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
+-- POST /proj?n=NAME&a=up|down|restart → projctl
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
 local M = {}
@@ -72,12 +76,57 @@ local function task(cmd, args, cb)
   return t
 end
 
+local function readFile(path)
+  local f = io.open(path, "rb")
+  if not f then return nil end
+  local data = f:read("a")
+  f:close()
+  return data
+end
+
 -- ── slow sources, refreshed in the background ──
 local limits, rem = {}, {}
 local slowTick = 0
+local HUB_DIR = HOME .. "/zettelkasten/claude_code"
+local HUB_URL = "http://localhost:8890/"
+local PROJCTL = HOME .. "/code/projctl"
+local hub, projects = {}, {}
+
+local function refreshHub()
+  -- newest 30 pages (no .bak copies), title from <title>
+  task("/bin/sh", { "-c", "cd '" .. HUB_DIR .. "' && find . -name '*.html' ! -name '*.bak*' ! -name index.html "
+    .. "-mtime -90 -exec stat -f '%m %N' {} + | sort -rn | head -30" }, function(out)
+    local list = {}
+    for mtime, path in out:gmatch("(%d+) %./([^\n]+)") do
+      local f = io.open(HUB_DIR .. "/" .. path)
+      local head = f and f:read(4096) or ""
+      if f then f:close() end
+      local title = (head:match("<title>(.-)</title>") or path:match("([^/]+)%.html$"))
+        :gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"'):gsub("&#39;", "'")
+      list[#list + 1] = { path = path, t = clean(title):sub(1, 90), d = os.date("%d.%m", tonumber(mtime)),
+                          dir = clean(path:match("^([^/]+)") or "") }
+    end
+    hub = list
+  end)
+end
+
+local function refreshProjects()
+  -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
+  local list = {}
+  for line in (readFile(PROJCTL .. "/registry.conf") or ""):gmatch("[^\n]+") do
+    local name, _, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
+    if name then
+      local ok = os.execute(TMUX .. " has-session -t '=" .. session .. "' 2>/dev/null")
+      list[#list + 1] = { n = name, on = ok == true, port = port, auto = auto == "1" }
+    end
+  end
+  projects = list
+end
 
 local function refreshSlow()
   slowTick = slowTick + 1
+  refreshHub()
+  refreshProjects()
   if slowTick % 5 == 1 then -- calendar: DeckHelper writes CAL_FILE, state() reads it
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
@@ -158,14 +207,6 @@ local function micUp()
   end)
 end
 
-local function readFile(path)
-  local f = io.open(path, "rb")
-  if not f then return nil end
-  local data = f:read("a")
-  f:close()
-  return data
-end
-
 -- Claude windows as numbers for the board's gauges: used %, elapsed % of the window, pace, tokens, reset
 local USAGE_CACHE = "/tmp/claude/statusline-usage-cache.json" -- written by statusline.sh
 local TOKENS_CACHE = "/tmp/claude/tokens-usage.txt"           -- line 1 = 5h tokens, line 2 = 7d
@@ -230,7 +271,7 @@ local function state()
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), board = M.boardVer,
+    recipes = recipes, slash = SLASH, voice = voice, hub = hub, proj = projects, fw = readFile(FW_SHA), board = M.boardVer,
   }
 end
 
@@ -344,6 +385,52 @@ local function pane(id, colors, width)
   return { t = id, text = table.concat(lines, "\n") }
 end
 
+-- hub page → plain text: drop head/style/script, keep paragraphs / headings / list items as lines
+local ENT = { amp = "&", lt = "<", gt = ">", quot = '"', apos = "'", nbsp = " ", mdash = "—", ndash = "–", hellip = "…" }
+local function htmlText(html, lang)
+  -- bilingual hub pages: <x data-en>…</x><x data-ua>…</x> → keep one language; the ☰ menu lives in <details>
+  local drop = lang == "en" and "ua" or "en"
+  html = html:gsub("<(%w+)[^>]-data%-" .. drop .. "[^>]*>.-</%1>", ""):gsub("<details.-</details>", "")
+  html = html:gsub("<head.-</head>", ""):gsub("<style.-</style>", ""):gsub("<script.-</script>", "")
+  html = html:gsub("<nav.-</nav>", ""):gsub("<button.-</button>", ""):gsub("<select.-</select>", ""):gsub("<label.-</label>", "")
+  html = html:gsub("<br%s*/?>", "\n"):gsub("</p>", "\n\n"):gsub("<h%d[^>]*>", "\n\n"):gsub("</h%d>", "\n")
+  html = html:gsub("<li[^>]*>", "\n• "):gsub("</tr>", "\n"):gsub("</t[dh]>", "  "):gsub("</div>", "\n"):gsub("</pre>", "\n")
+  html = html:gsub("<[^>]+>", "")
+  html = html:gsub("&(%a+);", function(e) return ENT[e] or "" end)
+  html = html:gsub("&#(%d+);", function(n) return utf8.char(tonumber(n)) end)
+  local lines, blank = {}, true
+  for line in (html .. "\n"):gmatch("(.-)\n") do
+    line = line:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "")
+    if line ~= "" or not blank then lines[#lines + 1] = line end
+    blank = line == ""
+  end
+  return table.concat(lines, "\n")
+end
+
+-- plain multi-line text → board lines cut to width (no colours; # escaped for the recolor label)
+local function plainLines(text, width)
+  local out = {}
+  for line in (text .. "\n"):gmatch("(.-)\n") do
+    line = clean(line, true)
+    if line == "" then out[#out + 1] = "" end
+    -- break at the last space that fits (prose); wrap() still hard-cuts anything longer than a line
+    while line ~= "" do
+      local len = utf8.len(line)
+      if len <= width then
+        wrap({ { nil, line } }, width, out)
+        break
+      end
+      local cut = utf8.offset(line, width + 1)
+      local sp = line:sub(1, cut - 1):match(".*() ")
+      if not sp or sp < cut / 2 then sp = cut end
+      wrap({ { nil, line:sub(1, sp - 1) } }, width, out)
+      line = line:sub(sp):gsub("^ ", "")
+    end
+    if #out > 1500 then break end
+  end
+  return table.concat(out, "\n")
+end
+
 M.pane = pane -- debug: hs -c to inspect one window
 
 local function currentSession()
@@ -402,6 +489,31 @@ local function handle(method, path, headers, body)
   end
   local r = RECIPES[tonumber(p.r or "")]
   if method == "POST" and route == "/run" and r then return reply({ t = runRecipe(r) }, 200, true) end
+  local width = math.max(20, math.min(200, tonumber(p.w) or 53))
+  if method == "POST" and route == "/page" then
+    local h = hub[tonumber(p.i or "")]
+    if not h then return reply("not found", 404) end
+    local text = htmlText(readFile(HUB_DIR .. "/" .. h.path) or "", p.lang)
+    return reply({ title = h.t, text = plainLines(text, width) }, 200, true)
+  end
+  if method == "POST" and route == "/open" then
+    local h = hub[tonumber(p.i or "")]
+    if h then task("/usr/bin/open", { HUB_URL .. h.path }) end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/fleet" then
+    local out = hs.execute("PATH=" .. PATH .. ":$HOME/.pyenv/shims python3 " .. HOME .. "/.claude/scripts/lead.py fleet 2>&1") or ""
+    return reply({ title = "Fleet", text = plainLines(out:gsub("\27%[[%d;]*m", ""), width) }, 200, true)
+  end
+  if method == "POST" and route == "/proj" and p.n and ({ up = 1, down = 1, restart = 1 })[p.a] then
+    for _, pr in ipairs(projects) do
+      if pr.n == p.n then -- registry name only, never free text, reaches the shell
+        task("/opt/homebrew/bin/just", { "--justfile", PROJCTL .. "/justfile", "--working-directory", PROJCTL, p.a, pr.n },
+             function() refreshProjects() end)
+      end
+    end
+    return reply("ok", 200)
+  end
   if method == "POST" and route == "/log" then
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
     if f then
