@@ -164,7 +164,7 @@ guard.bind(hyper, "Z", gitpanel.toggle)
 
 -- ─── Launcher (command palette) ─────────────────────────────────
 -- Space = app launcher + commands with fuzzy search
-guard.bind(hyper, "Space", palette.open) -- one palette; launcher.lua now only feeds it
+guard.bind(hyper, "Space", require("modules.pal").toggle) -- webview palette (pal/); chooser palette stays on hyper2/⌃⌥⌘ Space
 
 -- ─── Bookmarks ──────────────────────────────────────────────────
 -- Q = quick URL bookmarks with fuzzy search
@@ -209,6 +209,10 @@ end)
 -- ─── System Monitor ────────────────────────────────────────────
 -- Menubar: RAM% | pomodoro | caffeine, click for processes + controls
 sysmonitor.start()
+
+-- ─── ESP32 deck ────────────────────────────────────────────────
+-- HTTP :7777 for the ESP32-C5 touch board: dashboard state + button presses
+require("modules.deck").start()
 
 -- ─── Ctrl-tap-as-Escape ────────────────────────────────────────
 system.startCtrlEscape()

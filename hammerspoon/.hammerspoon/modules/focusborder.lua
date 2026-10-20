@@ -83,10 +83,14 @@ function M.refresh()
 end
 
 -- windows animate into place, so repaint once the movement has landed
+-- One focus switch fires unfocused + focused (+ moved while it animates);
+-- painting on each was ~30 ms of blocked main thread per switch. Coalesce the
+-- burst into one paint, then one more once the movement has landed.
 local function refreshSoon()
-  M.refresh()
-  if M.settleTimer then M.settleTimer:stop() end
-  M.settleTimer = hs.timer.doAfter(0.28, M.refresh)
+  M.soon = M.soon or hs.timer.delayed.new(0.03, M.refresh)
+  M.soon:start()
+  M.settle = M.settle or hs.timer.delayed.new(0.28, M.refresh)
+  M.settle:start()
 end
 
 function M.toggle()

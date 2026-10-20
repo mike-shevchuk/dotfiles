@@ -279,6 +279,8 @@ function M.refresh()
     menubar:setMenu(menu)
 end
 
+function M.ramPct() return cachedRamPct end
+
 function M.start()
     local memStr = shellExec("sysctl -n hw.memsize")
     totalMemoryBytes = tonumber(memStr) or 0
