@@ -11,6 +11,9 @@
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
 -- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
+-- POST /deck                → Stream Deck pages from ~/.hammerspoon/deck.json (labels/icons/colors only)
+-- POST /act?d=PAGE&i=N  ·  /act?r=N&app=APP → run that deck / ring button's action (actions never leave the Mac)
+-- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
 -- POST /mac                 → now playing (Spotify / Music) + files selected in Finder + last conversion
 -- POST /media?k=play|next|prev|volup|voldown → media keys (also drive YouTube in the browser)
 -- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
@@ -262,22 +265,6 @@ local function calendarLines()
 end
 
 -- ── endpoints ──
-local function state()
-  local todo = {}
-  for i, t in ipairs(todoist.tasks or {}) do
-    if i > 6 then break end
-    -- ponytail: reuses the Todoist widget's cache; it only refreshes while that widget is shown
-    todo[#todo + 1] = clean(t.content:gsub("%[(.-)%]%(.-%)", "%1")):sub(1, 70)
-  end
-  local recipes = {}
-  for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
-  return {
-    time = os.date("%H:%M"), date = os.date("%a %d %b"),
-    limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), board = M.boardVer,
-  }
-end
 
 -- a TUI ─── rule (box-drawing + spaces only): wider than the board, so it would wrap into several lines
 local function isRule(line)
@@ -548,6 +535,112 @@ local function reply(body, code, json)
   return json and hs.json.encode(body) or body, code, h
 end
 
+-- ── deck.json: Stream Deck pages + per-app ring; reloaded when the file changes ──
+local DECK_FILE = HOME .. "/.hammerspoon/deck.json"
+local deckCfg, deckVer = { deck = {}, ring = {} }, ""
+local function loadDeck()
+  local raw = readFile(DECK_FILE) or "{}"
+  local ok, c = pcall(hs.json.decode, raw)
+  if ok and type(c) == "table" then
+    deckCfg, deckVer = c, hs.hash.MD5(raw)
+  else
+    print("deck.json: invalid JSON, keeping the previous buttons")
+  end
+end
+
+local function ringFor(app)
+  local r = deckCfg.ring or {}
+  return r[app] or r["*"] or {}, r[app] and app or "*"
+end
+
+local function strip(buttons) -- what the board needs: no actions
+  local out = {}
+  for i, b in ipairs(buttons or {}) do out[i] = { label = clean(b.label or ""), icon = b.icon, color = b.color } end
+  return out
+end
+
+local MODS = { cmd = "cmd", command = "cmd", shift = "shift", alt = "alt", option = "alt", opt = "alt", ctrl = "ctrl", control = "ctrl", fn = "fn" }
+local SYSKEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN", mute = "MUTE" }
+
+local function runAction(a, label)
+  if type(a) ~= "table" then return nil end
+  if a.app then hs.application.launchOrFocus(a.app) end
+  if a.keys then
+    local mods, key = {}, nil
+    for part in a.keys:gmatch("[^+]+") do
+      if MODS[part:lower()] then mods[#mods + 1] = MODS[part:lower()] else key = part end
+    end
+    if key then hs.eventtap.keyStroke(mods, key, 0) end
+  end
+  if a.media and SYSKEY[a.media] then
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[a.media], true):post()
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[a.media], false):post()
+  end
+  if a.url then task("/usr/bin/open", { a.url }) end
+  if a.sh then task("/bin/zsh", { "-lc", a.sh }) end
+  if a.lua then
+    local fn, err = load(a.lua)
+    if fn then pcall(fn) else print("deck lua: " .. tostring(err)) end
+  end
+  if a.convert then convert(macFiles, a.convert) end
+  if a.term then return runRecipe({ label or "deck", a.term }) end -- the board opens this tmux window
+end
+
+-- ── control panel (Raven-style): toggles, sliders, what needs you ──
+local function panelState()
+  local out, inp = hs.audiodevice.defaultOutputDevice(), hs.audiodevice.defaultInputDevice()
+  local notes = {}
+  for _, w in ipairs(sessions()) do
+    if w.claude and w.state == "waiting" then
+      notes[#notes + 1] = { icon = "bell", t = w.idx .. "  " .. w.name, s = "Claude is waiting for you", id = w.id }
+    end
+  end
+  for _, l in ipairs(calendarLines()) do
+    if l:find(" · in ") or l:find("^● ") then notes[#notes + 1] = { icon = "call", t = l, s = "calendar" } end
+  end
+  if #rem > 0 then notes[#notes + 1] = { icon = "warning", t = #rem .. " reminders", s = rem[1].t } end
+  local b = hs.brightness.get()
+  return {
+    vol = out and math.floor(out:outputVolume() or 0) or 0, muted = out and out:outputMuted() or false,
+    mic = inp and inp:inputMuted() or false, bright = b or -1,
+    dark = hs.host.interfaceStyle() == "Dark", awake = hs.caffeinate.get("displayIdle") or false,
+    np = macNP, notes = notes,
+  }
+end
+
+local function panelSet(key, v)
+  local out, inp = hs.audiodevice.defaultOutputDevice(), hs.audiodevice.defaultInputDevice()
+  if key == "vol" and out then out:setOutputVolume(v); out:setOutputMuted(false) end
+  if key == "bright" then hs.brightness.set(v) end
+  if key == "mic" and inp then inp:setInputMuted(not inp:inputMuted()) end
+  if key == "awake" then hs.caffeinate.toggle("displayIdle") end
+  if key == "sleep" then task("/usr/bin/pmset", { "displaysleepnow" }) end
+  if key == "dark" then
+    osa('tell application "System Events" to tell appearance preferences to set dark mode to not dark mode')
+  end
+end
+
+local frontName = ""
+local function state()
+  local fa = hs.application.frontmostApplication()
+  frontName = fa and fa:name() or ""
+  local todo = {}
+  for i, t in ipairs(todoist.tasks or {}) do
+    if i > 6 then break end
+    -- ponytail: reuses the Todoist widget's cache; it only refreshes while that widget is shown
+    todo[#todo + 1] = clean(t.content:gsub("%[(.-)%]%(.-%)", "%1")):sub(1, 70)
+  end
+  local recipes = {}
+  for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
+  return {
+    time = os.date("%H:%M"), date = os.date("%a %d %b"),
+    limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
+    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
+    front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
+  }
+end
+
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
@@ -584,6 +677,28 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/projlist" then
     refreshProjects()
     return reply({ proj = projects }, 200, true)
+  end
+  if method == "POST" and route == "/deck" then
+    local pages = {}
+    for i, pg in ipairs(deckCfg.deck or {}) do pages[i] = { page = clean(pg.page or ("Page " .. i)), buttons = strip(pg.buttons) } end
+    return reply({ pages = pages, v = deckVer }, 200, true)
+  end
+  if method == "POST" and route == "/act" then
+    local b
+    if p.d then
+      local pg = (deckCfg.deck or {})[tonumber(p.d) or 0]
+      b = pg and (pg.buttons or {})[tonumber(p.i) or 0]
+    elseif p.r then
+      b = (ringFor(p.app or ""))[tonumber(p.r) or 0]
+    end
+    if not b then return reply("no such button", 404) end
+    local t = runAction(b.action, b.label)
+    return reply({ t = t or "" }, 200, true)
+  end
+  if method == "POST" and route == "/panel" then
+    if p.set then panelSet(p.set, tonumber(p.v) or 0) end
+    refreshMac()
+    return reply(panelState(), 200, true)
   end
   if method == "POST" and route == "/mac" then
     local names = {}
@@ -652,6 +767,8 @@ end
 
 function M.start()
   if not M.viewer then startViewer() end
+  loadDeck()
+  M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
   refreshSlow()
   M.slowTimer = hs.timer.doEvery(20, refreshSlow)
   M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(handle):start()

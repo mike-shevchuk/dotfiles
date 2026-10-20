@@ -1,0 +1,100 @@
+{
+  "_help": "esp-deck buttons. Edit and save: the board picks it up within seconds, no flashing. action = one of: app (open/focus), keys (\"cmd+shift+4\"), media (play|next|prev|volup|voldown|mute), term (shell command in a new tmux window, the board opens it), sh (shell command in the background), url, lua (Hammerspoon code), convert (jpg|png|heic|pdf|gif|mp4|mp3|m4a — the Finder selection). icon = play pause next prev stop home settings ok close refresh edit image audio video list file folder wifi bell keyboard upload download trash save copy cut paste power loop shuffle plus minus eye hide charge gps call mail warning bluetooth usb drive volup voldown mute eject left right up down mic sun moon cloud bolt bars. color = #rrggbb.",
+
+  "deck": [
+    {
+      "page": "Main",
+      "buttons": [
+        { "label": "Ghostty",  "icon": "keyboard", "color": "#3987e5", "action": { "app": "Ghostty" } },
+        { "label": "Chrome",   "icon": "eye",      "color": "#199e70", "action": { "app": "Google Chrome" } },
+        { "label": "VS Code",  "icon": "edit",     "color": "#9085e9", "action": { "app": "Visual Studio Code" } },
+        { "label": "Obsidian", "icon": "file",     "color": "#d55181", "action": { "app": "Obsidian" } },
+        { "label": "Finder",   "icon": "folder",   "color": "#c98500", "action": { "app": "Finder" } },
+        { "label": "Pal",      "icon": "bars",     "color": "#383835", "action": { "lua": "require('modules.pal').toggle()" } },
+        { "label": "Shot",     "icon": "image",    "color": "#383835", "action": { "keys": "cmd+shift+4" } },
+        { "label": "Todoist",  "icon": "ok",       "color": "#383835", "action": { "lua": "require('modules.todoist').toggle()" } },
+        { "label": "Lock",     "icon": "power",    "color": "#d03b3b", "action": { "lua": "hs.caffeinate.lockScreen()" } },
+        { "label": "Prev",     "icon": "prev",     "color": "#242423", "action": { "media": "prev" } },
+        { "label": "Play",     "icon": "play",     "color": "#242423", "action": { "media": "play" } },
+        { "label": "Next",     "icon": "next",     "color": "#242423", "action": { "media": "next" } }
+      ]
+    },
+    {
+      "page": "Dev",
+      "buttons": [
+        { "label": "Fleet",     "icon": "list",     "color": "#3987e5", "action": { "term": "python3 ~/.claude/scripts/lead.py fleet" } },
+        { "label": "Stuck",     "icon": "warning",  "color": "#d95926", "action": { "term": "python3 ~/.claude/scripts/lead.py stuck" } },
+        { "label": "Reminders", "icon": "bell",     "color": "#c98500", "action": { "term": "just -g rem" } },
+        { "label": "PR stale",  "icon": "refresh",  "color": "#9085e9", "action": { "term": "just -g pr-stale" } },
+        { "label": "Git all",   "icon": "drive",    "color": "#199e70", "action": { "term": "just -g git-status-all" } },
+        { "label": "Tokens",    "icon": "charge",   "color": "#d55181", "action": { "term": "just -g tokens" } },
+        { "label": "Projects",  "icon": "folder",   "color": "#383835", "action": { "term": "cd ~/code/projctl && just status" } },
+        { "label": "Disk hogs", "icon": "trash",    "color": "#383835", "action": { "term": "just -g disk-hogs" } },
+        { "label": "Hub",       "icon": "upload",   "color": "#383835", "action": { "url": "http://localhost:8890/" } }
+      ]
+    }
+  ],
+
+  "ring": {
+    "*": [
+      { "label": "Mission",  "icon": "bars",    "action": { "keys": "ctrl+up" } },
+      { "label": "Spotlight","icon": "eye",     "action": { "keys": "cmd+space" } },
+      { "label": "Copy",     "icon": "copy",    "action": { "keys": "cmd+c" } },
+      { "label": "Paste",    "icon": "paste",   "action": { "keys": "cmd+v" } },
+      { "label": "Close",    "icon": "close",   "action": { "keys": "cmd+w" } },
+      { "label": "Shot",     "icon": "image",   "action": { "keys": "cmd+shift+4" } },
+      { "label": "Play",     "icon": "play",    "action": { "media": "play" } },
+      { "label": "Lock",     "icon": "power",   "action": { "lua": "hs.caffeinate.lockScreen()" } }
+    ],
+    "Google Chrome": [
+      { "label": "Back",     "icon": "left",    "action": { "keys": "cmd+[" } },
+      { "label": "Forward",  "icon": "right",   "action": { "keys": "cmd+]" } },
+      { "label": "Reload",   "icon": "refresh", "action": { "keys": "cmd+r" } },
+      { "label": "New tab",  "icon": "plus",    "action": { "keys": "cmd+t" } },
+      { "label": "Close tab","icon": "close",   "action": { "keys": "cmd+w" } },
+      { "label": "Reopen",   "icon": "loop",    "action": { "keys": "cmd+shift+t" } },
+      { "label": "DevTools", "icon": "settings","action": { "keys": "cmd+alt+i" } },
+      { "label": "Find",     "icon": "eye",     "action": { "keys": "cmd+f" } }
+    ],
+    "Ghostty": [
+      { "label": "New tab",  "icon": "plus",    "action": { "keys": "cmd+t" } },
+      { "label": "Close",    "icon": "close",   "action": { "keys": "cmd+w" } },
+      { "label": "Prev tab", "icon": "left",    "action": { "keys": "cmd+shift+[" } },
+      { "label": "Next tab", "icon": "right",   "action": { "keys": "cmd+shift+]" } },
+      { "label": "Clear",    "icon": "trash",   "action": { "keys": "cmd+k" } },
+      { "label": "Bigger",   "icon": "plus",    "action": { "keys": "cmd+=" } },
+      { "label": "Smaller",  "icon": "minus",   "action": { "keys": "cmd+-" } },
+      { "label": "Paste",    "icon": "paste",   "action": { "keys": "cmd+v" } }
+    ],
+    "Finder": [
+      { "label": "→ JPG",    "icon": "image",   "action": { "convert": "jpg" } },
+      { "label": "→ PNG",    "icon": "image",   "action": { "convert": "png" } },
+      { "label": "→ PDF",    "icon": "file",    "action": { "convert": "pdf" } },
+      { "label": "→ MP4",    "icon": "video",   "action": { "convert": "mp4" } },
+      { "label": "→ MP3",    "icon": "audio",   "action": { "convert": "mp3" } },
+      { "label": "New win",  "icon": "plus",    "action": { "keys": "cmd+n" } },
+      { "label": "Downloads","icon": "download","action": { "keys": "cmd+alt+l" } },
+      { "label": "Trash",    "icon": "trash",   "action": { "keys": "cmd+delete" } }
+    ],
+    "Code": [
+      { "label": "Palette",  "icon": "bars",    "action": { "keys": "cmd+shift+p" } },
+      { "label": "Open file","icon": "file",    "action": { "keys": "cmd+p" } },
+      { "label": "Terminal", "icon": "keyboard","action": { "keys": "ctrl+`" } },
+      { "label": "Search",   "icon": "eye",     "action": { "keys": "cmd+shift+f" } },
+      { "label": "Format",   "icon": "edit",    "action": { "keys": "shift+alt+f" } },
+      { "label": "Save",     "icon": "save",    "action": { "keys": "cmd+s" } },
+      { "label": "Git",      "icon": "drive",   "action": { "keys": "ctrl+shift+g" } },
+      { "label": "Close",    "icon": "close",   "action": { "keys": "cmd+w" } }
+    ],
+    "Obsidian": [
+      { "label": "Quick",    "icon": "file",    "action": { "keys": "cmd+o" } },
+      { "label": "New note", "icon": "plus",    "action": { "keys": "cmd+n" } },
+      { "label": "Search",   "icon": "eye",     "action": { "keys": "cmd+shift+f" } },
+      { "label": "Palette",  "icon": "bars",    "action": { "keys": "cmd+p" } },
+      { "label": "Back",     "icon": "left",    "action": { "keys": "cmd+alt+left" } },
+      { "label": "Forward",  "icon": "right",   "action": { "keys": "cmd+alt+right" } },
+      { "label": "Graph",    "icon": "gps",     "action": { "keys": "cmd+g" } },
+      { "label": "Close",    "icon": "close",   "action": { "keys": "cmd+w" } }
+    ]
+  }
+}
