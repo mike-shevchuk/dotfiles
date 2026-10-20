@@ -11,6 +11,9 @@
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
 -- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
+-- POST /mac                 → now playing (Spotify / Music) + files selected in Finder + last conversion
+-- POST /media?k=play|next|prev|volup|voldown → media keys (also drive YouTube in the browser)
+-- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
 local M = {}
@@ -386,6 +389,85 @@ local function pane(id, colors, width)
   return { t = id, text = table.concat(lines, "\n") }
 end
 
+-- ── Mac quick actions (Opie-style): now playing + convert what's selected in Finder ──
+local NP = {
+  Spotify = [[if application "Spotify" is running then tell application "Spotify" to return (player state as string) & "|" & name of current track & "|" & artist of current track & "|" & (player position as integer) & "|" & ((duration of current track) div 1000)]],
+  Music = [[if application "Music" is running then tell application "Music" to return (player state as string) & "|" & name of current track & "|" & artist of current track & "|" & (player position as integer) & "|" & ((duration of current track) as integer)]],
+}
+-- AppleScript runs in /usr/bin/osascript tasks (never on Hammerspoon's thread: an Automation prompt or a busy
+-- app would stall the whole deck server); /mac answers from these caches and kicks off a refresh
+local macNP, macFiles = nil, {}
+local function osa(script, cb) task("/usr/bin/osascript", { "-e", script }, cb) end
+
+local function refreshMac()
+  local found = {}
+  for _, app in ipairs({ "Spotify", "Music" }) do
+    osa(NP[app], function(out)
+      local st, title, artist, pos, dur = out:gsub("%s+$", ""):match("^(%w+)|(.-)|(.-)|(%d+)|(%d+)$")
+      found[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
+                            pos = tonumber(pos), dur = tonumber(dur) } or false
+      if found.Spotify ~= nil and found.Music ~= nil then
+        local sp, mu = found.Spotify, found.Music
+        macNP = (sp and sp.playing and sp) or (mu and mu.playing and mu) or sp or mu or nil
+      end
+    end)
+  end
+  osa([[tell application "Finder" to set s to selection as alias list
+set out to ""
+repeat with f in s
+  set out to out & POSIX path of f & linefeed
+end repeat
+return out]], function(out)
+    local files = {}
+    for path in out:gmatch("[^\n]+") do
+      if not path:match("/$") then files[#files + 1] = path end -- folders: no
+    end
+    macFiles = files
+  end)
+end
+
+local IMAGE = { jpg = 1, jpeg = 1, png = 1, heic = 1, tiff = 1, tif = 1, gif = 1, bmp = 1, webp = 1 }
+local MEDIA = { mov = 1, mp4 = 1, m4v = 1, avi = 1, mkv = 1, webm = 1, mp3 = 1, wav = 1, m4a = 1, aac = 1, flac = 1 }
+local SIPS_FMT = { jpg = "jpeg", png = "png", heic = "heic", gif = "gif", pdf = "pdf", tiff = "tiff" }
+local FFMPEG_FMT = { mp4 = 1, mp3 = 1, m4a = 1, gif = 1, wav = 1 }
+local conversion = ""
+
+local function freeName(base, ext)
+  local out, n = base .. "." .. ext, 1
+  while hs.fs.attributes(out) do out = base .. "-" .. n .. "." .. ext; n = n + 1 end
+  return out
+end
+
+local function convert(files, fmt)
+  local started, names = 0, {}
+  for _, src in ipairs(files) do
+    local base, ext = src:match("^(.*)%.([^./]+)$")
+    ext = ext and ext:lower()
+    local cmd, args
+    if ext and IMAGE[ext] and SIPS_FMT[fmt] then
+      local dst = freeName(base, fmt)
+      cmd, args = "/usr/bin/sips", { "-s", "format", SIPS_FMT[fmt], src, "--out", dst }
+      names[#names + 1] = dst:match("[^/]+$")
+    elseif ext and (MEDIA[ext] or ext == "gif") and FFMPEG_FMT[fmt] then
+      local dst = freeName(base, fmt)
+      args = { "-y", "-loglevel", "error", "-i", src }
+      if fmt == "gif" then for _, a in ipairs({ "-vf", "fps=12,scale=480:-1" }) do args[#args + 1] = a end end
+      if fmt == "mp3" or fmt == "m4a" or fmt == "wav" then args[#args + 1] = "-vn" end
+      args[#args + 1] = dst
+      cmd = "/opt/homebrew/bin/ffmpeg"
+      names[#names + 1] = dst:match("[^/]+$")
+    end
+    if cmd then
+      started = started + 1
+      task(cmd, args, function()
+        started = started - 1
+        if started == 0 then conversion = "✓ " .. table.concat(names, ", ") end
+      end)
+    end
+  end
+  conversion = started > 0 and ("converting " .. started .. " → " .. fmt:upper() .. "…") or ("nothing to convert to " .. fmt:upper())
+end
+
 -- hub page → plain text: drop head/style/script, keep paragraphs / headings / list items as lines
 local ENT = { amp = "&", lt = "<", gt = ">", quot = '"', apos = "'", nbsp = " ", mdash = "—", ndash = "–", hellip = "…" }
 local function htmlText(html, lang)
@@ -502,6 +584,25 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/projlist" then
     refreshProjects()
     return reply({ proj = projects }, 200, true)
+  end
+  if method == "POST" and route == "/mac" then
+    local names = {}
+    refreshMac() -- answer from the cache, refresh for the next call (~1 s later)
+    for i, f in ipairs(macFiles) do
+      if i > 8 then names[#names + 1] = "…"; break end
+      names[#names + 1] = clean(f:match("[^/]+$"))
+    end
+    return reply({ np = macNP, files = names, conv = clean(conversion) }, 200, true)
+  end
+  local MEDIA_KEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN" }
+  if method == "POST" and route == "/media" and MEDIA_KEY[p.k] then
+    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], true):post()
+    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], false):post()
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/convert" and (SIPS_FMT[p.f] or FFMPEG_FMT[p.f]) then
+    convert(macFiles, p.f)
+    return reply("ok", 200)
   end
   if method == "POST" and route == "/open" then
     local h = hub[tonumber(p.i or "")]
