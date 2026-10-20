@@ -132,9 +132,8 @@ end
 
 local function refreshSlow()
   slowTick = slowTick + 1
-  refreshHub()
-  refreshProjects()
-  if slowTick % 5 == 1 then -- calendar: DeckHelper writes CAL_FILE, state() reads it
+
+  if slowTick % 2 == 1 then -- calendar every ~2 min: DeckHelper writes CAL_FILE, state() reads it
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
   -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
@@ -173,9 +172,9 @@ local function cpuPct()
   return pct
 end
 
-local function sessions()
-  local out = hs.execute(TMUX .. " list-windows -a -F "
-    .. "'#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}\t#{pane_current_command}'") or ""
+-- tmux windows, cached: refreshed every 3 s by an async task so a /state request never forks tmux
+local sessionCache = {}
+local function parseSessions(out)
   local list = {}
   for line in out:gmatch("[^\n]+") do
     local id, idx, name, st, cmd = line:match("^(@%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
@@ -185,8 +184,13 @@ local function sessions()
       list[#list + 1] = { id = id, idx = idx, name = clean(name), state = st, claude = claude }
     end
   end
-  return list
+  sessionCache = list
 end
+local function refreshSessions()
+  task(TMUX, { "list-windows", "-a", "-F",
+    "#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}\t#{pane_current_command}" }, parseSessions)
+end
+local function sessions() return sessionCache end
 
 -- ── voice: DeckHelper.app records until SIGINT, then writes the transcript to VOICE_FILE ──
 local voice = { state = "idle", text = "" }
@@ -510,6 +514,10 @@ local function currentSession()
 end
 
 local function runRecipe(r)
+  -- one window per recipe: close the previous "deck:<label>" before opening a fresh one
+  for _, w in ipairs(sessions()) do
+    if w.name == clean("deck:" .. r[1]) then task(TMUX, { "kill-window", "-t", w.id }) end
+  end
   local id = hs.execute(TMUX .. " new-window -d -P -F '#{window_id}' -t '" .. currentSession() .. ":' -n 'deck:"
     .. r[1] .. "' \"" .. r[2] .. "; echo; read -sk '?done, any key closes'\" "):gsub("%s+", "")
   return id
@@ -697,7 +705,10 @@ local function handle(method, path, headers, body)
     return reply({ title = h.t, text = plainLines(text, width) }, 200, true)
   end
   -- heavy lists only when the board opens that tab (lazy), not in every 2-second /state
-  if method == "POST" and route == "/hub" then return reply({ hub = hub }, 200, true) end
+  if method == "POST" and route == "/hub" then
+    refreshHub() -- async: the board gets the cached list now, a fresh one on its next open
+    return reply({ hub = hub }, 200, true)
+  end
   if method == "POST" and route == "/projlist" then
     refreshProjects()
     return reply({ proj = projects }, 200, true)
@@ -794,9 +805,12 @@ end
 function M.start()
   if not M.viewer then startViewer() end
   loadDeck()
+  refreshHub() -- warm the cache once; later only when the board opens Hub
   M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
   refreshSlow()
-  M.slowTimer = hs.timer.doEvery(20, refreshSlow)
+  M.slowTimer = hs.timer.doEvery(60, refreshSlow) -- statusline.sh (bash + python) + reminders: once a minute is plenty
+  refreshSessions()
+  M.sessionTimer = hs.timer.doEvery(3, refreshSessions)
   M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(handle):start()
 end
 
