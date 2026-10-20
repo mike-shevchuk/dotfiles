@@ -36,6 +36,12 @@ local paperwmfit  = require("modules.paperwmfit")
 -- `hs -c "..."` CLI (binary comes from the hammerspoon brew formula)
 require("hs.ipc")
 
+-- ─── ESP32 deck ────────────────────────────────────────────────
+-- HTTP :7777 for the ESP32-C5 touch board. Started first and in pcall: an error further down
+-- (PaperWM, a module) must not take the board offline with it.
+local deckOk, deckErr = pcall(function() require("modules.deck").start() end)
+if not deckOk then print("deck: failed to start: " .. tostring(deckErr)) end
+
 -- ─── Master toggle (integrated into sysmonitor menubar) ─────────
 guard.start(true)
 
@@ -210,9 +216,6 @@ end)
 -- Menubar: RAM% | pomodoro | caffeine, click for processes + controls
 sysmonitor.start()
 
--- ─── ESP32 deck ────────────────────────────────────────────────
--- HTTP :7777 for the ESP32-C5 touch board: dashboard state + button presses
-require("modules.deck").start()
 
 -- ─── Ctrl-tap-as-Escape ────────────────────────────────────────
 system.startCtrlEscape()
