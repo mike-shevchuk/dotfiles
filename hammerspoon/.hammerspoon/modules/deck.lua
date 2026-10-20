@@ -587,6 +587,28 @@ local function runAction(a, label)
 end
 
 -- ── control panel (Raven-style): toggles, sliders, what needs you ──
+-- memory: the biggest processes (killable from the board, never system ones) + pressure + free disk
+local NO_KILL = { kernel_task = 1, WindowServer = 1, launchd = 1, loginwindow = 1, Hammerspoon = 1, Finder = 1, Dock = 1,
+  SystemUIServer = 1, coreaudiod = 1, mds = 1, mds_stores = 1, cfprefsd = 1, ["Claude Code"] = 1, claude = 1 }
+local topPids = {}
+local function memoryState()
+  local procs, pids = {}, {}
+  for pid, rss, cmd in (hs.execute("/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40") or ""):gmatch("%s*(%d+)%s+(%d+)%s+([^\n]+)") do
+    local name = cmd:match("([^/]+)$") or cmd
+    -- Claude Code shows up as its version ("2.1.303") or "claude …": quitting it would kill the sessions
+    local claude = name:match("^%d+%.%d+%.%d+$") or name:lower():match("^claude")
+    if not NO_KILL[name] and not claude and tonumber(pid) > 300 and #procs < 6 then
+      procs[#procs + 1] = { pid = tonumber(pid), name = clean(name):sub(1, 28), mb = math.floor(tonumber(rss) / 1024) }
+      pids[tonumber(pid)] = true
+    end
+  end
+  topPids = pids
+  local pressure = (hs.execute("/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level") or ""):gsub("%s", "")
+  local free = (hs.execute("/bin/df -g / | /usr/bin/awk 'NR==2{print $4}'") or ""):gsub("%s", "")
+  return { ram = sysmonitor.ramPct(), pressure = ({ ["1"] = "normal", ["2"] = "warning", ["4"] = "critical" })[pressure] or "?",
+           disk = tonumber(free) or 0, procs = procs }
+end
+
 local function panelState()
   local out, inp = hs.audiodevice.defaultOutputDevice(), hs.audiodevice.defaultInputDevice()
   local notes = {}
@@ -604,7 +626,7 @@ local function panelState()
     vol = out and math.floor(out:outputVolume() or 0) or 0, muted = out and out:outputMuted() or false,
     mic = inp and inp:inputMuted() or false, bright = b or -1,
     dark = hs.host.interfaceStyle() == "Dark", awake = hs.caffeinate.get("displayIdle") or false,
-    np = macNP, notes = notes,
+    np = macNP, notes = notes, mem = memoryState(),
   }
 end
 
@@ -615,6 +637,8 @@ local function panelSet(key, v)
   if key == "mic" and inp then inp:setInputMuted(not inp:inputMuted()) end
   if key == "awake" then hs.caffeinate.toggle("displayIdle") end
   if key == "sleep" then task("/usr/bin/pmset", { "displaysleepnow" }) end
+  if key == "kill" and topPids[v] then task("/bin/kill", { tostring(v) }) end -- only a pid the board was shown
+  if key == "hogs" then return runRecipe({ "disk hogs", "just -g disk-hogs" }) end
   if key == "dark" then
     osa('tell application "System Events" to tell appearance preferences to set dark mode to not dark mode')
   end
@@ -696,9 +720,11 @@ local function handle(method, path, headers, body)
     return reply({ t = t or "" }, 200, true)
   end
   if method == "POST" and route == "/panel" then
-    if p.set then panelSet(p.set, tonumber(p.v) or 0) end
+    local t = p.set and panelSet(p.set, tonumber(p.v) or 0)
     refreshMac()
-    return reply(panelState(), 200, true)
+    local st = panelState()
+    st.t = t -- disk hogs opens its tmux window on the board
+    return reply(st, 200, true)
   end
   if method == "POST" and route == "/mac" then
     local names = {}
