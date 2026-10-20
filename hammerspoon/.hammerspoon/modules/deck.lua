@@ -7,7 +7,7 @@
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
 -- POST /log                 → board log lines + timings, appended to ~/Library/Logs/esp-deck.log (`just logs`)
--- /state.hub, /state.proj    → recent hub pages, projctl projects (with their tmux state)
+-- POST /hub, /projlist      → recent hub pages, projctl projects (lazy: only when that tab opens)
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
 -- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
@@ -272,7 +272,7 @@ local function state()
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
-    recipes = recipes, slash = SLASH, voice = voice, hub = hub, proj = projects, fw = readFile(FW_SHA), board = M.boardVer,
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), board = M.boardVer,
   }
 end
 
@@ -496,6 +496,12 @@ local function handle(method, path, headers, body)
     if not h then return reply("not found", 404) end
     local text = htmlText(readFile(HUB_DIR .. "/" .. h.path) or "", p.lang)
     return reply({ title = h.t, text = plainLines(text, width) }, 200, true)
+  end
+  -- heavy lists only when the board opens that tab (lazy), not in every 2-second /state
+  if method == "POST" and route == "/hub" then return reply({ hub = hub }, 200, true) end
+  if method == "POST" and route == "/projlist" then
+    refreshProjects()
+    return reply({ proj = projects }, 200, true)
   end
   if method == "POST" and route == "/open" then
     local h = hub[tonumber(p.i or "")]
