@@ -90,6 +90,7 @@ local slowTick = 0
 local HUB_DIR = HOME .. "/zettelkasten/claude_code"
 local HUB_URL = "http://localhost:8890/"
 local PROJCTL = HOME .. "/code/projctl"
+local VIEWER = HOME .. "/code/esp-deck/viewer/server.mjs" -- headless-Chrome remote browser for the board (:7779)
 local hub, projects = {}, {}
 
 local function refreshHub()
@@ -103,7 +104,7 @@ local function refreshHub()
       if f then f:close() end
       local title = (head:match("<title>(.-)</title>") or path:match("([^/]+)%.html$"))
         :gsub("&amp;", "&"):gsub("&lt;", "<"):gsub("&gt;", ">"):gsub("&quot;", '"'):gsub("&#39;", "'")
-      list[#list + 1] = { path = path, t = clean(title):sub(1, 90), d = os.date("%d.%m", tonumber(mtime)),
+      list[#list + 1] = { path = path, url = HUB_URL .. path, t = clean(title):sub(1, 90), d = os.date("%d.%m", tonumber(mtime)),
                           dir = clean(path:match("^([^/]+)") or "") }
     end
     hub = list
@@ -531,7 +532,19 @@ local function handle(method, path, headers, body)
   return reply("not found", 404)
 end
 
+-- the remote browser lives as long as Hammerspoon; restart it if it dies
+local function startViewer()
+  M.viewer = hs.task.new("/bin/sh", function(code)
+    print("deck viewer exited " .. tostring(code) .. ", restarting in 5 s")
+    M.viewerTimer = hs.timer.doAfter(5, startViewer) -- keep a reference: an unreferenced timer gets collected
+  end, { "-c", "exec node " .. VIEWER .. " >> /tmp/deck-viewer.log 2>&1" })
+  M.viewer:setEnvironment({ PATH = PATH .. ":" .. HOME .. "/.local/share/mise/installs/node/latest/bin", HOME = HOME,
+                            DECK_TOKEN = env.get("DECK_TOKEN") or "" })
+  M.viewer:start()
+end
+
 function M.start()
+  if not M.viewer then startViewer() end
   refreshSlow()
   M.slowTimer = hs.timer.doEvery(20, refreshSlow)
   M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(handle):start()
