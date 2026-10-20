@@ -250,12 +250,20 @@ local function cmdItems()
   return out
 end
 
--- Apps with real icons. Encoding ~150 PNGs costs a second or two, so warm()
--- pays it in small chunks after Hammerspoon starts; until then a placeholder.
+-- Apps with real icons, as PNG files next to index.html: base64 data URLs made
+-- Home 1.3MB, re-encoded and re-parsed on every send. A file is written once
+-- (warm() does it a few per tick), then only stat()ed; until then a placeholder.
+hs.fs.mkdir(hs.configdir .. "/pal/icons")
 local iconURL = {}
+local homeDirty = true   -- some list Home is made of changed since it was last sent
 local function encodeIcon(a)
-  local img = launcher.appIcon(a.path)
-  iconURL[a.path] = img and img:setSize({ w = 64, h = 64 }):encodeAsURLString() or "🧭"
+  local rel = "icons/" .. hs.hash.MD5(a.path):sub(1, 16) .. ".png"
+  local file = hs.configdir .. "/pal/" .. rel
+  if not hs.fs.attributes(file) then
+    local img = launcher.appIcon(a.path)
+    if not (img and img:setSize({ w = 64, h = 64 }):saveToFile(file)) then rel = "🧭" end
+  end
+  iconURL[a.path] = rel
 end
 
 local function appItems()
@@ -346,8 +354,9 @@ end
 -- Folder builders take a callback; the cheap file-only ones answer at once.
 local function now(fn) return function(done) done(fn()) end end
 
+local SNIPPETS = hs.configdir .. "/pal/snippets.json"
 local function snippetItems()
-  local f = io.open(hs.configdir .. "/pal/snippets.json")
+  local f = io.open(SNIPPETS)
   if not f then return {} end
   local list = decode(f:read("a"))
   f:close()
@@ -781,6 +790,11 @@ function M.homeItems()
   return out, parts
 end
 
+-- Home's file-backed parts: an edit to either rebuilds it.
+local function homeKey()
+  return tostring(hs.fs.attributes(ZSHRC, "modification")) .. tostring(hs.fs.attributes(SNIPPETS, "modification"))
+end
+
 -- The page keeps every folder it was sent, so a set it already has is not
 -- sent again (every resend also resets the page's selection). And a list is
 -- encoded only when it changed: hs.json.encode costs ~45ms per MB, and Home
@@ -831,9 +845,11 @@ local function sendItems(payload, parts, sigs)
   end
 end
 
+local function folderSig(st, sigs) return st.line .. "\2" .. table.concat(sigs, "\2") end
+
 local function sendFolder(id, parts, st)
   local sigs = partSigs(parts)
-  local sig = st.line .. "\2" .. table.concat(sigs, "\2")
+  local sig = folderSig(st, sigs)
   if sent[id] == sig then return end
   sent[id] = sig
   sendItems({ type = "folder", id = id, status = st }, parts, sigs)
@@ -842,6 +858,11 @@ end
 function M.folder(id)
   local f = byId[id] or byId.home
   if f.id == "home" then
+    -- every open asks for Home; rebuilding ~2000 rows just to find them
+    -- unchanged froze HS ~100ms, so skip it unless something moved
+    local key = homeKey()
+    if sent.home and not homeDirty and key == M._homeKey then return end
+    homeDirty, M._homeKey = false, key
     local items, parts = M.homeItems()
     return sendFolder("home", parts, status(f, #items))
   end
@@ -853,7 +874,7 @@ function M.folder(id)
   loading[f.id] = os.time()
   loadFolder(f, function(items, line)
     loading[f.id] = nil
-    M._cache[f.id], M._status[f.id] = items, status(f, #items, line)
+    M._cache[f.id], M._status[f.id], homeDirty = items, status(f, #items, line), true
     sendFolder(f.id, { { f.id, items } }, M._status[f.id])
   end)
 end
@@ -1003,8 +1024,10 @@ end
 -- ─── Window ─────────────────────────────────────────────────────
 
 local function init()
-  sent = {}   -- a (re)loaded page has nothing yet
-  local _, parts = M.homeItems()
+  local items, parts = M.homeItems()
+  local sigs = partSigs(parts)
+  -- a (re)loaded page has nothing but this Home, so the open that follows sends nothing
+  sent, homeDirty, M._homeKey = { home = folderSig(status(byId.home, #items), sigs) }, false, homeKey()
   local folders = {}
   for _, f in ipairs(M.FOLDERS) do folders[#folders + 1] = { id = f.id, name = f.name, icon = f.icon, view = f.view } end
   local payload = { type = "init", folders = folders, usage = M.usage(), abbrev = M.abbrev(),
@@ -1012,18 +1035,18 @@ local function init()
   local s = settings()
   payload.settings = { theme = s.theme, header = s.header }
   payload.favs = s.favs
-  sendItems(payload, parts, partSigs(parts))
+  sendItems(payload, parts, sigs)
   -- Warm the network folders so Home and their first open are not empty;
   -- only the cache is filled, the page is not told until it asks.
   for _, f in ipairs(M.FOLDERS) do
-    if f.net then f.build(function(list) M._cache[f.id] = list end) end
+    if f.net then f.build(function(list) M._cache[f.id], homeDirty = list, true end) end
   end
 end
 
 function M.hide(refocus)
   if not (M.wv and M.wv:isVisible()) then return end
   M.wv:hide()
-  if refocus and M._prev then M._prev:focus() end
+  if refocus and M._prev then M._prev:activate() end
 end
 
 -- Stays open: the page re-ranks from the favs echoed back in settings.
@@ -1034,6 +1057,7 @@ local function toggleFav(id, h)
     favs[id] = (not favs[id]) or nil
     kvSet("fav", hs.json.encode(favs))
   end
+  homeDirty = true
   send(settings())
 end
 
@@ -1100,6 +1124,10 @@ local function create()
     :allowTextEntry(true)
     :shadow(true)
     :level(hs.drawing.windowLevels.modalPanel)
+    -- created ahead of time (warm), so it must follow you to whichever Space
+    -- you are on; otherwise it opens on the Space it was born on — invisible,
+    -- yet holding the keyboard, which looks exactly like a hang
+    :behavior(hs.drawing.windowBehaviors.moveToActiveSpace)
     :closeOnEscape(false)
     :deleteOnClose(false)
     :windowCallback(function(action, _, focused)
@@ -1113,12 +1141,14 @@ end
 function M.toggle()
   if M.wv and M.wv:isVisible() then return M.hide(true) end
   if not M.wv then create() end
-  M._prev = hs.window.focusedWindow()
-  local screen = (M._prev and M._prev:screen() or hs.screen.mainScreen()):frame()
+  -- No AX here: focusedWindow()/hswindow() ask the frontmost app over
+  -- Accessibility and stalled toggle 50-150ms. The app (NSWorkspace) is enough
+  -- to hand focus back; mainScreen is the screen of the focused window.
+  M._prev = hs.application.frontmostApplication()
+  local screen = hs.screen.mainScreen():frame()
   M.wv:frame({ x = screen.x + (screen.w - W) / 2, y = screen.y + (screen.h - H) / 2.6, w = W, h = H })
-  M.wv:show()
-  local win = M.wv:hswindow()
-  if win then win:focus() end
+  M.wv:show()   -- makes it key; activating Hammerspoon gives it the keyboard
+  hs.focus()
   send({ type = "open" })
 end
 
@@ -1130,9 +1160,13 @@ local function warmIcons(i)
   for j = i, math.min(i + 3, #M._apps) do if not iconURL[M._apps[j].path] then encodeIcon(M._apps[j]) end end
   if i + 4 <= #M._apps then M._warm = hs.timer.doAfter(0.02, function() warmIcons(i + 4) end); return end
   -- then encode Home's parts once, so init and Home only splice cached JSON
+  homeDirty = true
   M._warm = hs.timer.doAfter(0.02, function()
     local _, parts = M.homeItems()
     itemsJSON(parts, partSigs(parts))
+    -- build the (hidden) webview now too: creating it and loading the page
+    -- cost the first ⌥⇧Space ~1.5 s
+    M._warm = hs.timer.doAfter(0.02, function() if not M.wv then create() end end)
   end)
 end
 

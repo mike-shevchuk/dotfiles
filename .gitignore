@@ -43,3 +43,4 @@ projctl/code/projctl/projctl.log
 .env.bak*
 .lgtm/
 .playwright-mcp/
+hammerspoon/.hammerspoon/pal/icons/
