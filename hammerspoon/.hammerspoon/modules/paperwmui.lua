@@ -239,8 +239,11 @@ function M.start()
     hs.window.filter.windowCreated,
     hs.window.filter.windowDestroyed,
   }, function()
-    -- watchers fire before PaperWM finishes retiling; let it settle
-    hs.timer.doAfter(0.12, function()
+    -- watchers fire before PaperWM finishes retiling; let it settle. One
+    -- delayed timer, restarted per event: a focus switch fires several events
+    -- and each used to queue its own update — AX reads while the app is still
+    -- activating are slow (40–90 ms each), so read once, after it has landed.
+    M.settle = M.settle or hs.timer.delayed.new(0.25, function()
       M.update()
       -- only surface the map when the position actually moved, otherwise it
       -- pops up on every stray click
@@ -252,6 +255,7 @@ function M.start()
       end
       lastCol, lastTotal, lastFloat = col, total, nfloat
     end)
+    M.settle:start()
   end)
 
   M.update()
