@@ -9,8 +9,9 @@
 -- POST /log                 → board log lines + timings, appended to ~/Library/Logs/esp-deck.log (`just logs`)
 -- POST /hub, /projlist      → recent hub pages, projctl projects (lazy: only when that tab opens)
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
--- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
+-- POST /fleet?w=COLS        → compact `lead.py blockers --json` (who waits for Mike first; plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
+-- POST /spawn?p=NAME        → new window in that project's session running `claude "<body>"` → {"t":"@ID"}
 -- POST /deck                → Stream Deck pages from ~/.hammerspoon/deck.json (labels/icons/colors only)
 -- POST /act?d=PAGE&i=N  ·  /act?r=N&app=APP → run that deck / ring button's action (actions never leave the Mac)
 -- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
@@ -41,7 +42,7 @@ local SLASH = { "/mine", "/fleet", "/stuck", "/trylog", "/devnow", "/brief" }
 
 -- Recipes tab: { label, shell command } — each runs in a new tmux window the board then opens
 local RECIPES = {
-  { "fleet",      "just -g fleet plain=1" },
+  { "fleet",      "just -g fleet '' 1" }, -- positional: w (empty = pane width), plain
   { "rem",        "just -g rem" },
   { "pr-stale",   "just -g pr-stale" },
   { "git all",    "just -g git-status-all" },
@@ -74,6 +75,7 @@ local function clean(s, mono)
   if not mono then r = r:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "") end
   return r
 end
+local function cut(s, n) local o = utf8.offset(s, n + 1); return o and s:sub(1, o - 1) or s end -- never mid-UTF-8
 
 local function task(cmd, args, cb)
   local t = hs.task.new(cmd, function(_, out) if cb then cb(out or "") end end, args)
@@ -96,8 +98,7 @@ local slowTick = 0
 local HUB_DIR = HOME .. "/zettelkasten/claude_code"
 local HUB_URL = "http://localhost:8890/"
 local PROJCTL = HOME .. "/code/projctl"
-local VIEWER = HOME .. "/code/esp-deck/viewer/server.mjs" -- headless-Chrome remote browser for the board (:7779)
-local hub, projects = {}, {}
+local hub, projects, projWhere = {}, {}, {} -- projWhere[name] = { dir, session } for /spawn
 
 local function refreshHub()
   -- newest 30 pages (no .bak copies), title from <title>
@@ -119,15 +120,16 @@ end
 
 local function refreshProjects()
   -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
-  local list = {}
+  local list, where = {}, {}
   for line in (readFile(PROJCTL .. "/registry.conf") or ""):gmatch("[^\n]+") do
-    local name, _, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
+    local name, dir, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
     if name then
       local ok = os.execute(TMUX .. " has-session -t '=" .. session .. "' 2>/dev/null")
       list[#list + 1] = { n = name, on = ok == true, port = port, auto = auto == "1" }
+      where[name] = { dir = dir:gsub("^~", HOME), session = session }
     end
   end
-  projects = list
+  projects, projWhere = list, where
 end
 
 local function refreshSlow()
@@ -173,22 +175,39 @@ local function cpuPct()
 end
 
 -- tmux windows, cached: refreshed every 3 s by an async task so a /state request never forks tmux
-local sessionCache = {}
+local sessionCache, askCache = {}, {}
 local function parseSessions(out)
-  local list = {}
+  local list, asks, seen = {}, {}, {}
   for line in out:gmatch("[^\n]+") do
-    local id, idx, name, st, cmd = line:match("^(@%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
+    -- @agent_ask* come from agent-state.sh (Notification hook); the ask text is last, it may hold anything but \t/\n
+    local id, idx, name, st, cmd, kind, at, ask =
+      line:match("^(@%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
     if id then
       -- Claude Code shows up as its version ("2.1.301") in pane_current_command
       local claude = st ~= "" or cmd:match("^%d+%.%d+%.%d+$") ~= nil or cmd == "claude"
-      list[#list + 1] = { id = id, idx = idx, name = clean(name), state = st, claude = claude }
+      name = clean(name)
+      list[#list + 1] = { id = id, idx = idx, name = name, state = st, claude = claude }
+      if st == "waiting" and not seen[id] then -- a linked window is listed once per session; ask once
+        seen[id] = true
+        local ok, text = pcall(clean, ask) -- utf8.codes throws on invalid UTF-8; one bad window must not drop the list
+        asks[#asks + 1] = { id = id, idx = idx, name = name, kind = kind ~= "" and kind or "other",
+                            text = cut(ok and text or "", 160), at = tonumber(at) or os.time() }
+      end
     end
   end
-  sessionCache = list
+  table.sort(asks, function(a, b) return a.at < b.at end) -- oldest question first
+  sessionCache, askCache = list, { table.unpack(asks, 1, 5) }
 end
 local function refreshSessions()
-  task(TMUX, { "list-windows", "-a", "-F",
-    "#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}\t#{pane_current_command}" }, parseSessions)
+  task(TMUX, { "list-windows", "-a", "-F", "#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}"
+    .. "\t#{pane_current_command}\t#{@agent_ask_kind}\t#{@agent_ask_at}\t#{@agent_ask}" }, parseSessions)
+end
+local function asks()
+  local now, r = os.time(), {}
+  for i, a in ipairs(askCache) do
+    r[i] = { id = a.id, idx = a.idx, name = a.name, kind = a.kind, text = a.text, age = math.max(0, now - a.at) }
+  end
+  return r
 end
 local function sessions() return sessionCache end
 
@@ -482,7 +501,7 @@ local function htmlText(html, lang)
 end
 
 -- plain multi-line text → board lines cut to width (no colours; # escaped for the recolor label)
-local function plainLines(text, width)
+local function plainLines(text, width, fg)
   local out = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
     line = clean(line, true)
@@ -491,18 +510,61 @@ local function plainLines(text, width)
     while line ~= "" do
       local len = utf8.len(line)
       if len <= width then
-        wrap({ { nil, line } }, width, out)
+        wrap({ { fg, line } }, width, out)
         break
       end
       local cut = utf8.offset(line, width + 1)
       local sp = line:sub(1, cut - 1):match(".*() ")
       if not sp or sp < cut / 2 then sp = cut end
-      wrap({ { nil, line:sub(1, sp - 1) } }, width, out)
+      wrap({ { fg, line:sub(1, sp - 1) } }, width, out)
       line = line:sub(sp):gsub("^ ", "")
     end
     if #out > 1500 then break end
   end
   return table.concat(out, "\n")
+end
+
+-- compact fleet for the board (`lead.py blockers --json`): windows that wait for Mike first, ≤3 asks each
+local function fleetText(width)
+  local raw = hs.execute("PATH=" .. PATH .. ":$HOME/.pyenv/shims python3 " .. HOME .. "/.claude/scripts/lead.py blockers --json 2>/dev/null")
+  local ok, d = pcall(hs.json.decode, raw or "")
+  if not ok or not d then return "lead.py blockers failed:\n" .. plainLines(raw or "", width) end
+  local rows = d.rows or {}
+  local function asks(r) local a = {}; for _, x in ipairs(r.asks or {}) do a[#a + 1] = x end
+    for _, x in ipairs(r.need or {}) do a[#a + 1] = x end; return a end
+  table.sort(rows, function(a, b)
+    local na, nb = #asks(a) + #(a.plans or {}) > 0, #asks(b) + #(b.plans or {}) > 0
+    if na ~= nb then return na end
+    return (tonumber(a.i) or 0) < (tonumber(b.i) or 0)
+  end)
+  local L = {}
+  -- ind: wrapped lines of a bullet start under its text, not at column 0
+  local function add(text, fg, ind)
+    ind = ind or 0
+    L[#L + 1] = (plainLines(text, width - ind, fg):gsub("\n", "\n" .. (" "):rep(ind)))
+  end
+  add((d.session or "") .. "  " .. (d.ts or "") .. "   long-press = refresh", "808080")
+  for _, r in ipairs(rows) do
+    local a = asks(r)
+    local name = (r.name or ""):gsub("^.-│%S*%s*", "") -- drop the "🙋│🔵 " badge
+    add("")
+    add(r.win .. "  " .. name, (#a + #(r.plans or {}) > 0) and "f5f543" or "cccccc")
+    local meta = { r.state }
+    if r.pct then meta[#meta + 1] = r.pct .. "%" end
+    if (r.eta or "") ~= "" then meta[#meta + 1] = "ETA " .. r.eta end
+    add("  " .. table.concat(meta, " · "), "808080")
+    for k, x in ipairs(a) do
+      if k > 3 then add("  +" .. (#a - 3) .. " more", "808080"); break end
+      add("  • " .. cut(x:gsub("^%-%s*", ""):gsub("%*%*", ""), 160), "ff9e64", 4)
+    end
+    for _, pl in ipairs(r.plans or {}) do add("  plan " .. (pl.id or "?") .. " → «" .. (pl.say or "") .. "»", "6eb5ff") end
+  end
+  if #(d.extra or {}) > 0 then
+    add("")
+    add("Other", "f5f543")
+    for _, x in ipairs(d.extra) do add("  • " .. cut(x, 160), "cccccc", 4) end
+  end
+  return table.concat(L, "\n")
 end
 
 M.pane = pane -- debug: hs -c to inspect one window
@@ -520,6 +582,18 @@ local function runRecipe(r)
   end
   local id = hs.execute(TMUX .. " new-window -d -P -F '#{window_id}' -t '" .. currentSession() .. ":' -n 'deck:"
     .. r[1] .. "' \"" .. r[2] .. "; echo; read -sk '?done, any key closes'\" "):gsub("%s+", "")
+  return id
+end
+
+-- claude in a new window of the project's session; the task text never meets a shell
+local function spawnClaude(w, text)
+  local function q(s) return "'" .. s:gsub("'", "'\\''") .. "'" end -- registry values only, never the body
+  local has = os.execute(TMUX .. " has-session -t " .. q("=" .. w.session) .. " 2>/dev/null")
+  local cmd = has and ("new-window -d -t " .. q("=" .. w.session .. ":")) or ("new-session -d -s " .. q(w.session))
+  local id = hs.execute(TMUX .. " " .. cmd .. " -P -F '#{window_id}' -c " .. q(w.dir)):gsub("%s+", "")
+  if not id:match("^@%d+$") then return nil end
+  -- ≥2 command args → tmux execvp()s them directly: the body stays one argv, whatever it holds
+  task(TMUX, { "respawn-pane", "-k", "-t", id, "claude", text })
   return id
 end
 
@@ -667,7 +741,7 @@ local function state()
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
+    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
   }
@@ -762,8 +836,7 @@ local function handle(method, path, headers, body)
     return reply("ok", 200)
   end
   if method == "POST" and route == "/fleet" then
-    local out = hs.execute("PATH=" .. PATH .. ":$HOME/.pyenv/shims python3 " .. HOME .. "/.claude/scripts/lead.py fleet 2>&1") or ""
-    return reply({ title = "Fleet", text = plainLines(out:gsub("\27%[[%d;]*m", ""), width) }, 200, true)
+    return reply({ title = "Fleet", text = fleetText(width) }, 200, true)
   end
   if method == "POST" and route == "/proj" and p.n and ({ up = 1, down = 1, restart = 1 })[p.a] then
     for _, pr in ipairs(projects) do
@@ -773,6 +846,16 @@ local function handle(method, path, headers, body)
       end
     end
     return reply("ok", 200)
+  end
+  if method == "POST" and route == "/spawn" then
+    refreshProjects()
+    local w = projWhere[p.p or ""]
+    if not w then return reply("unknown project", 400) end
+    if not (body or ""):match("%S") then return reply("empty task", 400) end -- voice that wasn't recognised
+    local id = spawnClaude(w, body)
+    if not id then return reply("tmux failed", 500) end
+    refreshSessions()
+    return reply({ t = id }, 200, true)
   end
   if method == "POST" and route == "/log" then
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
@@ -791,19 +874,7 @@ local function handle(method, path, headers, body)
   return reply("not found", 404)
 end
 
--- the remote browser lives as long as Hammerspoon; restart it if it dies
-local function startViewer()
-  M.viewer = hs.task.new("/bin/sh", function(code)
-    print("deck viewer exited " .. tostring(code) .. ", restarting in 5 s")
-    M.viewerTimer = hs.timer.doAfter(5, startViewer) -- keep a reference: an unreferenced timer gets collected
-  end, { "-c", "exec node " .. VIEWER .. " >> /tmp/deck-viewer.log 2>&1" })
-  M.viewer:setEnvironment({ PATH = PATH .. ":" .. HOME .. "/.local/share/mise/installs/node/latest/bin", HOME = HOME,
-                            DECK_TOKEN = env.get("DECK_TOKEN") or "" })
-  M.viewer:start()
-end
-
 function M.start()
-  if not M.viewer then startViewer() end
   loadDeck()
   refreshHub() -- warm the cache once; later only when the board opens Hub
   M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
