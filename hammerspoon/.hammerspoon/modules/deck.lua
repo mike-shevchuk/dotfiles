@@ -2,7 +2,7 @@
 -- GET  /state               → dashboard, tmux sessions, recipes, voice state (JSON)
 -- GET  /pane?t=@ID          → last lines of that tmux window
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
--- POST /key?t=@ID&k=Enter   → one whitelisted tmux key
+-- POST /key?t=@ID&k=Enter   → one whitelisted tmux key (Escape to a Claude window also marks it done)
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
@@ -11,6 +11,7 @@
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
 -- POST /fleet?w=COLS        → compact `lead.py blockers --json` (who waits for Mike first; plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
+-- POST /chat?t=@ID&n=N      → that window's Claude conversation, oldest first: {"msgs":[{"r":"u|a|t","x":"…"}]}
 -- POST /spawn?p=NAME        → new window in that project's session running `claude "<body>"` → {"t":"@ID"}
 -- POST /deck                → Stream Deck pages from ~/.hammerspoon/deck.json (labels/icons/colors only)
 -- POST /act?d=PAGE&i=N  ·  /act?r=N&app=APP → run that deck / ring button's action (actions never leave the Mac)
@@ -29,6 +30,7 @@ local todoist = require("modules.todoist")
 local PORT = 7777
 local HOME = os.getenv("HOME")
 local TMUX = "/opt/homebrew/bin/tmux"
+local AGENT_STATE = HOME .. "/dotfiles/tmux/scripts/agent-state.sh" -- Claude hook; `chat` reads a session JSONL
 local STATUSLINE = HOME .. "/.claude/statusline.sh"
 local REMINDERS = HOME .. "/.claude/reminders.sh"
 local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
@@ -176,47 +178,79 @@ end
 
 -- tmux windows, cached: refreshed every 3 s by an async task so a /state request never forks tmux
 local sessionCache, askCache = {}, {}
+local tailCache, fetchTail = {}, nil -- id → the terminal above Claude's dialog, for an ask with no ctx (fetchTail is defined below isRule)
+-- the hook's JSON array of strings → cleaned, utf8-safe, each ≤ n chars
+local function strList(json, n)
+  local out, ok, arr = {}, pcall(hs.json.decode, json)
+  for _, l in ipairs(ok and type(arr) == "table" and arr or {}) do
+    local cok, c = pcall(clean, tostring(l))
+    out[#out + 1] = cut(cok and c or "", n)
+  end
+  return out
+end
+local function safeClean(s, n) -- utf8.codes throws on invalid UTF-8; one bad window must not drop the list
+  local ok, c = pcall(clean, s)
+  return cut(ok and c or "", n)
+end
+-- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
+local FIELDS = { "window_id", "session_name}:#{window_index", "window_name", "@agent_state", "pane_current_command",
+  "@agent_ask_kind", "@agent_ask_at", "@agent_ask_opts", "@agent_ask_multi", "@agent_ask_n", "@agent_ask_descs",
+  "@agent_ask_head", "@agent_ask_ctx", "@agent_ask" }
 local function parseSessions(out)
   local list, asks, seen = {}, {}, {}
   for line in out:gmatch("[^\n]+") do
-    -- @agent_ask* come from agent-state.sh (Notification hook); the ask text is last, it may hold anything but \t/\n
-    local id, idx, name, st, cmd, kind, at, ask =
-      line:match("^(@%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
-    if id then
+    local f = {}
+    for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
+    local id, idx, name, st, cmd, kind, at, opts, multi, nq, descs, head, ctx, ask = table.unpack(f, 1, #FIELDS)
+    if id and id:match("^@%d+$") and ask then
       -- Claude Code shows up as its version ("2.1.301") in pane_current_command
       local claude = st ~= "" or cmd:match("^%d+%.%d+%.%d+$") ~= nil or cmd == "claude"
       name = clean(name)
       list[#list + 1] = { id = id, idx = idx, name = name, state = st, claude = claude }
       if st == "waiting" and not seen[id] then -- a linked window is listed once per session; ask once
         seen[id] = true
-        local ok, text = pcall(clean, ask) -- utf8.codes throws on invalid UTF-8; one bad window must not drop the list
         asks[#asks + 1] = { id = id, idx = idx, name = name, kind = kind ~= "" and kind or "other",
-                            text = cut(ok and text or "", 160), at = tonumber(at) or os.time() }
+                            text = safeClean(ask, 160), at = tonumber(at) or os.time(),
+                            opts = strList(opts, 40), multi = multi == "true", nq = tonumber(nq) or 1,
+                            descs = strList(descs, 80), head = safeClean(head, 40), ctx = safeClean(ctx, 600) }
       end
     end
   end
-  table.sort(asks, function(a, b) return a.at < b.at end) -- oldest question first
+  local rank = { permission = 1, choice = 2 }
+  table.sort(asks, function(a, b) -- permission, then choice, then the rest; oldest first within each
+    local ra, rb = rank[a.kind] or 3, rank[b.kind] or 3
+    if ra ~= rb then return ra < rb end
+    return a.at < b.at
+  end)
   sessionCache, askCache = list, { table.unpack(asks, 1, 5) }
+  local tails = {}
+  for _, a in ipairs(askCache) do
+    if a.ctx == "" then tails[a.id] = tailCache[a.id] or ""; fetchTail(a.id) end
+  end
+  tailCache = tails
 end
 local function refreshSessions()
-  task(TMUX, { "list-windows", "-a", "-F", "#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}"
-    .. "\t#{pane_current_command}\t#{@agent_ask_kind}\t#{@agent_ask_at}\t#{@agent_ask}" }, parseSessions)
+  task(TMUX, { "list-windows", "-a", "-F", "#{" .. table.concat(FIELDS, "}\t#{") .. "}" }, parseSessions)
 end
 local function asks()
   local now, r = os.time(), {}
   for i, a in ipairs(askCache) do
-    r[i] = { id = a.id, idx = a.idx, name = a.name, kind = a.kind, text = a.text, age = math.max(0, now - a.at) }
+    r[i] = { id = a.id, idx = a.idx, name = a.name, kind = a.kind, text = a.text, age = math.max(0, now - a.at),
+             opts = a.opts, multi = a.multi, nq = a.nq, descs = a.descs, head = a.head, ctx = a.ctx,
+             tail = tailCache[a.id] }
   end
   return r
 end
 local function sessions() return sessionCache end
 
 -- ── voice: DeckHelper.app records until SIGINT, then writes the transcript to VOICE_FILE ──
+-- (while recording it keeps the partial transcript in VOICE_FILE .. ".partial" → /state.voice.text)
 local voice = { state = "idle", text = "" }
 local voiceTimer
 
 local function micDown(lang)
   os.remove(VOICE_FILE)
+  os.remove(VOICE_FILE .. ".partial")
   voice = { state = "rec", text = "" }
   task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "listen", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
 end
@@ -296,6 +330,25 @@ local function isRule(line)
     if cp ~= 32 and (cp < 0x2500 or cp > 0x257F) then return false end
   end
   return line ~= ""
+end
+
+-- the screen above Claude's dialog / input box (its first ─ or ╌ rule in the bottom 30 lines): ≤ 12 lines, ≤ 600 chars
+fetchTail = function(id)
+  task(TMUX, { "capture-pane", "-p", "-J", "-t", id }, function(out)
+    local lines = {}
+    for l in (out .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = (l:gsub("%s+$", "")) end
+    local stop = #lines + 1
+    for i = math.max(1, #lines - 30), #lines do
+      if isRule(lines[i]) then stop = i; break end
+    end
+    local keep = {}
+    for i = 1, stop - 1 do
+      local ok, c = pcall(clean, lines[i])
+      if ok and c ~= "" then keep[#keep + 1] = c end
+    end
+    local text = table.concat(keep, "\n", math.max(1, #keep - 11))
+    if tailCache[id] then tailCache[id] = (text:sub(-600):gsub("^[\128-\191]+", "")) end -- bytes; never mid-UTF-8
+  end)
 end
 
 -- ── terminal colors: tmux SGR → LVGL label recolor ("#rrggbb text#", a literal # is "##") ──
@@ -597,6 +650,35 @@ local function spawnClaude(w, text)
   return id
 end
 
+-- /chat, cached like sessions: answer from the cache at once, refresh async (≤1 per 2 s per window),
+-- forget a window nobody asked about for 60 s — two sync hs.execute here froze HS ~10% of the time
+local chatCache = {}
+local function chat(id, n)
+  local now = os.time()
+  for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
+  local e = chatCache[id] or { fetched = 0 }
+  chatCache[id], e.asked = e, now
+  if not e.busy and now - e.fetched >= 2 then
+    e.busy, e.fetched = true, now
+    local function done(d) e.data, e.busy = d, false end
+    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
+      local path = out:gsub("%s+$", "")
+      if path == "" then return done({ msgs = {}, err = "no transcript" }) end
+      -- the hook keeps the session JSONL per window; agent-state.sh chat turns it into u/a/t lines
+      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(30, n or 15))) }, function(raw)
+        local ok, d = pcall(hs.json.decode, raw)
+        if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
+        for _, m in ipairs(d.msgs or {}) do -- mono clean keeps the newlines of a chat bubble
+          local cok, c = pcall(clean, tostring(m.x), true)
+          m.x = cut((cok and c or ""):gsub("^%s+", ""), 500) -- the 🔧/❓ the board can't draw leave a space
+        end
+        done(d)
+      end)
+    end)
+  end
+  return e.data or { msgs = {}, wait = true }
+end
+
 local function query(qs)
   local p = {}
   for k, v in (qs or ""):gmatch("([^&=]+)=([^&]*)") do
@@ -728,6 +810,7 @@ end
 
 local frontName = ""
 local function state()
+  if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
   frontName = fa and fa:name() or ""
   local todo = {}
@@ -767,6 +850,17 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/key" and id and validKey(p.k) then
     task(TMUX, { "send-keys", "-t", id, p.k })
+    -- Escape interrupts Claude (the board's "Ні" too) and an interrupt fires no Stop hook: without this the window
+    -- would keep its answered ask / "working" for good. agent-state.sh done drops them (the hook wants $TMUX)
+    if p.k == "Escape" then
+      for _, w in ipairs(sessionCache) do
+        if w.id == id and w.state ~= "" then
+          task("/bin/sh", { "-c", 'TMUX="$(tmux display -p "#{socket_path}"),0,0" TMUX_PANE="$1" "$0" done </dev/null',
+                                   AGENT_STATE, id })
+          break
+        end
+      end
+    end
     return reply("ok", 200)
   end
   local r = RECIPES[tonumber(p.r or "")]
@@ -847,6 +941,7 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
+  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n)), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
     local w = projWhere[p.p or ""]
