@@ -3,12 +3,15 @@
 # tmux window with @agent_state (⏳ working / 💤 waiting for the lead / ✅ in the window list). No-op outside tmux.
 # On waiting it also keeps the Notification's question for the deck: @agent_ask (one line, ≤300 chars),
 # @agent_ask_kind (permission|idle|other), @agent_ask_at (epoch s); any other state drops all of them.
+# Only a permission dialog (or AskUserQuestion, below) sets @agent_state waiting; the default idle_prompt is ignored.
 # PreToolUse of AskUserQuestion ("working" + that tool_name) is a question too: kind choice, plus
 # @agent_ask_opts (JSON array of ≤6 labels, ≤40 chars each), @agent_ask_multi (true|false), @agent_ask_n (questions),
 # @agent_ask_descs (JSON array parallel to opts, ≤80 chars each), @agent_ask_head (questions[0].header).
 # Every call keeps @agent_transcript (the session JSONL); a question also gets @agent_ask_ctx = the assistant's
 # last text (≤600 chars, newlines → " · "). PreToolUse keeps @agent_tool ("Bash: <cmd>"): a permission ask shows it.
 # agent-state.sh chat <transcript> [n] → {"msgs":[{r:u|a|t, x}]} for the deck's chat panel (no tmux needed).
+# agent-state.sh info <transcript>... → what each agent is doing / its last summary / context tokens (deck's sessions).
+# Every event also stamps @agent_at (epoch s).
 
 # a tool call {name, input} in one line: "Bash: <first line ≤80>" / "Edit: <file_path>" / "Name"
 TOOL='if .name == "Bash" then "Bash: " + ((.input.command // "") | split("\n")[0] | .[:80])
@@ -35,6 +38,24 @@ if [ "$1" = chat ]; then
   exit 0
 fi
 
+if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing ≤60, sum ≤140, tok, model} on one line
+  shift
+  for f; do
+    [ -r "$f" ] || continue
+    tail -n 300 "$f" | jq -nc --arg f "$f" '
+      def lines: [splits("\n") | gsub("\\*\\*|`"; "") | sub("^#+\\s*"; "") | gsub("^\\s+|\\s+$"; "") | sub("^([-*•]|\\d+\\.)\\s+"; "") | select(. != "")];
+      [inputs | select((.isSidechain // false | not) and (.isMeta // false | not))] as $l
+      | ([$l[] | select(.type == "assistant" and .message.usage)] | last | .message) as $m
+      | [$l[] | '"$TURNS"' | select(.r != "u")] as $t
+      | {f: $f,
+         doing: ($t | last // {r: "a", x: ""} | if .r == "t" then .x | sub("^(🔧|❓) "; "") else (.x | lines | .[0] // "") end | .[:60]),
+         sum: ([$t[] | select(.r == "a")] | last | .x // "" | lines | .[:2] | join(" · ") | .[:140]),
+         tok: ($m.usage // {} | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)),
+         model: ($m.model // "")}' 2>/dev/null
+  done
+  exit 0
+fi
+
 [ -n "${TMUX:-}" ] && [ -n "${TMUX_PANE:-}" ] || exit 0
 w=(-w -t "$TMUX_PANE")
 ASK=(@agent_ask @agent_ask_kind @agent_ask_at @agent_ask_opts @agent_ask_multi @agent_ask_n
@@ -54,6 +75,10 @@ in=$(cat)
 state=$1
 tr=$(jq -r '.transcript_path // ""' <<<"$in" 2>/dev/null)
 [ -n "$tr" ] && put @agent_transcript "$tr"
+# resting at the prompt (idle_prompt's default text, ~1 min after Stop) is no event: not waiting, asks nothing
+[ "$state" = waiting ] && [ "$(jq -r '.notification_type + "|" + .message' <<<"$in" 2>/dev/null)" = \
+  "idle_prompt|Claude is waiting for your input" ] && exit 0
+put @agent_at "$(date +%s)" # last event: the deck's age
 if [ "$state" = working ] && [ "$(jq -r '.tool_name // ""' <<<"$in" 2>/dev/null)" = AskUserQuestion ]; then
   q='.tool_input.questions'
   put @agent_state waiting
@@ -69,7 +94,6 @@ if [ "$state" = working ] && [ "$(jq -r '.tool_name // ""' <<<"$in" 2>/dev/null)
   exit 0
 fi
 
-tmux set "${w[@]}" @agent_state "$state" 2>/dev/null
 if [ "$state" = waiting ]; then
   # a Notification while an AskUserQuestion is open must not overwrite its options
   [ "$(tmux show -wv -t "$TMUX_PANE" @agent_ask_kind 2>/dev/null)" = choice ] && exit 0
@@ -78,11 +102,14 @@ if [ "$state" = waiting ]; then
       (.message // "" | gsub("[\t\n\r]"; " ") | .[:300])' <<<"$in" 2>/dev/null)
   # permission_prompt's message is just "Claude needs your permission" — the PreToolUse before it says what for
   [ "$kind" = permission ] && tool=$(tmux show -wv -t "$TMUX_PANE" @agent_tool 2>/dev/null) && [ -n "$tool" ] && ask=$tool
+  # only an open dialog is "waiting"; an idle / other Notification keeps its text as an ask, the state stays
+  [ "$kind" = permission ] && put @agent_state waiting
   put @agent_ask "$ask"
   put @agent_ask_kind "${kind:-other}"
   put @agent_ask_ctx "$(ctx)"
   put @agent_ask_at "$(date +%s)"
 else
+  put @agent_state "$state"
   clear_ask
   # the tool about to run: a permission prompt that follows names it
   [ "$state" = working ] && t=$(jq -r "select(.tool_name) | {name: .tool_name, input: .tool_input} | $TOOL | gsub(\"[\\t\\r]\"; \" \")" <<<"$in" 2>/dev/null) \

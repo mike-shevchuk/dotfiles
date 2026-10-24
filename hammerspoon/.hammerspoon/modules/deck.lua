@@ -1,6 +1,6 @@
 -- ESP32 deck: HTTP API for the Waveshare ESP32-C5 touch board (firmware + web simulator: ~/code/esp-deck)
 -- GET  /state               → dashboard, tmux sessions, recipes, voice state (JSON)
--- GET  /pane?t=@ID          → last lines of that tmux window
+-- GET  /pane?t=@ID[&m=clean] → last lines of that tmux window (clean: no Claude chrome, turns marked \1u / \1a)
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
 -- POST /key?t=@ID&k=Enter   → one whitelisted tmux key (Escape to a Claude window also marks it done)
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
@@ -12,6 +12,7 @@
 -- POST /fleet?w=COLS        → compact `lead.py blockers --json` (who waits for Mike first; plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
 -- POST /chat?t=@ID&n=N      → that window's Claude conversation, oldest first: {"msgs":[{"r":"u|a|t","x":"…"}]}
+-- POST /net?r=day|month|year → minutes on the home LAN per device, top 15: {"r":"day","top":[{name,mac,min}]}
 -- POST /spawn?p=NAME        → new window in that project's session running `claude "<body>"` → {"t":"@ID"}
 -- POST /deck                → Stream Deck pages from ~/.hammerspoon/deck.json (labels/icons/colors only)
 -- POST /act?d=PAGE&i=N  ·  /act?r=N&app=APP → run that deck / ring button's action (actions never leave the Mac)
@@ -26,6 +27,7 @@ local M = {}
 local env = require("modules.env")
 local sysmonitor = require("modules.sysmonitor")
 local todoist = require("modules.todoist")
+local paneclean = require("modules.paneclean")
 
 local PORT = 7777
 local HOME = os.getenv("HOME")
@@ -34,6 +36,7 @@ local AGENT_STATE = HOME .. "/dotfiles/tmux/scripts/agent-state.sh" -- Claude ho
 local STATUSLINE = HOME .. "/.claude/statusline.sh"
 local REMINDERS = HOME .. "/.claude/reminders.sh"
 local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
+local NET_DIR = HOME .. "/Library/Application Support/esp-deck" -- net-day|month|year.json (top 15), written by launchd: `just netscan` in esp-deck
 local VOICE_FILE = "/tmp/deck-voice.txt"
 local CAL_FILE = "/tmp/deck-cal.json"
 local FW_SHA = "/tmp/deck-ota.sha" -- written by `just ota`; the board updates when it differs from its own
@@ -181,6 +184,7 @@ local sessionCache, askCache = {}, {}
 local tailCache, fetchTail = {}, nil -- id → the terminal above Claude's dialog, for an ask with no ctx (fetchTail is defined below isRule)
 -- the hook's JSON array of strings → cleaned, utf8-safe, each ≤ n chars
 local function strList(json, n)
+  if json:sub(1, 1) ~= "[" then return {} end -- "" (no ask): hs.json.decode logs an ERROR even inside pcall
   local out, ok, arr = {}, pcall(hs.json.decode, json)
   for _, l in ipairs(ok and type(arr) == "table" and arr or {}) do
     local cok, c = pcall(clean, tostring(l))
@@ -195,22 +199,62 @@ end
 -- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
 local FIELDS = { "window_id", "session_name}:#{window_index", "window_name", "@agent_state", "pane_current_command",
   "@agent_ask_kind", "@agent_ask_at", "@agent_ask_opts", "@agent_ask_multi", "@agent_ask_n", "@agent_ask_descs",
-  "@agent_ask_head", "@agent_ask_ctx", "@agent_ask" }
+  "@agent_ask_head", "@agent_ask_ctx", "@agent_transcript", "@agent_at", "@agent_ctx_max", "pane_current_path", "@agent_ask" }
+-- transcript path → { mtime, doing, sum, tok, model } from `agent-state.sh info`, re-read only when the file changed
+local infoCache = {}
+local function refreshInfo(list)
+  local keep, stale = {}, {}
+  for _, w in ipairs(list) do
+    if w.tr ~= "" and not keep[w.tr] then
+      local e = infoCache[w.tr] or {}
+      keep[w.tr] = e
+      local m = hs.fs.attributes(w.tr, "modification") -- a stat, no fork
+      if m and m ~= e.mtime then e.mtime = m; stale[#stale + 1] = w.tr end
+    end
+  end
+  infoCache = keep
+  if #stale == 0 then return end
+  task(AGENT_STATE, { "info", table.unpack(stale) }, function(out)
+    for line in out:gmatch("[^\n]+") do
+      local ok, d = pcall(hs.json.decode, line)
+      local e = ok and type(d) == "table" and infoCache[d.f]
+      if e then
+        e.doing, e.sum, e.tok, e.model = safeClean(d.doing, 60), safeClean(d.sum, 140), tonumber(d.tok) or 0, d.model or ""
+      end
+    end
+  end)
+end
+local ST_RANK = { waiting = 1, done = 2, working = 3, idle = 4 }
+local IDLE_TEXT = "Claude is waiting for your input" -- idle_prompt's default: resting at the prompt, not a question
+-- which hook-kept asks reach the board: an open dialog; an "other" Notification ≤ 1 h; an idle one with real text ≤ 10 min
+local function isAsk(st, kind, text, age)
+  if kind == "permission" or kind == "choice" then return st == "waiting" end
+  if kind == "idle" then return text ~= IDLE_TEXT and text ~= "" and age <= 600 end
+  return kind == "other" and age <= 3600
+end
 local function parseSessions(out)
   local list, asks, seen = {}, {}, {}
   for line in out:gmatch("[^\n]+") do
     local f = {}
     for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
-    local id, idx, name, st, cmd, kind, at, opts, multi, nq, descs, head, ctx, ask = table.unpack(f, 1, #FIELDS)
-    if id and id:match("^@%d+$") and ask then
+    local id, idx, name, st, cmd, kind, at, opts, multi, nq, descs, head, ctx, tr, aat, cmax, cwd, ask =
+      table.unpack(f, 1, #FIELDS)
+    -- a window linked into several sessions (W42 / w42) comes once per session: keep its first, like the asks
+    if id and id:match("^@%d+$") and ask and not seen[id] then
+      seen[id] = true
       -- Claude Code shows up as its version ("2.1.301") in pane_current_command
       local claude = st ~= "" or cmd:match("^%d+%.%d+%.%d+$") ~= nil or cmd == "claude"
       name = clean(name)
-      list[#list + 1] = { id = id, idx = idx, name = name, state = st, claude = claude }
-      if st == "waiting" and not seen[id] then -- a linked window is listed once per session; ask once
-        seen[id] = true
+      -- tmux's automatic-rename calls a Claude window by its version: the project folder says more
+      if name == "" or name:match("^%d+%.%d+%.%d+$") or name:lower() == "claude" then
+        name = clean(cwd:match("([^/]+)/*$") or name)
+      end
+      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr,
+                          at = tonumber(aat), cmax = tonumber(cmax), n = #list }
+      local askAt = tonumber(at) or os.time()
+      if isAsk(st, kind, ask, os.time() - askAt) then
         asks[#asks + 1] = { id = id, idx = idx, name = name, kind = kind ~= "" and kind or "other",
-                            text = safeClean(ask, 160), at = tonumber(at) or os.time(),
+                            text = safeClean(ask, 160), at = askAt,
                             opts = strList(opts, 40), multi = multi == "true", nq = tonumber(nq) or 1,
                             descs = strList(descs, 80), head = safeClean(head, 40), ctx = safeClean(ctx, 600) }
       end
@@ -221,6 +265,25 @@ local function parseSessions(out)
     local ra, rb = rank[a.kind] or 3, rank[b.kind] or 3
     if ra ~= rb then return ra < rb end
     return a.at < b.at
+  end)
+  -- st: waiting only with an open dialog; at the prompt = done for 30 min after the last event, then idle
+  refreshInfo(list)
+  local now = os.time()
+  for _, w in ipairs(list) do
+    if w.claude then
+      w.at = w.at or (infoCache[w.tr] or {}).mtime -- @agent_at comes with the next hook event; until then the transcript's
+      if w.state == "working" then w.st = "working"
+      elseif w.state == "waiting" and (w.kind == "permission" or w.kind == "choice") then w.st = "waiting"
+      else w.st = w.at and now - w.at <= 1800 and "done" or "idle" end
+    end
+  end
+  -- Claude agents waiting → done → working → idle, the latest event first; other windows after them in tmux order
+  local function rank(w) return w.claude and ST_RANK[w.st] or 5 end
+  table.sort(list, function(a, b)
+    local ra, rb = rank(a), rank(b)
+    if ra ~= rb then return ra < rb end
+    if ra < 5 and (a.at or 0) ~= (b.at or 0) then return (a.at or 0) > (b.at or 0) end
+    return a.n < b.n
   end)
   sessionCache, askCache = list, { table.unpack(asks, 1, 5) }
   local tails = {}
@@ -241,7 +304,25 @@ local function asks()
   end
   return r
 end
-local function sessions() return sessionCache end
+local function sessions()
+  local now, r = os.time(), {}
+  for i, w in ipairs(sessionCache) do
+    local s = { id = w.id, idx = w.idx, name = w.name, state = w.state, claude = w.claude }
+    if w.claude then
+      local e = infoCache[w.tr] or {}
+      s.st = w.st
+      s.age = w.at and math.max(0, now - w.at) or nil
+      s.doing = e.doing
+      if e.tok and e.tok > 0 then
+        local max = w.cmax or ((e.model:find("[1m]", 1, true) or e.tok > 200000) and 1000000 or 200000)
+        s.ctx = math.floor(e.tok * 100 / max + 0.5)
+      end
+      if s.st == "done" then s.sum = e.sum end
+    end
+    r[i] = s
+  end
+  return r
+end
 
 -- ── voice: DeckHelper.app records until SIGINT, then writes the transcript to VOICE_FILE ──
 -- (while recording it keeps the partial transcript in VOICE_FILE .. ".partial" → /state.voice.text)
@@ -324,13 +405,7 @@ end
 -- ── endpoints ──
 
 -- a TUI ─── rule (box-drawing + spaces only): wider than the board, so it would wrap into several lines
-local function isRule(line)
-  if not utf8.len(line) then return false end
-  for _, cp in utf8.codes(line) do
-    if cp ~= 32 and (cp < 0x2500 or cp > 0x257F) then return false end
-  end
-  return line ~= ""
-end
+local isRule = paneclean.isRule
 
 -- the screen above Claude's dialog / input box (its first ─ or ╌ rule in the bottom 30 lines): ≤ 12 lines, ≤ 600 chars
 fetchTail = function(id)
@@ -429,13 +504,19 @@ local function wrap(segs, width, out)
   flush()
 end
 
-local function pane(id, colors, width)
-  width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
-  local out = hs.execute(TMUX .. " capture-pane -p -e -J -S -120 -t '" .. id .. "'") or ""
+-- a capture-pane → the board's text; clean = paneclean's view, its first line of a turn starts "\1u" / "\1a"
+local function render(out, colors, width, clean)
   out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
+  local items = {}
+  for line in (out .. "\n"):gmatch("(.-)\n") do items[#items + 1] = { s = (line:gsub("%s+$", "")) } end
+  if clean then
+    local src = {}
+    for i, it in ipairs(items) do src[i] = it.s end
+    items = paneclean.clean(src)
+  end
   local lines, blank, fg = {}, false, nil
-  for line in (out .. "\n"):gmatch("(.-)\n") do
-    line = line:gsub("%s+$", "")
+  for _, it in ipairs(items) do
+    local line, first = it.s, #lines + 1
     local plain = line:gsub("\27%[[%d;]*m", "")
     local empty = plain:match("^%s*$") ~= nil
     if isRule(plain) then -- a ─── rule: one screen wide, no colour
@@ -445,11 +526,32 @@ local function pane(id, colors, width)
       local segs
       segs, fg = segments(line, fg, colors)
       if #segs == 0 then lines[#lines + 1] = "" else wrap(segs, width, lines) end
+      if it.m and lines[first] then lines[first] = "\1" .. it.m .. lines[first] end
     end
     blank = empty
   end
   while #lines > 60 do table.remove(lines, 1) end -- the board re-renders all of it every second: keep it light
-  return { t = id, text = table.concat(lines, "\n") }
+  return table.concat(lines, "\n")
+end
+
+-- /pane answers from a cache at once; the capture runs async (a sync hs.execute stalled all of HS for up to 1 s),
+-- at most every 0.4 s per window+view, and a view nobody asked for in 60 s is dropped
+local paneCache = {}
+local function pane(id, colors, width, clean)
+  width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
+  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean) }, "|")
+  for k, e in pairs(paneCache) do if now - e.asked > 60 then paneCache[k] = nil end end
+  local e = paneCache[key] or { fetched = 0 }
+  paneCache[key], e.asked = e, now
+  if not e.busy and now - e.fetched >= 0.4 then
+    e.busy, e.fetched = true, now
+    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-120", "-t", id }, function(out)
+      local ok, text = pcall(render, out, colors, width, clean)
+      if ok then e.data = { t = id, text = text } end
+      e.busy = false
+    end)
+  end
+  return e.data or { t = id, text = "", wait = true }
 end
 
 -- ── Mac quick actions (Opie-style): now playing + convert what's selected in Finder ──
@@ -830,6 +932,7 @@ local function state()
   }
 end
 
+local enterTimers = {} -- id → the pending Enter of a /send (kept so it is not collected before it fires)
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
@@ -841,12 +944,23 @@ local function handle(method, path, headers, body)
   local id = p.t and p.t:match("^@%d+$")
 
   if method == "GET" and route == "/state" then return reply(state(), 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w)), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
-      if p.enter == "1" then task(TMUX, { "send-keys", "-t", id, "Enter" }) end
+      -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
+      if p.enter == "1" then
+        enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+      end
     end)
     return reply("ok", 200)
+  end
+  if method == "POST" and route == "/net" then
+    local r = p.r or "day"
+    if r ~= "day" and r ~= "month" and r ~= "year" then return reply("r=day|month|year", 400) end
+    local ok, top = pcall(hs.json.decode, readFile(NET_DIR .. "/net-" .. r .. ".json") or "[]")
+    top = ok and type(top) == "table" and top or {}
+    for _, d in ipairs(top) do d.name = safeClean(tostring(d.name), 40) end
+    return reply({ r = r, top = top }, 200, true)
   end
   if method == "POST" and route == "/key" and id and validKey(p.k) then
     task(TMUX, { "send-keys", "-t", id, p.k })

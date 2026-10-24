@@ -18,17 +18,25 @@ check kind "$(opt @agent_ask_kind)" permission
 check at-is-number "$(opt @agent_ask_at | grep -Ec '^[0-9]+$')" 1
 check state "$(opt @agent_state)" waiting
 
-echo "→ idle prompt" >&2
+echo "→ idle prompt: an agent resting at its prompt is not waiting and asks nothing" >&2
+echo '{}' | "$here/agent-state.sh" done
 echo '{"message":"Claude is waiting for your input","notification_type":"idle_prompt"}' | "$here/agent-state.sh" waiting
-check kind "$(opt @agent_ask_kind)" idle
+check idle-state-kept "$(opt @agent_state)" done
+check idle-no-ask "$(opt @agent_ask_kind)$(opt @agent_ask)" ""
+echo '{"message":"Need the staging URL","notification_type":"idle_prompt"}' | "$here/agent-state.sh" waiting
+check idle-custom-kind "$(opt @agent_ask_kind)" idle
+check idle-custom-text "$(opt @agent_ask)" "Need the staging URL"
+check idle-custom-state "$(opt @agent_state)" done
 
 echo "→ trailing semicolon survives" >&2
 echo '{"message":"run: ls;","notification_type":"permission_prompt"}' | "$here/agent-state.sh" waiting
 check semicolon "$(opt @agent_ask)" "run: ls;"
 
 echo "→ other / tabs+newlines / length" >&2
+echo '{}' | "$here/agent-state.sh" done
 printf '{"message":"a\\tb\\nc %s"}' "$(printf 'x%.0s' $(seq 400))" | "$here/agent-state.sh" waiting
 check kind "$(opt @agent_ask_kind)" other
+check other-not-waiting "$(opt @agent_state)" done
 v=$(opt @agent_ask)
 check no-tab-nl "$([[ $v != *$'\t'* && $v != *$'\n'* ]] && echo y)" y
 check len-le-300 "$([ ${#v} -le 300 ] && echo y)" y
@@ -49,7 +57,7 @@ echo '{"tool_name":"Edit","tool_input":{"file_path":"/a/b.lua"}}' | "$here/agent
 echo '{"message":"Claude needs your permission","notification_type":"permission_prompt"}' | "$here/agent-state.sh" waiting
 check perm-file "$(opt @agent_ask)" "Edit: /a/b.lua"
 echo '{"message":"Claude is waiting for your input","notification_type":"idle_prompt"}' | "$here/agent-state.sh" waiting
-check idle-keeps-message "$(opt @agent_ask)" "Claude is waiting for your input"
+check idle-default-ignored "$(opt @agent_ask)" "Edit: /a/b.lua"
 echo '{}' | "$here/agent-state.sh" done
 check tool-cleared "$(opt @agent_tool)" ""
 
@@ -127,7 +135,32 @@ check chat-ask "$(jq -r '.msgs[-1].x' <<<"$chat")" "❓ Куди деплой?"
 check chat-no-noise "$(grep -c 'secret output\|subagent noise\|meta caveat\|ignore me' <<<"$chat")" 0
 check chat-n "$(env -u TMUX "$here/agent-state.sh" chat "$TR" 2 | jq -c '[.msgs[].r]')" '["a","t"]'
 check chat-missing "$(env -u TMUX "$here/agent-state.sh" chat /nope.jsonl 15)" '{"msgs":[],"err":"no transcript"}'
+
+echo "→ info subcommand: doing / sum / tok / model per transcript, one JSON line each" >&2
+TR2="$tr_dir/done.jsonl"
+cat > "$TR2" <<'J'
+{"type":"user","message":{"role":"user","content":"go"}}
+{"type":"assistant","isSidechain":true,"message":{"model":"x","usage":{"input_tokens":999999},"content":[{"type":"text","text":"subagent"}]}}
+{"type":"assistant","message":{"model":"claude-opus-5-5","usage":{"input_tokens":10,"cache_read_input_tokens":150000,"cache_creation_input_tokens":990,"output_tokens":5},"content":[{"type":"text","text":"Готово: деплой пройшов.\n\n- **Далі** — нічого.\nтретій рядок"}]}}
+J
+info=$(env -u TMUX "$here/agent-state.sh" info "$TR" "$TR2" /nope.jsonl)
+check info-lines "$(wc -l <<<"$info" | tr -d ' ')" 2
+i1=$(jq -c --arg f "$TR" 'select(.f == $f)' <<<"$info"); i2=$(jq -c --arg f "$TR2" 'select(.f == $f)' <<<"$info")
+check doing-tool "$(jq -r .doing <<<"$i1")" "Куди деплой?"
+check doing-text "$(jq -r .doing <<<"$i2")" "Готово: деплой пройшов."
+check sum "$(jq -r .sum <<<"$i2")" "Готово: деплой пройшов. · Далі — нічого."
+check tok "$(jq -r .tok <<<"$i2")" 151000
+check tok-none "$(jq -r .tok <<<"$i1")" 0
+check model "$(jq -r .model <<<"$i2")" claude-opus-5-5
+printf '{"type":"assistant","message":{"content":[{"type":"text","text":"%s"}]}}\n' "$(printf 'д%.0s' $(seq 300))" > "$TR2"
+check doing-le-60 "$(env -u TMUX "$here/agent-state.sh" info "$TR2" | jq '.doing | length')" 60
+check sum-le-140 "$(env -u TMUX "$here/agent-state.sh" info "$TR2" | jq '.sum | length')" 140
 rm -rf "$tr_dir"
+
+echo "→ @agent_at on every event" >&2
+tmux -L $S set -wu -t "$TMUX_PANE" @agent_at
+echo '{}' | "$here/agent-state.sh" done
+check agent-at "$(opt @agent_at | grep -Ec '^[0-9]+$')" 1
 
 echo "→ outside tmux" >&2
 out=$(echo '{}' | env -u TMUX "$here/agent-state.sh" waiting 2>&1); rc=$?
