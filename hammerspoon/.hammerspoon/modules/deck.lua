@@ -125,16 +125,22 @@ end
 
 local function refreshProjects()
   -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
+  -- (one async list-sessions: a sync has-session per project held up every request behind it)
   local list, where = {}, {}
   for line in (readFile(PROJCTL .. "/registry.conf") or ""):gmatch("[^\n]+") do
     local name, dir, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
     if name then
-      local ok = os.execute(TMUX .. " has-session -t '=" .. session .. "' 2>/dev/null")
-      list[#list + 1] = { n = name, on = ok == true, port = port, auto = auto == "1" }
+      list[#list + 1] = { n = name, session = session, port = port, auto = auto == "1" }
       where[name] = { dir = dir:gsub("^~", HOME), session = session }
     end
   end
-  projects, projWhere = list, where
+  projWhere = where
+  task(TMUX, { "list-sessions", "-F", "#{session_name}" }, function(out)
+    local up = {}
+    for n in out:gmatch("[^\n]+") do up[n] = true end
+    for _, pr in ipairs(list) do pr.on = up[pr.session] == true; pr.session = nil end
+    projects = list
+  end)
 end
 
 local function refreshSlow()
@@ -680,8 +686,16 @@ local function plainLines(text, width, fg)
 end
 
 -- compact fleet for the board (`lead.py blockers --json`): windows that wait for Mike first, ≤3 asks each
+-- lead.py runs async: the board gets the last result (its long-press refresh brings the fresh one)
+local fleetRaw
+local function refreshFleet()
+  task("/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
+       function(out) fleetRaw = out end)
+end
 local function fleetText(width)
-  local raw = hs.execute("PATH=" .. PATH .. ":$HOME/.pyenv/shims python3 " .. HOME .. "/.claude/scripts/lead.py blockers --json 2>/dev/null")
+  local raw = fleetRaw
+  refreshFleet()
+  if not raw then return "…" end
   local ok, d = pcall(hs.json.decode, raw or "")
   if not ok or not d then return "lead.py blockers failed:\n" .. plainLines(raw or "", width) end
   local rows = d.rows or {}
@@ -856,10 +870,16 @@ end
 -- memory: the biggest processes (killable from the board, never system ones) + pressure + free disk
 local NO_KILL = { kernel_task = 1, WindowServer = 1, launchd = 1, loginwindow = 1, Hammerspoon = 1, Finder = 1, Dock = 1,
   SystemUIServer = 1, coreaudiod = 1, mds = 1, mds_stores = 1, cfprefsd = 1, ["Claude Code"] = 1, claude = 1 }
-local topPids = {}
+local topPids, memRaw = {}, ""
 local function memoryState()
+  local raw = memRaw -- async below: three sync hs.execute here ran on every panel poll
+  task("/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
+    .. "/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level; /bin/df -g / | /usr/bin/awk 'NR==2{print $4}'" },
+    function(out) memRaw = out end)
+  local ps, rest = raw:match("^(.-)\1\n(.*)$")
+  local pressure, free = (rest or ""):match("^(%d+)%s+(%d+)")
   local procs, pids = {}, {}
-  for pid, rss, cmd in (hs.execute("/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40") or ""):gmatch("%s*(%d+)%s+(%d+)%s+([^\n]+)") do
+  for pid, rss, cmd in (ps or ""):gmatch("%s*(%d+)%s+(%d+)%s+([^\n]+)") do
     local name = cmd:match("([^/]+)$") or cmd
     -- Claude Code shows up as its version ("2.1.303") or "claude …": quitting it would kill the sessions
     local claude = name:match("^%d+%.%d+%.%d+$") or name:lower():match("^claude")
@@ -868,9 +888,7 @@ local function memoryState()
       pids[tonumber(pid)] = true
     end
   end
-  topPids = pids
-  local pressure = (hs.execute("/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level") or ""):gsub("%s", "")
-  local free = (hs.execute("/bin/df -g / | /usr/bin/awk 'NR==2{print $4}'") or ""):gsub("%s", "")
+  if ps then topPids = pids end
   return { ram = sysmonitor.ramPct(), pressure = ({ ["1"] = "normal", ["2"] = "warning", ["4"] = "critical" })[pressure] or "?",
            disk = tonumber(free) or 0, procs = procs }
 end
@@ -1083,6 +1101,22 @@ local function handle(method, path, headers, body)
   return reply("not found", 404)
 end
 
+-- a slow request (>300 ms in the handler) or an HS main-thread stall (the 0.25 s tick late by >1 s: some module's
+-- sync hs.execute) goes to ~/Library/Logs/deck-slow.log — the board's "perf state 4153ms" lines name neither
+local SLOW_LOG = HOME .. "/Library/Logs/deck-slow.log"
+local function slowLog(line)
+  print("deck slow: " .. line)
+  local f = io.open(SLOW_LOG, "a")
+  if f then f:write(os.date("%H:%M:%S "), line, "\n"); f:close() end
+end
+local function timed(method, path, headers, body)
+  local t0 = hs.timer.absoluteTime()
+  local a, b, c = handle(method, path, headers, body)
+  local ms = (hs.timer.absoluteTime() - t0) / 1e6
+  if ms > 300 then slowLog(string.format("%s %s %.0f ms", method, path:match("^[^?]*"), ms)) end
+  return a, b, c
+end
+
 function M.start()
   loadDeck()
   refreshHub() -- warm the cache once; later only when the board opens Hub
@@ -1090,8 +1124,18 @@ function M.start()
   refreshSlow()
   M.slowTimer = hs.timer.doEvery(60, refreshSlow) -- statusline.sh (bash + python) + reminders: once a minute is plenty
   refreshSessions()
+  refreshProjects() -- warm: /spawn and /projlist answer from it
+  refreshFleet()
+  memoryState()
   M.sessionTimer = hs.timer.doEvery(3, refreshSessions)
-  M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(handle):start()
+  local last = hs.timer.absoluteTime()
+  M.stallTimer = hs.timer.doEvery(0.25, function()
+    local t = hs.timer.absoluteTime()
+    local gap = (t - last) / 1e6
+    last = t
+    if gap > 1250 then slowLog(string.format("HS stall %.0f ms", gap - 250)) end
+  end)
+  M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(timed):start()
 end
 
 return M
