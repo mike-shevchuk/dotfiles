@@ -1133,7 +1133,11 @@ function M.start()
     local t = hs.timer.absoluteTime()
     local gap = (t - last) / 1e6
     last = t
-    if gap > 1250 then slowLog(string.format("HS stall %.0f ms", gap - 250)) end
+    if gap > 1250 then
+      local l = (package.loaded["modules.stallprof"] or {}).last -- the callback that ended last: the stall's suspect
+      slowLog(string.format("HS stall %.0f ms%s", gap - 250,
+        l and string.format(" · last cb %s (%.0f ms, ended %.0f ms ago)", l.label, l.ms, (t - l.at) / 1e6) or ""))
+    end
   end)
   M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(timed):start()
 end
