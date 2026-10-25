@@ -142,6 +142,7 @@ end
 
 -- Update only the menubar title (called by pomodoro every second)
 -- Uses cached RAM percentage to avoid spawning vm_stat subprocess each time
+local lastTitle
 local function updateTitle()
     if not menubar then return end
 
@@ -155,10 +156,11 @@ local function updateTitle()
 
     table.insert(parts, caffeineState and "☕️" or "💤")
 
-    menubar:setTitle(table.concat(parts, " | "))
+    local title = table.concat(parts, " | ")
+    if title ~= lastTitle then lastTitle = title; menubar:setTitle(title) end -- setTitle redraws the menubar
 end
 
-local render
+local buildMenu
 local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", "ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10" }
 local refreshTask
 function M.refresh()
@@ -169,13 +171,15 @@ function M.refresh()
             i = i + 1
             if REFRESH_CMDS[i] then cached[REFRESH_CMDS[i]] = part end
         end
-        render()
+        local used, total = getMemoryUsage()
+        cachedRamPct = total > 0 and math.floor(used / total * 100) or 0
+        updateTitle()
     end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(REFRESH_CMDS, "; printf '\\1\\n'; ") })
     refreshTask:start()
 end
 
-render = function()
-    if not menubar then return end
+-- the menu is built only when it opens (setMenu(fn)), from the last async refresh: no styledtext every 10 s
+buildMenu = function()
 
     local used, total, details = getMemoryUsage()
     local procs = getTopProcesses()
@@ -183,9 +187,6 @@ render = function()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
     cachedRamPct = pct
-
-    -- Update title
-    updateTitle()
 
     local menu = {}
 
@@ -295,10 +296,11 @@ render = function()
     table.insert(menu, { title = "-" })
     table.insert(menu, { title = "Refresh Now", fn = M.refresh })
 
-    menubar:setMenu(menu)
+    return menu
 end
 
 function M.ramPct() return cachedRamPct end
+M.menu = function() return buildMenu() end -- debug / test: the items the menubar shows when it opens
 
 function M.start()
     local memStr = shellExec("sysctl -n hw.memsize")
@@ -311,6 +313,7 @@ function M.start()
     guard.onUpdate = updateTitle
 
     menubar = hs.menubar.new()
+    menubar:setMenu(buildMenu)
     M.refresh()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
 end
