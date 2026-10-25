@@ -4,6 +4,7 @@
 -- Master toggle via menubar icon (hammer/stop)
 --
 
+require("modules.stallprof") -- first: times every callback / sync call the modules below set up (>500 ms → deck-slow.log)
 local guard       = require("modules.guard")
 local windows     = require("modules.windows")
 local apps        = require("modules.apps")

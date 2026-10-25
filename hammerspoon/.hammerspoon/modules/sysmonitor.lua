@@ -16,7 +16,10 @@ local caffeineState = false
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 local FONT = { name = "Menlo", size = 12 }
 
+-- vm_stat / swap / ps come from one async task (M.refresh): three sync forks every 10 s could stall all of HS
+local cached = {}
 local function shellExec(cmd)
+    if cached[cmd] then return cached[cmd] end
     return hs.execute(string.format("export PATH='%s'; %s", PATH, cmd))
 end
 
@@ -155,7 +158,23 @@ local function updateTitle()
     menubar:setTitle(table.concat(parts, " | "))
 end
 
+local render
+local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", "ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10" }
+local refreshTask
 function M.refresh()
+    if not menubar or (refreshTask and refreshTask:isRunning()) then return end
+    refreshTask = hs.task.new("/bin/sh", function(_, out)
+        local i = 0
+        for part in ((out or "") .. "\1\n"):gmatch("(.-)\1\n") do
+            i = i + 1
+            if REFRESH_CMDS[i] then cached[REFRESH_CMDS[i]] = part end
+        end
+        render()
+    end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(REFRESH_CMDS, "; printf '\\1\\n'; ") })
+    refreshTask:start()
+end
+
+render = function()
     if not menubar then return end
 
     local used, total, details = getMemoryUsage()
