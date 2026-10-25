@@ -109,6 +109,22 @@ pcall(function()
   end
 end)
 
+-- a userdata finalizer (hs.task, axuielement, …) runs from inside any allocation, so a slow one shows up as a stall at
+-- a random Lua line: time every registered metatable's __gc as "gc <type>" (re-scanned each minute: extensions load lazily)
+local gcWrapped = {}
+local function wrapGc()
+  for name, mt in pairs(debug.getregistry()) do
+    if type(name) == "string" and type(mt) == "table" and type(mt.__gc) == "function" and not gcWrapped[mt] then
+      local orig = mt.__gc
+      mt.__gc = function(...) return timed("gc " .. name, orig, ...) end
+      gcWrapped[mt] = true
+    end
+  end
+end
+M.wrapGc = wrapGc
+wrapGc()
+M.gcTimer = hs.timer.new(60, wrapGc):start()
+
 -- a stall inside code nobody wrapped (a C call: AX, AppleEvent, DNS…): a 0.25 s heartbeat, and a count hook that,
 -- once Lua runs again with the heartbeat >1 s late, logs the stack that was blocked — once per stall
 local beat, told = now(), false
