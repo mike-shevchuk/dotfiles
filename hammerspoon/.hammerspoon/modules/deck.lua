@@ -371,6 +371,26 @@ local function micDown(lang)
   task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "listen", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
 end
 
+-- the board's own mic: raw PCM arrives in /mic/pcm chunks, the close (/mic?down=0&board=1) runs whisper on it
+local PCM_FILE, WAV_FILE = "/tmp/deck-voice.pcm", "/tmp/deck-voice.wav"
+local WHISPER = "/opt/homebrew/bin/whisper-cli"
+local WHISPER_MODEL = HOME .. "/.cache/whisper/ggml-large-v3-turbo-q5_0.bin" -- multilingual: Ukrainian as well as English
+
+local function micBoardUp(rate, lang)
+  voice.state = "busy"
+  local f = io.open(PCM_FILE, "rb")
+  local pcm = f and f:read("a") or ""
+  if f then f:close() end
+  if #pcm < rate then voice = { state = "done", text = "" }; return end -- under ½ s: nothing said
+  local w = io.open(WAV_FILE, "wb")
+  w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
+    "data", #pcm), pcm)
+  w:close()
+  task(WHISPER, { "-m", WHISPER_MODEL, "-l", lang == "en" and "en" or "uk", "-nt", "-np", "-f", WAV_FILE }, function(out)
+    voice = { state = "done", text = clean(((out or ""):gsub("%s+", " "):gsub("^ ", ""))) }
+  end)
+end
+
 local function micUp()
   voice.state = "busy"
   task("/usr/bin/pkill", { "-INT", "-x", "DeckHelper" })
@@ -809,7 +829,7 @@ local function chat(id, n)
     local function withPath(path)
       if path == "" then return done({ msgs = {}, err = "no transcript" }) end
       -- the hook keeps the session JSONL per window; agent-state.sh chat turns it into u/a/t lines
-      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(30, n or 15))) }, function(raw)
+      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(60, n or 15))) }, function(raw)
         local ok, d = pcall(hs.json.decode, raw)
         if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
         for _, m in ipairs(d.msgs or {}) do -- mono clean keeps the newlines of a chat bubble
@@ -1142,9 +1162,16 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
+  if method == "POST" and route == "/mic/pcm" then
+    local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")
+    if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
+  end
   if method == "POST" and route == "/mic" then
     if p.clear == "1" then voice = { state = "idle", text = "" }
+    elseif p.down == "1" and p.board == "1" then os.remove(PCM_FILE); voice = { state = "rec", text = "" }
     elseif p.down == "1" then micDown(p.lang)
+    elseif p.board == "1" then micBoardUp(tonumber(p.rate) or 22050, p.lang)
     else micUp() end
     return reply("ok", 200)
   end
