@@ -374,7 +374,10 @@ end
 -- the board's own mic: raw PCM arrives in /mic/pcm chunks, the close (/mic?down=0&board=1) runs whisper on it
 local PCM_FILE, WAV_FILE = "/tmp/deck-voice.pcm", "/tmp/deck-voice.wav"
 local WHISPER = "/opt/homebrew/bin/whisper-cli"
-local WHISPER_MODEL = HOME .. "/.cache/whisper/ggml-large-v3-turbo-q5_0.bin" -- multilingual: Ukrainian as well as English
+-- same model + tuning as the stt-host service (~/zettelkasten/claude_code/stt-service/host), run directly: no extra hop
+local WHISPER_MODEL = HOME .. "/.local/share/stt-host/models/ggml-large-v3-turbo-q5_0.bin"
+local WHISPER_PROMPT = { uk = "Розмова українською мовою. Говоримо чітко, правильними реченнями.",
+  en = "A conversation in English with clear speech and proper sentences." }
 
 local function micBoardUp(rate, lang)
   voice.state = "busy"
@@ -386,7 +389,9 @@ local function micBoardUp(rate, lang)
   w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
     "data", #pcm), pcm)
   w:close()
-  task(WHISPER, { "-m", WHISPER_MODEL, "-l", lang == "en" and "en" or "uk", "-nt", "-np", "-f", WAV_FILE }, function(out)
+  lang = lang == "en" and "en" or "uk"
+  task(WHISPER, { "-m", WHISPER_MODEL, "-l", lang, "--prompt", WHISPER_PROMPT[lang], "--suppress-nst", "--beam-size", "8",
+    "--best-of", "8", "-nt", "-np", "-f", WAV_FILE }, function(out)
     voice = { state = "done", text = clean(((out or ""):gsub("%s+", " "):gsub("^ ", ""))) }
   end)
 end
