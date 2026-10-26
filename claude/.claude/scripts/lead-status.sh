@@ -35,9 +35,9 @@ done < <(tmux list-windows -t "$SESSION" -F '#I|#W' 2>/dev/null | grep -vE '\|(â
 prs="[]"
 while IFS='|' read -r num branch draft mergeable title; do
   [ -z "$num" ] && continue
-  pf="/tmp/claude/pipeline-${branch//\//-}.json"
+  pf="$HOME/.claude/pipeline-state/pipeline-${branch//\//-}.json"   # durable; pipeline-stamp.sh mirrors to /tmp
   stamps=$( [ -f "$pf" ] && jq -c '[.steps|to_entries[]|select(.value.done)|.key]' "$pf" || echo '[]')
-  jt=$(gh pr view "$num" -R "$REPO" --json comments -q '[.comments[].body|select(test("End-to-end smoke trace|API for the frontend"))]|length' 2>/dev/null || echo 0)
+  jt=$(gh pr view "$num" -R "$REPO" --json comments -q '[.comments[].body|select(test("End-to-end smoke trace|Smoke trace|/just-test|API for the frontend|FE hand-off|/just-fe"; "i"))]|length' 2>/dev/null || echo 0)
   demo=$(~/.claude/demo-result.sh check "$num" 2>&1 | head -1)
   labels=$(gh pr view "$num" -R "$REPO" --json labels -q '[.labels[].name]|join(",")' 2>/dev/null)
   prs=$(jq -c --arg n "$num" --arg b "$branch" --arg d "$draft" --arg m "$mergeable" --arg t "$title" \
