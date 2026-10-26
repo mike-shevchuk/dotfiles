@@ -74,7 +74,7 @@ reports filter="":
 hub port="8890" root="~/zettelkasten/claude_code":
     #!/usr/bin/env bun
     import { watch, existsSync } from "node:fs";
-    import { readdir, stat } from "node:fs/promises";
+    import { readdir, stat, readFile, writeFile, rename } from "node:fs/promises";
     import { networkInterfaces } from "node:os";
     import { join, extname, relative } from "node:path";
 
@@ -93,12 +93,75 @@ hub port="8890" root="~/zettelkasten/claude_code":
       if (!r.success) console.error("  (_hub.py failed — serving the existing index.html)");
     }
 
-    const RELOAD = `<script>new EventSource("/__reload").onmessage=()=>location.reload()</script>`;
+    // "state" = only the hub state file changed (archive/tags/pins) — the index re-renders itself, pages don't reload
+    const RELOAD = `<script>new EventSource("/__reload").onmessage=e=>{if(e.data!=="state")location.reload()}</script>`;
     const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
     const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
 
     const clients = new Set<ReadableStreamDefaultController>();
-    try { watch(ROOT, { recursive: true }, () => { for (const c of clients) { try { c.enqueue("data: change\n\n"); } catch {} } }); } catch {}
+    const push = (ev: string) => { for (const c of clients) { try { c.enqueue(`data: ${ev}\n\n`); } catch {} } };
+    // A new/edited article re-runs _hub.py (debounced) so the index lists it without a restart.
+    let regenT: ReturnType<typeof setTimeout> | undefined;
+    const regen = () => { clearTimeout(regenT); regenT = setTimeout(() => { if (existsSync(gen)) Bun.spawnSync(["python3", gen], { cwd: ROOT }); }, 800); };
+    try {
+      watch(ROOT, { recursive: true }, (_ev, f) => {
+        const name = String(f ?? "");
+        if (name.endsWith(STATE_NAME) || name.endsWith(".tmp")) return push("state");
+        if (/\.html?$/i.test(name) && name !== "index.html") regen();
+        push("change");
+      });
+    } catch {}
+
+    // ── hub state: archive / manual tags / pins / renames, shared by every device ──
+    // One JSON file under ROOT; mutated only through small ops (never a whole-state overwrite),
+    // so a phone and a laptop can't clobber each other. LAN-only, paths must stay under ROOT.
+    const STATE_NAME = "_hub_state.json";
+    const STATE = join(ROOT, STATE_NAME);
+    type HubState = { archived: string[]; tags: Record<string, string[]>; pins: string[]; renames: Record<string, string>; updated?: string };
+    const emptyState = (): HubState => ({ archived: [], tags: {}, pins: [], renames: {} });
+    async function readState(): Promise<HubState> {
+      try { return { ...emptyState(), ...JSON.parse(await readFile(STATE, "utf8")) }; } catch { return emptyState(); }
+    }
+    let writing: Promise<unknown> = Promise.resolve();   // serialize read-modify-write
+    const isLan = (ip: string) => /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|::1$|::ffff:(127|10|192\.168)\.|fe80:)/.test(ip);
+    const okRel = (r: unknown): r is string => {
+      if (typeof r !== "string" || !r || r.length > 400 || r.includes("\0") || r.startsWith("/") || !/\.html?$/i.test(r)) return false;
+      const abs = join(ROOT, r);
+      return abs.startsWith(ROOT + "/") && !r.split("/").includes("..");
+    };
+    const okTag = (t: unknown): t is string => typeof t === "string" && /^[\p{L}\p{N}_.:+-]{1,40}$/u.test(t);
+    const bad = (m: string) => new Response(m, { status: 400 });
+    async function applyOp(b: any): Promise<HubState | Response> {
+      const st = await readState();
+      const rels = (x: unknown) => Array.isArray(x) && x.length <= 500 && x.every(okRel) ? x as string[] : null;
+      const setOf = (arr: string[], add: string[], on: boolean) => { const s = new Set(arr); add.forEach(r => on ? s.add(r) : s.delete(r)); return [...s]; };
+      switch (b?.op) {
+        case "archive": case "unarchive": {
+          const r = rels(b.rels); if (!r) return bad("rels: array of relative .html paths under the hub root");
+          st.archived = setOf(st.archived, r, b.op === "archive"); break; }
+        case "pin": {
+          if (!okRel(b.rel) || typeof b.on !== "boolean") return bad("pin: {rel, on}");
+          st.pins = setOf(st.pins, [b.rel], b.on); break; }
+        case "rename": {
+          if (!okRel(b.rel) || !(b.name === null || (typeof b.name === "string" && b.name.length <= 200))) return bad("rename: {rel, name|null}");
+          if (b.name) st.renames[b.rel] = b.name.trim(); else delete st.renames[b.rel]; break; }
+        case "tags": {
+          if (!okRel(b.rel) || !Array.isArray(b.tags) || b.tags.length > 20 || !b.tags.every(okTag)) return bad("tags: {rel, tags[] ≤20, [letters digits _ . : + -]}");
+          if (b.tags.length) st.tags[b.rel] = [...new Set(b.tags as string[])]; else delete st.tags[b.rel]; break; }
+        case "merge": {   // one-time migration of old per-browser pins/renames; never overwrites server values
+          const p = rels(b.pins ?? []); if (!p) return bad("merge.pins");
+          const rn = b.renames ?? {}; if (typeof rn !== "object" || Array.isArray(rn)) return bad("merge.renames");
+          st.pins = setOf(st.pins, p, true);
+          for (const [k, v] of Object.entries(rn)) if (okRel(k) && typeof v === "string" && v.length <= 200 && !st.renames[k]) st.renames[k] = v;
+          break; }
+        default: return bad("op must be archive|unarchive|pin|rename|tags|merge");
+      }
+      st.updated = new Date().toISOString();
+      const tmp = STATE + ".tmp";
+      await writeFile(tmp, JSON.stringify(st, null, 1));
+      await rename(tmp, STATE);                          // atomic replace
+      return st;
+    }
 
     const esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;");
     function md(s: string): string {
@@ -137,8 +200,23 @@ hub port="8890" root="~/zettelkasten/claude_code":
     console.error(`→ serving ${ROOT.replace(HOME, "~")} on 0.0.0.0:${PORT} (bun, live-reload)`);
     Bun.serve({
       port: PORT, hostname: "0.0.0.0", idleTimeout: 0,
-      async fetch(req) {
+      async fetch(req, server) {
         const p = new URL(req.url).pathname;
+        if (p === "/_hub/state") {
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          if (req.method === "GET") return json(await readState());
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          const body = await req.text();
+          if (body.length > 65536) return new Response("too large", { status: 413 });
+          let b; try { b = JSON.parse(body); } catch { return bad("invalid JSON"); }
+          const job = writing.then(() => applyOp(b)); writing = job.catch(() => {});
+          const res = await job;
+          if (res instanceof Response) return res;
+          console.error(`  state ← ${b.op} from ${ip}`);
+          return json(res);
+        }
         if (p === "/__reload") {
           let self: ReadableStreamDefaultController;
           return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
