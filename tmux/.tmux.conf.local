@@ -133,14 +133,14 @@ set -g status-format[1] '#[list=on align=#{status-justify}]#[list=left-marker]<#
 set -g status-format[2] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]' #!important
 
 # Badges: 🙋 (red) = fleet.json need_mike (scripts/fleet-sync.sh sets
-# @need_mike); ⏳/✋/✅ = @agent_state from Claude hooks (scripts/agent-state.sh).
+# @need_mike); ⏳ working / 💤 waiting for the lead / ✅ done = @agent_state from Claude hooks (scripts/agent-state.sh).
 # Window tabs — active tab is a filled block in the window's OWN colour
 # (window-status-style fg + reverse) with ▶ ◀ markers; no fg switch inside
 # the current format, or the block would change colour mid-tab.
 set -g window-status-style 'fg=#6c7086' #!important
 set -g window-status-current-style 'bold,reverse' #!important
-set -g window-status-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},✋ ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ' #!important
-set -g window-status-current-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}▶ #{?#{==:#{pane_current_command},claude},󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},✋ ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ◀ ' #!important
+set -g window-status-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}#{?#{==:#{pane_current_command},claude},#[fg=#cba6f7]󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},💤 ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ' #!important
+set -g window-status-current-format ' #{?#{@need_mike},#[bg=#f38ba8 fg=#1e1e2e bold noreverse] 🙋 #[default] ,}▶ #{?#{==:#{pane_current_command},claude},󰚩 ,}#{?#{==:#{@agent_state},working},⏳ ,#{?#{==:#{@agent_state},waiting},💤 ,#{?#{==:#{@agent_state},done},✅ ,}}}#{?#{@deploy},#{@deploy} ,}#I:#W ◀ ' #!important
 set -g window-status-separator '#[fg=#45475a,nobold,nounderscore] │ ' #!important
 
 # -- Mode colors (native formats, no plugin) -----------------------------------
@@ -389,3 +389,9 @@ bind w display-popup -E -w 85% -h 75% -d "#{pane_current_path}" "~/dotfiles/tmux
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
 run '~/.tmux/plugins/tpm/tpm'
+
+# Row split by name width (indexes have gaps when renumber-windows is off) — see scripts/win-split.sh.
+set-hook -g window-linked       'run-shell -b "~/dotfiles/tmux/scripts/win-split.sh #{session_name}"'
+set-hook -g window-unlinked     'run-shell -b "~/dotfiles/tmux/scripts/win-split.sh #{session_name}"'
+set-hook -g after-rename-window 'run-shell -b "~/dotfiles/tmux/scripts/win-split.sh #{session_name}"'
+set-hook -g session-created     'run-shell -b "~/dotfiles/tmux/scripts/win-split.sh #{session_name}"'
