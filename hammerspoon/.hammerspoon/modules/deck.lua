@@ -958,7 +958,7 @@ local function chat(id, n, force, job)
         local ok, d = pcall(hs.json.decode, raw)
         if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
         -- newest first, whole messages up to 3000 chars, until ~36 KB: the board reads at most 48 KB per reply
-        local msgs, kept, budget = d.msgs or {}, {}, 36000
+        local msgs, kept, budget = d.msgs or {}, {}, 14000 -- 36 KB scrolled at 9 fps on the board
         for i = #msgs, 1, -1 do
           local m = msgs[i]
           local cok, c = pcall(clean, tostring(m.x), true) -- mono clean keeps the newlines of a chat bubble
