@@ -234,7 +234,19 @@ end
 -- windows Claude's hooks never tag: a `claude agents` client (its hook-reported file is never written; the agent it
 -- shows is a background job) and a claude whose hook never ran. Their state comes from the background jobs' own
 -- state.json (every ~10 s) or from how fresh their transcript is.
-local jobPick = {} -- window id → the transcript its chat shows (a job's, or the project's newest unclaimed)
+-- window id → the transcript its chat shows (a job's, or the project's newest unclaimed); kept on disk across reloads
+local JOBPICK_FILE = HOME .. "/.hammerspoon/deck-jobpick.json"
+local jobPick = (function()
+  local f = io.open(JOBPICK_FILE)
+  local ok, t = pcall(hs.json.decode, f and f:read("a") or "")
+  if f then f:close() end
+  return ok and type(t) == "table" and t or {}
+end)()
+local function savePick(id, tr)
+  jobPick[id] = tr
+  local f = io.open(JOBPICK_FILE, "w")
+  if f then f:write(hs.json.encode(jobPick)); f:close() end
+end
 local jobs = { by = {}, active = {}, tr = {} } -- job transcript → state; active jobs for the picker; job id → transcript
 local JQ = "/usr/bin/jq"
 local function jobStates()
@@ -954,15 +966,25 @@ local function chat(id, n, force, job)
       local path, cwd = out:gsub("%s+$", ""):match("^([^\t]*)\t?(.*)$")
       if path ~= "" and hs.fs.attributes(path) then return withPath(path) end
       if path ~= "" then -- a client of background sessions: `claude attach <id>` says which; `claude agents` can't
-        if job and jobs.tr[job] then jobPick[id] = jobs.tr[job] end
-        if force and not job then jobPick[id] = nil end
+        if job and jobs.tr[job] then savePick(id, jobs.tr[job]) end
         return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
-          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null" }, function(args)
-          local att = (args or ""):match("claude attach (%S+)")
+          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null; " .. TMUX .. " display -p -t " .. id ..
+          " '#{session_name} #{window_name}'" }, function(out)
+          local att = (out or ""):match("claude attach (%S+)")
           if att then
             for jid, t in pairs(jobs.tr) do
-              if jid:sub(1, #att) == att or att:sub(1, #jid) == jid then jobPick[id] = t end
+              if jid:sub(1, #att) == att or att:sub(1, #jid) == jid then savePick(id, t) end
             end
+          end
+          if not jobPick[id] then -- the window's name names one active session ("esp-deck" → "Прошивка ESP32-C5…")
+            local names, hit = (out or ""):match("([^\n]*)\n?$"):lower(), nil
+            for _, j in ipairs(jobs.active) do
+              local jn = j.name:lower()
+              for w in names:gmatch("[%w]+") do
+                if #w >= 3 and jn:find(w, 1, true) then hit = hit == nil and j.id or false; break end
+              end
+            end
+            if hit then savePick(id, jobs.tr[hit]) end
           end
           if jobPick[id] then return withPath(jobPick[id]) end
           done({ msgs = {}, err = "pick", jobs = jobs.active }) -- the board asks which session this window shows
@@ -975,7 +997,7 @@ local function chat(id, n, force, job)
         for l in o:gmatch("[^\n]+") do
           if l == "--" then past = true
           elseif not past then claimed[l] = true
-          elseif not claimed[l] then jobPick[id] = l; return withPath(l) end
+          elseif not claimed[l] then savePick(id, l); return withPath(l) end
         end
         withPath("")
       end)
