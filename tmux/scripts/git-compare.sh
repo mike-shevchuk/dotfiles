@@ -17,6 +17,9 @@
 #   difftastic   — difftastic semantic diff (falls back to git diff if difft missing)
 #   files        — fzf list of changed files vs target; opens picked file in DiffView
 #
+# GC_HEAD=<ref> GC_BASE=<ref> (both) skip every branch picker: review/codediff/menu
+# diff BASE→HEAD, diffview opens BASE...HEAD, delta/difftastic/files use BASE...HEAD.
+#
 # Default branch detection: origin/HEAD → origin/main → origin/master → origin/develop.
 
 set -uo pipefail
@@ -147,6 +150,15 @@ launch_view() {
             ;;
     esac
 }
+
+# ─── Preset refs (GC_HEAD + GC_BASE, e.g. a try's review popup): no pickers ─
+# Every picker answers itself; single-target modes get the committed PR range.
+GC_PRESET=""
+if [[ -n "${GC_HEAD:-}" && -n "${GC_BASE:-}" ]]; then
+    GC_PRESET=1
+    pick_branch() { echo "$GC_BASE...$GC_HEAD"; }
+    pick_branch_default() { case "$2" in "head —"*|"PR head —"*|"DiffView head —"*) echo "$GC_HEAD" ;; *) echo "$GC_BASE" ;; esac; }
+fi
 
 # ─── Pick target branch ────────────────────────────────────────────────────
 # review + codediff + menu + diffview pick their OWN refs (custom pickers);
@@ -279,6 +291,8 @@ case "$TOOL" in
         # origin/HEAD → origin/main → origin/master (single source of truth).
         base_def=$(detect_default_branch || echo "origin/master")
         dv_out=$(
+            # preset → as if Tab on GC_BASE: 3-dot GC_BASE...GC_HEAD (the PR view)
+            [[ -n "$GC_PRESET" ]] && { printf 'tab\n%s\n' "$GC_BASE"; exit 0; }
             {
                 echo "$base_def"
                 list_branches | grep -vFx "$base_def"
