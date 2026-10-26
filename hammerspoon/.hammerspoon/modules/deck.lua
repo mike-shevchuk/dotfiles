@@ -823,11 +823,12 @@ end
 -- /chat, cached like sessions: answer from the cache at once, refresh async (≤1 per 2 s per window),
 -- forget a window nobody asked about for 60 s — two sync hs.execute here froze HS ~10% of the time
 local chatCache = {}
-local function chat(id, n)
+local function chat(id, n, force)
   local now = os.time()
   for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
   local e = chatCache[id] or { fetched = 0 }
   chatCache[id], e.asked = e, now
+  if force then e.fetched = 0 end -- the board's ↻: read the transcript now, not within the 2 s throttle
   if not e.busy and now - e.fetched >= 2 then
     e.busy, e.fetched = true, now
     local function done(d) e.data, e.busy = d, false end
@@ -1148,7 +1149,7 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n)), 200, true) end
+  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n), p.f == "1"), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
     local w = projWhere[p.p or ""] or extraWhere[p.p or ""]
