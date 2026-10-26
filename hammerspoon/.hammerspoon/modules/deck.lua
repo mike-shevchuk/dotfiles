@@ -235,7 +235,7 @@ end
 -- shows is a background job) and a claude whose hook never ran. Their state comes from the background jobs' own
 -- state.json (every ~10 s) or from how fresh their transcript is.
 local jobPick = {} -- window id → the transcript its chat shows (a job's, or the project's newest unclaimed)
-local jobs = { by = {}, latest = nil } -- background job transcript → its state; the latest active one
+local jobs = { by = {}, active = {}, tr = {} } -- job transcript → state; active jobs for the picker; job id → transcript
 local JQ = "/usr/bin/jq"
 local function jobStates()
   local r = {}
@@ -246,13 +246,17 @@ local function jobStates()
   return r
 end
 local function refreshJobs()
-  task(JQ, { "-r", 'select(.linkScanPath) | "\\(.updatedAt)\t\\(.state)\t\\(.linkScanPath)"', table.unpack(jobStates()) }, function(o)
-    local by, best, bestAt = {}, nil, ""
-    for at, st, tr in o:gmatch("([^\t\n]+)\t([^\t\n]+)\t([^\n]+)") do
-      by[tr] = st
-      if st ~= "done" and st ~= "failed" and at > bestAt and hs.fs.attributes(tr) then best, bestAt = tr, at end
+  task(JQ, { "-r", 'select(.linkScanPath) | "\\(.updatedAt)\t\\(.state)\t\\(.daemonShort // .sessionId[:8])\t\\(.name // "?")\t\\(.linkScanPath)"',
+    table.unpack(jobStates()) }, function(o)
+    local by, active, tr = {}, {}, {}
+    for at, st, jid, name, path in o:gmatch("([^\t\n]+)\t([^\t\n]+)\t([^\t\n]+)\t([^\t\n]*)\t([^\n]+)") do
+      by[path], tr[jid] = st, path
+      if st ~= "done" and st ~= "failed" and hs.fs.attributes(path) then
+        active[#active + 1] = { id = jid, name = safeClean(name, 40), st = st, at = at }
+      end
     end
-    jobs = { by = by, latest = best }
+    table.sort(active, function(a, b) return a.at > b.at end)
+    jobs = { by = by, active = active, tr = tr }
   end)
 end
 -- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
@@ -330,7 +334,7 @@ local function parseSessions(out)
   for _, w in ipairs(list) do -- untagged Claude windows: the transcript they most likely show
     if w.claude and w.state == "" then
       local live = w.tr ~= "" and hs.fs.attributes(w.tr)
-      if not live then w.tr = jobPick[w.id] or (w.tr ~= "" and jobs.latest) or "" end
+      if not live then w.tr = jobPick[w.id] or "" end -- a `claude agents` window: only once you picked its session
       w.untagged = true
     end
   end
@@ -892,7 +896,7 @@ local function clipImage() -- an image on the clipboard not pasted yet (no read 
   end
   return false
 end
-local function chat(id, n, force)
+local function chat(id, n, force, job)
   local now = os.time()
   for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
   local e = chatCache[id] or { fetched = 0 }
@@ -949,17 +953,19 @@ local function chat(id, n, force)
     task(TMUX, { "display", "-p", "-t", id, "#{@agent_transcript}\t#{pane_current_path}" }, function(out)
       local path, cwd = out:gsub("%s+$", ""):match("^([^\t]*)\t?(.*)$")
       if path ~= "" and hs.fs.attributes(path) then return withPath(path) end
-      if path ~= "" then
-        if force then jobPick[id] = nil end
-        if jobPick[id] then return withPath(jobPick[id]) end
-        return task(JQ, { "-r", 'select(.state != "done" and .state != "failed" and .linkScanPath) | "\\(.updatedAt)\t\\(.linkScanPath)"',
-          table.unpack(jobStates()) }, function(o)
-          local best, bestAt = "", ""
-          for at, tr in o:gmatch("([^\t\n]+)\t([^\n]+)") do
-            if at > bestAt and hs.fs.attributes(tr) then best, bestAt = tr, at end
+      if path ~= "" then -- a client of background sessions: `claude attach <id>` says which; `claude agents` can't
+        if job and jobs.tr[job] then jobPick[id] = jobs.tr[job] end
+        if force and not job then jobPick[id] = nil end
+        return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
+          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null" }, function(args)
+          local att = (args or ""):match("claude attach (%S+)")
+          if att then
+            for jid, t in pairs(jobs.tr) do
+              if jid:sub(1, #att) == att or att:sub(1, #jid) == jid then jobPick[id] = t end
+            end
           end
-          jobPick[id] = best ~= "" and best or nil
-          withPath(best)
+          if jobPick[id] then return withPath(jobPick[id]) end
+          done({ msgs = {}, err = "pick", jobs = jobs.active }) -- the board asks which session this window shows
         end)
       end
       local dir = cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or ""
@@ -1263,7 +1269,7 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n), p.f == "1"), 200, true) end
+  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n), p.f == "1" or p.job ~= nil, p.job), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
     local w = projWhere[p.p or ""] or extraWhere[p.p or ""]
