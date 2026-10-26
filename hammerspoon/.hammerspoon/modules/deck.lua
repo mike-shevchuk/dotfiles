@@ -919,7 +919,26 @@ local function chat(id, n, force)
           table.insert(kept, 1, m)
         end
         d.msgs = kept
-        done(d)
+        -- the terminal's foot for the chat's status bar: Claude's spinner line ("✻ Thinking… (12s · ↑ 3k tokens)")
+        -- and the status lines under the input box (model, tokens, limits, mode)
+        task(TMUX, { "capture-pane", "-p", "-t", id }, function(pane)
+          local lines = {}
+          for l in (pane or ""):gmatch("[^\n]*") do lines[#lines + 1] = l end
+          local rule, spin = nil, nil
+          for i = #lines, 1, -1 do
+            if not rule and lines[i]:match("^%s*─") then rule = i end
+            if not spin and (lines[i]:find("esc to interrupt", 1, true) or lines[i]:match("^%s*[✻✽✶✳✢·*]%s+%S+…")) then
+              spin = safeClean(lines[i], 120)
+            end
+          end
+          local foot = {}
+          for i = (rule or #lines) + 1, #lines do
+            local c = safeClean(lines[i], 160):gsub("^%s+", "")
+            if c ~= "" then foot[#foot + 1] = c end
+          end
+          d.spin, d.foot = spin, foot
+          done(d)
+        end)
       end)
     end
     -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
