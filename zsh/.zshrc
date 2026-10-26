@@ -249,38 +249,91 @@ claude-free() {
   [[ -n $model ]] || return 1
   [[ -n $OMNIROUTE_MODEL ]] && { omni-test "$model" || return 1; }
   echo "━━━ omniroute ━━━  omniroute run claude --model $model --api-key-env OMNIROUTE_API_KEY -- $*" >&2
+  print -r -- "  Endpoint: http://127.0.0.1:20128 | model: $model | auth: OMNIROUTE_API_KEY (value hidden)" >&2
+  print -r -- "  Probe verified 1 tool; Claude sends its full tool set separately." >&2
+  print -r -- "  Claude's claude.ai connectors warning is expected with OmniRoute API-key authentication." >&2
   omniroute run claude --model "$model" --api-key-env OMNIROUTE_API_KEY -- "$@"
+  local rc=$?
+  print -r -- "  Claude/OmniRoute exited: $rc | model: $model" >&2
+  return $rc
 }
 
-# Send "reply OK" to one OmniRoute model; exit 0 only if it answered
+# Verify an actual tool call before handing the model to Claude Code.
 omni-test() {
   local key=${OMNIROUTE_API_KEY:-$(grep '^OMNIROUTE_API_KEY=' ~/dotfiles/.env | cut -d= -f2-)}
   zmodload zsh/datetime
-  local m=${1:?model}
-  echo "━━━ xh ━━━  xh -b --ignore-stdin --timeout 60 POST http://127.0.0.1:20128/v1/chat/completions \"Authorization:Bearer \$OMNIROUTE_API_KEY\" model=$m 'messages:=[{\"role\":\"user\",\"content\":\"reply OK\"}]' max_tokens:=20" >&2
-  local t0=$EPOCHREALTIME r
-  r=$(xh -b --ignore-stdin --timeout 60 POST http://127.0.0.1:20128/v1/chat/completions \
-      "Authorization:Bearer $key" model="$m" 'messages:=[{"role":"user","content":"reply OK"}]' max_tokens:=20 2>/dev/null)
+  local m=${1:?model} url=http://127.0.0.1:20128/v1/chat/completions
+  local messages='[{"role":"user","content":"Call the diagnostic_ping tool with value OK. Do not answer with text."}]'
+  local tool_schema='[{"type":"function","function":{"name":"diagnostic_ping","description":"Return the supplied diagnostic value.","parameters":{"type":"object","properties":{"value":{"type":"string"}},"required":["value"],"additionalProperties":false}}}]'
+  print -r -- "━━━ xh ━━━  xh --print=hb --pretty=none --ignore-stdin --timeout 60 POST $url \"Authorization:Bearer \$OMNIROUTE_API_KEY\" model=${(q)m} messages:=${(q)messages} tools:=${(q)tool_schema} max_tokens:=128" >&2
+  local t0=$EPOCHREALTIME r rc body http_line
+  r=$(xh --print=hb --pretty=none --ignore-stdin --timeout 60 POST "$url" \
+      "Authorization:Bearer $key" model="$m" messages:="$messages" tools:="$tool_schema" max_tokens:=128)
+  rc=$?
   local dt=$(printf '%.1f' $((EPOCHREALTIME - t0)))
-  local ok=$(jq -r '.choices[0].message.content // empty' <<<"$r" 2>/dev/null)
-  if [[ -n $ok ]]; then
-    echo "  OK ${dt}s  $m → ${${ok//$'\n'/ }:0:60}" >&2
-  else
-    echo "  FAIL ${dt}s  $m → $(jq -r '.error.message // .' <<<"$r" 2>/dev/null | head -c 120)" >&2
+  r=${r//$'\r'/}
+  http_line=${r%%$'\n'*}
+  body=${r#*$'\n\n'}
+  print -r -- "  Model: $m | ${http_line:-no HTTP response} | ${dt}s | xh exit: $rc | probe: 1 tool" >&2
+  if (( rc != 0 )); then
+    print -r -- "  FAIL: tool probe request failed" >&2
+    if [[ -n $body ]]; then
+      print -r -- "$body" | jq . >&2 2>/dev/null || print -r -- "$body" >&2
+    fi
+    if [[ $body == *'supports tool calling'* ]]; then
+      print -r -- "  Action: choose a tool-capable model, or add one to this combo in OmniRoute. Plain chat success is insufficient for Claude Code." >&2
+    fi
+    local error_message=$(print -r -- "$body" | jq -r '.error.message // empty' 2>/dev/null)
+    case "$error_message" in
+      *'DEVIN_AGENTIC_HOME must be an absolute path inside the bridge sandbox'*|*'Auggie CLI not found:'*|*'spawn zcode ENOENT'*|*'Codex app-server transport is not configured'*)
+        print -r -- "  Provider setup is broken; hiding its models for this picker session." >&2
+        return 2 ;;
+    esac
     return 1
   fi
+  if ! print -r -- "$body" | jq -e '.choices[0].message.tool_calls[]? | select(.function.name == "diagnostic_ping") | .function.arguments | fromjson | select(.value == "OK")' >/dev/null 2>&1; then
+    print -r -- "  FAIL: HTTP succeeded, but the model did not return the expected tool call. Response:" >&2
+    print -r -- "$body" | jq . >&2 2>/dev/null || print -r -- "$body" >&2
+    return 1
+  fi
+  print -r -- "$body" | jq -r '"  OK: tool calling | response model: \(.model // "unknown") | finish: \(.choices[0].finish_reason // "unknown") | usage: \(.usage // {} | tojson)"' >&2
 }
 
-# fzf over OmniRoute chat models, test the pick, re-open picker until one answers
+# Only direct models advertising tools; verify the selected model before launch.
 omni-pick() {
   local key=${OMNIROUTE_API_KEY:-$(grep '^OMNIROUTE_API_KEY=' ~/dotfiles/.env | cut -d= -f2-)}
-  local list m
-  list=$(xh -b --ignore-stdin GET http://127.0.0.1:20128/v1/models "Authorization:Bearer $key" \
-    | jq -r '.data[] | select(.owned_by != "aihorde") | "\(.id)\t\(.owned_by)"') || return 1
-  while m=$(fzf --prompt='omniroute model> ' --delimiter='\t' --with-nth=1,2 \
-      --header='Enter = test + use · Esc = cancel' <<<"$list" | cut -f1); [[ -n $m ]]; do
-    omni-test "$m" && { echo "$m"; return 0; }
+  local catalog list table m rc provider
+  print -r -- '━━━ xh ━━━  xh -b --ignore-stdin --timeout 15 GET http://127.0.0.1:20128/v1/models "Authorization:Bearer $OMNIROUTE_API_KEY"' >&2
+  catalog=$(xh -b --ignore-stdin --timeout 15 GET http://127.0.0.1:20128/v1/models "Authorization:Bearer $key") || return 1
+  list=$(jq -r '
+    def limit: if type == "number" and . > 0 then tostring else "?" end;
+    [.data[] | select(.owned_by != "combo" and .owned_by != "aihorde" and .capabilities.tool_calling == true)]
+    | sort_by(.owned_by, .id)[]
+    | [.id, .owned_by, (.context_length | limit), (.max_input_tokens | limit), (.max_output_tokens | limit)]
+    | @tsv' <<<"$catalog") || return 1
+  if [[ -z $list ]]; then
+    print -r -- "  No direct models advertising tool calling are available in OmniRoute." >&2
+    return 1
+  fi
+  while [[ -n $list ]]; do
+    table=$(column -t -s $'\t' <<<"$(print -r -- $'MODEL\tPROVIDER\tCONTEXT\tMAX INPUT\tMAX OUTPUT'; print -r -- "$list")") || return 1
+    m=$(fzf --prompt='Model / provider> ' --header-lines=1 --delimiter=' +' --accept-nth=1 \
+        --bind='tab:down,shift-tab:up' --no-multi \
+        --header=$'UNVERIFIED: catalog claims tools · Enter = test + use · Tab/Shift-Tab = move\nToken limits; ? = unknown · Provider quota unavailable · Failed entries removed this session' <<<"$table") || return 1
+    [[ -n $m ]] || return 1
+    omni-test "$m"
+    rc=$?
+    if (( rc == 0 )); then
+      print -r -- "$m"
+      return 0
+    fi
+    provider=$(jq -r --arg id "$m" '.data[] | select(.id == $id) | .owned_by' <<<"$catalog") || return 1
+    list=$(jq -Rr --arg id "$m" --arg provider "$provider" --argjson rc "$rc" '
+      select(length > 0) | split("\t")
+      | select(if $rc == 2 then .[1] != $provider else .[0] != $id end)
+      | @tsv' <<<"$list") || return 1
   done
+  print -r -- "  No working model found. Catalog tool support does not establish provider readiness." >&2
   return 1
 }
 
@@ -969,3 +1022,4 @@ fi
 # Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
 # PATH entry on the Orange Pi, which shares this file via stow)
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
+

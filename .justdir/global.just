@@ -95,6 +95,10 @@ hub port="8890" root="~/zettelkasten/claude_code":
 
     // "state" = only the hub state file changed (archive/tags/pins) — the index re-renders itself, pages don't reload
     const RELOAD = `<script>new EventSource("/__reload").onmessage=e=>{if(e.data!=="state")location.reload()}</script>`;
+    // every page links back to the hub index by LAN IP (Mike 16.10), so a link opened on the phone/another machine still works
+    // LAN IP re-read per request: DHCP moves it (.15 → .182 → .85), a value cached at start went stale
+    const curIP = () => Object.values(networkInterfaces()).flat().find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
+    const HOME_LINK = () => `<a href="http://${curIP()}:${PORT}/" title="hub" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:18px;padding:5px 12px;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 2px 8px #0006">🏠 Hub</a>`;
     const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
     const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
 
@@ -234,8 +238,8 @@ hub port="8890" root="~/zettelkasten/claude_code":
           return html(await dirListing(path));
         }
         const ext = extname(path).toLowerCase();
-        if (ext === ".md") return html(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}` + md(await Bun.file(path).text()));
-        if (ext === ".html" || ext === ".htm") return html((await Bun.file(path).text()) + RELOAD);
+        if (ext === ".md") return html(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}${HOME_LINK()}` + md(await Bun.file(path).text()));
+        if (ext === ".html" || ext === ".htm") return html((await Bun.file(path).text()) + RELOAD + HOME_LINK());
         return new Response(Bun.file(path));
       },
     });
@@ -1788,3 +1792,33 @@ ls:
 [group('self')]
 show recipe:
     @just -g --show {{recipe}}
+
+# Rebuild fleet.json (tmux 🙋 badges) from the live b2b windows; 🙋 only from ~/.claude/fleet-board/need-mike.tsv
+[group('fleet')]
+fleet-icons:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ [1/2] rebuilding fleet.json from live b2b windows..." >&2
+    python3 ~/.claude/fleet-board/bin/fleet-icons.py
+    echo "→ [2/2] syncing tmux badges (fleet-sync.sh)..." >&2
+    bash ~/dotfiles/tmux/scripts/fleet-sync.sh && echo "  OK" >&2 || { echo "  FAIL (fleet-sync.sh)" >&2; exit 1; }
+
+# Print the fleet board once (same renderer + format as tmux window 3); w=width, plain=1 strips colors
+[group('fleet')]
+fleet w="" plain="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "→ rendering fleet board once (FLEET_ONCE=1 ~/.claude/fleet-board/fleet-live.sh)..." >&2
+    W="{{w}}"; [[ -n "$W" ]] || W=$(tput cols 2>/dev/null || echo 120)
+    # newest sprint board (w<N>) unless FLEET_S is set — the old "b2b" session is gone
+    if [[ -z "${FLEET_S:-}" ]]; then
+      N=$(ls -d ~/.claude/fleet-board/w[0-9]* 2>/dev/null | sed 's/.*w//' | sort -n | tail -1)
+      export FLEET_S=W$N FLEET_B=~/.claude/fleet-board/w$N FLEET_CS=~/.claude/fleet-board/w$N/panel-collapsed
+      echo "  session $FLEET_S" >&2
+    fi
+    if [[ -n "{{plain}}" ]]; then
+      FLEET_ONCE=1 FLEET_W="$W" ~/.claude/fleet-board/fleet-live.sh | sed $'s/\x1b\\[[0-9;]*m//g'
+    else
+      FLEET_ONCE=1 FLEET_W="$W" ~/.claude/fleet-board/fleet-live.sh
+    fi
+    echo "  OK" >&2
