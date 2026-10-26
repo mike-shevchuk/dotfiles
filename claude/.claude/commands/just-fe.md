@@ -146,3 +146,9 @@ export interface EnterpriseCategory { … }
 - [ ] no tokens/secrets in the comment (`<TOKEN>`), real dev IDs kept
 - [ ] test data cleaned up (other people's dev data untouched)
 - [ ] badge SHA = the build-proof SHA of this run; DEMO gate `demo-result.sh check <pr>` ✓ before saying "ready to merge"
+
+## Language + layout (Mike 2026-10-01 — mandatory)
+- **English only** in the PR comment — no Ukrainian anywhere, including copied try/recipe output («Маєш побачити», «Що перевіряємо», verdicts).
+  The try is Ukrainian for Mike; the comment is not: translate or drop those lines. Check before posting: `grep -P '[\x{0400}-\x{04FF}]'` must find nothing.
+- **Split into sections** so it reads top-down: a short summary table first (step · what · result ✅/❌), then ONE collapsible
+  `<details><summary>Step N — title · ✅</summary>` per step holding the commands and raw output. Never one long unbroken log.
