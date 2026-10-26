@@ -927,7 +927,8 @@ local function chat(id, n, force)
           local rule, spin = nil, nil
           for i = #lines, 1, -1 do
             if not rule and lines[i]:match("^%s*─") then rule = i end
-            if not spin and (lines[i]:find("esc to interrupt", 1, true) or lines[i]:match("^%s*[✻✽✶✳✢·*]%s+%S+…")) then
+            -- "✻ Thinking… (12s · ↑ 3k tokens · esc to interrupt)", also bare "Beaming… (19m 20s · 6.6k tokens)"
+            if not spin and (lines[i]:find("esc to interrupt", 1, true) or lines[i]:match("%S…%s*%(%d+[hms]")) then
               spin = safeClean(lines[i], 120)
             end
           end
