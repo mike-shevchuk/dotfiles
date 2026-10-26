@@ -855,13 +855,15 @@ local function chat(id, n, force)
         done(d)
       end)
     end
-    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
-      local path = out:gsub("%s+$", "")
-      if path == "" or hs.fs.attributes(path) then return withPath(path) end
-      -- a client attached to background jobs reports its own (never written) session file: show the newest
-      -- transcript no other window claims — the job it is watching.
-      -- ponytail: newest-unclaimed heuristic, read the attached job id if two bg jobs talk at once
-      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. HOME .. "/.claude/projects/*/*.jsonl | head -20" }, function(o)
+    -- no hook-kept transcript (the hook never ran there) or a dead one (a client attached to background jobs):
+    -- the newest transcript no other window claims, from this window's own project folder when it has one
+    -- ponytail: newest-unclaimed heuristic, read the attached job id if two bg jobs talk at once
+    task(TMUX, { "display", "-p", "-t", id, "#{@agent_transcript}\t#{pane_current_path}" }, function(out)
+      local path, cwd = out:gsub("%s+$", ""):match("^([^\t]*)\t?(.*)$")
+      if path ~= "" and hs.fs.attributes(path) then return withPath(path) end
+      local dir = path == "" and cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or nil
+      local glob = dir and hs.fs.attributes(dir) and (dir .. "/*.jsonl") or (HOME .. "/.claude/projects/*/*.jsonl")
+      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. glob .. " | head -20" }, function(o)
         local claimed, past = {}, false
         for l in o:gmatch("[^\n]+") do
           if l == "--" then past = true
