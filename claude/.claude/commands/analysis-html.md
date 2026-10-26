@@ -33,7 +33,7 @@ Collect and keep the raw material; you will paste it verbatim later:
 ## Step 2 — build the page from the template
 
 ```bash
-cp ~/dotfiles/claude/.claude/scripts/report/template.html <OUT>/<slug>-<YYYY-MM-DD>.html
+cp ~/dotfiles/claude/.claude/scripts/report/template.html <OUT>/<slug>-<YYYY-MM-DD>.html   # template loads /_assets/diff-hl.js → every pre.diff gets syntax highlighting (language from the .file line); keep pre.diff lines as span.add/.del/.ctx
 ```
 
 Fill `{{TITLE}}`, `{{H1_EN}}`, `{{H1_UA}}`, `{{SUBTITLE}}`, `{{SECTIONS}}`, `{{EXTRA_CSS}}`.
@@ -215,6 +215,49 @@ component lives in `{{EXTRA_CSS}}` and is built only from `var(--…)` tokens so
 five themes keep working), and **wide tables scroll inside their own wrapper**
 (`.ba-wrap`, `.lam-wrap`, `.tl-wrap`) — never the page. Verify both, plus the
 before/after diffs render coloured, in the Step 5 browser pass.
+
+## Step 3c — 3Blue1Brown style for «how it works» explanations (Mike 2026-10-09)
+
+When the report explains a mechanism (a formula, a pipeline, why numbers differ), teach it the 3Blue1Brown way —
+still INSIDE the template (only `{{EXTRA_CSS}}` + inline SVG; no new libraries, no redesign, never a hand-made page):
+1. **Concrete before abstract** — start from one real case with real numbers (e.g. «Gregs Desk hears the card at −60 dBm»), only then the general formula.
+2. **One colour = one quantity, everywhere** — e.g. signal distance = blue, pin distance = yellow, broken value = red; the SAME colour in prose,
+   formula terms, SVG shapes and tables. A 1-line colour legend near the top.
+3. **Build up step by step** — numbered small SVG frames (or a ◀ ▶ stepper revealing one stage per click); each frame adds ONE idea.
+4. **The formula is drawn, not just written** — each term coloured, an arrow from each term to where it lives in the picture;
+   then plug the real numbers in, term by term, to the final value.
+5. **Wrong path next to the right one** — side by side, same scale, same colours, so the difference is seen, not described.
+6. **Geometry at true scale** — repeaters, pins and circles drawn in feet, labelled by name.
+7. **Each section ends with a one-sentence bold takeaway**, in both languages.
+Dark-theme safe (template tokens), readable at 760 px, no endless animation (respect prefers-reduced-motion).
+
+Borrowed from a strong outside example (Mike 2026-10-09) — add these where they fit:
+8. **One explorable control per key parameter** — an `<input type="range">` (e.g. path-loss n 2–6, default the real value) that recomputes
+   the drawn number and shape live, so the reader *moves* the cause and sees the effect («2.5 generic vs 5.4 calibrated»).
+9. **↻ Replay** on animated frames (`requestAnimationFrame`, runs once on scroll-in, replays on click; static frame under prefers-reduced-motion).
+10. **Scale honesty under every drawing** — «To scale · grid = 5 ft» or «Illustration, not to scale».
+11. **Headings are claims in plain words** («Every screen drew its own pin», «Draw the pin once, then everyone measures from it»),
+    with a short uppercase kicker above (`LOUDNESS → DISTANCE`).
+12. **Footer metadata line** — ticket · PR · merged/created time (Kyiv) · env/build sha.
+
+## Step 3d — findable: descriptive title, file name, keywords (Mike 2026-10-09)
+
+The hub search/tags read the file name, `<title>` and `<meta name="keywords">`. Every report sets all three:
+- **`<title>`** = `PUN-NNNN · PR #NNNN · <what it explains in plain words> — <kind: root cause / how it works / plan / measurement>`
+  (e.g. `PUN-1911 · PR #2330 · Device panel distance ≠ map — root cause & fix`). Never just a ticket id.
+- **File name** = `<topic-words>-<PUN|prNNNN>-<YYYY-MM-DD>.html`, lowercase, words not codes (e.g. `hub-distance-panel-vs-map-pun1911-2026-10-09.html`).
+- **`<meta name="keywords" content="…">`** — 8–15 comma-separated search words in BOTH languages: component names (repeater, card, evaluator),
+  endpoints (/hubs, /maps/{id}/spaces), fields (distanceFt, displayRadiusFt), concepts (calibration, triangulation, калібровка, відстань), PR/PUN ids.
+  `_hub.py` turns them into tags.
+
+## Step 3e — at least one /just-test or /just-fe style evidence block (Mike 2026-10-09)
+
+Every report carries at least ONE reproducible proof block in the spirit of `/just-test` (smoke trace) or `/just-fe` (FE hand-off):
+- the exact copy-paste command (`xh …` / `jb2b …` / `aws …`, full URL + headers with `$SNAPSHOT_AUTH`, no «…»), run for real on dev (or prod read-only);
+- the real response excerpt (`pre`, trimmed with the jq filter shown), the key fields highlighted, before → after when there is a change;
+- a one-line verdict ✅/❌ and when/where it ran (env, build sha, Kyiv time);
+- for FE-facing changes: the field table (name · type · meaning · example) and the screen that uses it, like `/just-fe`.
+Reuse what the PR's posted JT/JF comments already proved (link them) instead of inventing new runs.
 
 ## Step 4 — bilingual
 
