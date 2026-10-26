@@ -261,14 +261,36 @@ local function refreshJobs()
   task(JQ, { "-r", 'select(.linkScanPath) | "\\(.updatedAt)\t\\(.state)\t\\(.daemonShort // .sessionId[:8])\t\\(.name // "?")\t\\(.linkScanPath)"',
     table.unpack(jobStates()) }, function(o)
     local by, active, tr = {}, {}, {}
+    local dayAgo = os.date("!%Y-%m-%dT%H:%M:%S", os.time() - 86400)
     for at, st, jid, name, path in o:gmatch("([^\t\n]+)\t([^\t\n]+)\t([^\t\n]+)\t([^\t\n]*)\t([^\n]+)") do
       by[path], tr[jid] = st, path
-      if st ~= "done" and st ~= "failed" and hs.fs.attributes(path) then
+      -- active = touched in the last 24 h; one blocked for weeks is not "waiting for you" any more
+      if st ~= "done" and st ~= "failed" and at >= dayAgo and hs.fs.attributes(path) then
         active[#active + 1] = { id = jid, name = safeClean(name, 40), st = st, at = at }
       end
     end
     table.sort(active, function(a, b) return a.at > b.at end)
     jobs = { by = by, active = active, tr = tr }
+    -- a claude whose hook never ran (no @agent_transcript, e.g. a lead started before the hooks): the newest
+    -- transcript of its project that no window, pick or background job owns
+    local taken = {}
+    for _, j in ipairs(active) do taken[tr[j.id]] = true end -- live background jobs (a done one may be resumed in a window)
+    for _, t in pairs(jobPick) do taken[t] = true end
+    for _, w in ipairs(sessionCache) do if w.tr ~= "" then taken[w.tr] = true end end
+    for _, w in ipairs(sessionCache) do
+      if w.claude and w.state == "" and not jobPick[w.id] and (w.cwd or "") ~= "" then
+        local dir = HOME .. "/.claude/projects/" .. w.cwd:gsub("[/.]", "-")
+        if hs.fs.attributes(dir) then
+          local best, bestM
+          for f in hs.fs.dir(dir) do
+            local path = dir .. "/" .. f
+            local m = f:match("%.jsonl$") and not taken[path] and hs.fs.attributes(path, "modification")
+            if m and (not bestM or m > bestM) then best, bestM = path, m end
+          end
+          if best then taken[best] = true; savePick(w.id, best) end
+        end
+      end
+    end
   end)
 end
 -- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
@@ -325,7 +347,7 @@ local function parseSessions(out)
       if name == "" or name:match("^%d+%.%d+%.%d+$") or name:lower() == "claude" then
         name = clean(cwd:match("([^/]+)/*$") or name)
       end
-      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr,
+      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr, cwd = cwd,
                           at = tonumber(aat), cmax = tonumber(cmax), n = #list }
       local askAt = tonumber(at) or os.time()
       if isAsk(st, kind, ask, os.time() - askAt) then
@@ -343,9 +365,21 @@ local function parseSessions(out)
     return a.at < b.at
   end)
   -- st: waiting only with an open dialog; at the prompt = done for 30 min after the last event, then idle
+  -- background sessions (claude --bg) have no tmux window: a row each in a "bg" block, unless a window shows it
+  local shown = {}
+  for _, w in ipairs(list) do if w.tr ~= "" then shown[w.tr] = true end end
+  for _, t in pairs(jobPick) do shown[t] = true end
+  for _, j in ipairs(jobs.active) do
+    local t = jobs.tr[j.id]
+    if t and not shown[t] then
+      list[#list + 1] = { id = "job:" .. j.id, idx = "bg:" .. j.id:sub(1, 4), name = j.name, state = "", kind = "",
+                          claude = true, tr = t, job = j.st, n = #list }
+    end
+  end
   for _, w in ipairs(list) do -- untagged Claude windows: the transcript they most likely show
     if w.claude and w.state == "" then
       local live = w.tr ~= "" and hs.fs.attributes(w.tr)
+      if w.job then live = true end
       if not live then w.tr = jobPick[w.id] or "" end -- a `claude agents` window: only once you picked its session
       w.untagged = true
     end
@@ -359,7 +393,7 @@ local function parseSessions(out)
       local js = w.untagged and jobs.by[w.tr]
       -- a fresh transcript beats the job's own state, which lags (still "blocked" while it already works again)
       if m and now - m <= 90 then w.st = "working"
-      elseif js == "blocked" then w.st = "waiting"
+      elseif js == "blocked" and m and now - m <= 7200 then w.st = "waiting"
       elseif js == "working" then w.st = "working"
       elseif w.state == "working" then w.st = "working"
       elseif w.state == "waiting" and (w.kind == "permission" or w.kind == "choice") then w.st = "waiting"
@@ -958,6 +992,8 @@ local function chat(id, n, force, job)
         end)
       end)
     end
+    local jid = id:match("^job:(%w+)$") -- a background session's row: its own transcript, no window behind it
+    if jid then return withPath(jobs.tr[jid] or "") end
     -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
     -- window's own project folder. A dead one = a `claude agents` client: the background job it most likely
     -- shows (the latest active one), kept for that window until ↻ — never a teammate's transcript.
@@ -1291,6 +1327,8 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
+  local jobId = p.t and p.t:match("^job:%w+$")
+  if method == "POST" and route == "/chat" and jobId then return reply(chat(jobId, tonumber(p.n), p.f == "1"), 200, true) end
   if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n), p.f == "1" or p.job ~= nil, p.job), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
@@ -1343,6 +1381,11 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/mic/pcm" then
     local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")
     if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
+  end
+  -- the board's pull-down on the Dash: everything the minute timers would bring, now
+  if method == "POST" and route == "/refresh" then
+    refreshJobs(); refreshSessions(); refreshSlow()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/mic" then
