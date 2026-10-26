@@ -200,8 +200,22 @@ function M.widthRatios()
   return pwm and pwm.window_ratios or {}
 end
 
+-- PaperWM's refreshWindows() skips any window that already has an index entry,
+-- so a stale entry (index says col 1 but the window is not in the list — seen
+-- with Thorium sharing Ghostty's slot) hides it from the strip forever. Drop
+-- every index entry that does not point back at its own window first.
 function M.refreshWindows()
-  if paperwm.pwm then paperwm.pwm.windows.refreshWindows() end
+  local pwm = paperwm.pwm
+  if not pwm then return end
+  for _, w in ipairs(pwm.window_filter:getWindows()) do
+    local i = pwm.state.windowIndex(w)
+    local col = i and pwm.state.windowList(i.space, i.col)
+    if i and not (col and col[i.row] and col[i.row]:id() == w:id()) then
+      pwm.state.windowIndex(w, true)
+    end
+  end
+  pwm.windows.refreshWindows()
+  M.invalidate()
 end
 
 -- ── mutations ───────────────────────────────────────────────────

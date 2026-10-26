@@ -69,8 +69,8 @@ local function runShell(cmd)
   M.outputView:html(html)
   M.outputView:show()
 
-  -- Reopen launcher after showing output
-  hs.timer.doAfter(0.3, function() M.show() end)
+  -- Reopen the palette after showing output
+  hs.timer.doAfter(0.3, function() require("modules.palette").open() end)
 end
 
 local function getApps()
@@ -116,6 +116,22 @@ local function buildCommands()
     { text = "Restart",                subText = "System", fn = function() hs.caffeinate.restartSystem() end },
     { text = "Dark Mode Toggle",       subText = "System", fn = function() hs.osascript.applescript('tell application "System Events" to tell appearance preferences to set dark mode to not dark mode') end },
     { text = "Empty Trash",            subText = "System", fn = function() hs.osascript.applescript('tell application "Finder" to empty trash'); hs.alert.show("Trash emptied", 1) end },
+
+    -- Daily (the things done every day; edit freely)
+    { text = "Refresh window layout",  subText = "Daily — re-adopt windows PaperWM lost", fn = function()
+        require("modules.paperwmmodel").refreshWindows(); require("modules.paperwmui").update() end },
+    { text = "Copy public IP",         subText = "Daily — to clipboard", fn = function()
+        hs.task.new("/bin/zsh", function(_, out)
+          hs.pasteboard.setContents((out or ""):gsub("%s+", "")); hs.alert.show("IP copied", 1)
+        end, { "-lc", "xh -b https://ifconfig.me/ip" }):start() end },
+    { text = "Copy sprint week (W#)",  subText = "Daily — W1 = first Monday of January", fn = function()
+        local y = os.date("*t").year
+        local t = os.time({ year = y, month = 1, day = 1, hour = 12 })
+        while os.date("*t", t).wday ~= 2 do t = t + 86400 end
+        local w = math.floor((os.time() - t) / 604800) + 1
+        hs.pasteboard.setContents("W" .. w); hs.alert.show("W" .. w .. " copied", 1) end },
+    { text = "Open dotfiles",           subText = "Daily — Finder", fn = function() hs.execute("open ~/dotfiles") end },
+    { text = "Open zettelkasten",       subText = "Daily — Finder", fn = function() hs.execute("open ~/zettelkasten") end },
 
     -- Hammerspoon
     { text = "Reload Config",          subText = "Hammerspoon", fn = function() hs.reload() end },
@@ -240,6 +256,39 @@ local function fuzzyMatch(query, item)
   return nil
 end
 
+-- Icons: real app icons for apps, an emoji badge per category for commands.
+local CATEGORY_ICON = {
+  System = "⚙️", Hammerspoon = "🔨", Display = "🖥️", Tools = "🧰", Linear = "📊",
+  Audio = "🔊", Window = "🪟", Trackpad = "👆", Screenshot = "📸",
+  Shell = "💻", ["Shell History"] = "🕘",
+}
+
+local iconCache = {}
+
+local function emojiImage(emoji)
+  if iconCache[emoji] then return iconCache[emoji] end
+  local c = hs.canvas.new({ x = 0, y = 0, w = 64, h = 64 })
+  c[1] = { type = "text", text = hs.styledtext.new(emoji, {
+    font = { size = 46 }, paragraphStyle = { alignment = "center" } }),
+    frame = { x = 0, y = 4, w = 64, h = 60 } }
+  local img = c:imageFromCanvas()
+  c:delete()
+  iconCache[emoji] = img
+  return img
+end
+
+local function appIcon(path)
+  if not iconCache[path] then iconCache[path] = hs.image.iconForFile(path) end
+  return iconCache[path]
+end
+
+local function categoryOf(subText)
+  return (subText or ""):match("^([^%s—]+%s?[^%s—]*)"):gsub("%s+$", "")
+end
+
+M.emojiImage, M.appIcon, M.runShell, M.apps = emojiImage, appIcon, runShell, getApps
+function M.commands() return buildCommands() end
+
 -- Build all items (cached between shows)
 M._allItems = nil
 
@@ -254,6 +303,7 @@ local function getAllItems()
     items[#items + 1] = {
       text = cmd.text,
       subText = cmd.subText,
+      image = emojiImage(CATEGORY_ICON[categoryOf(cmd.subText)] or "▶️"),
       type = "cmd",
       cmdIdx = i,
     }
@@ -261,6 +311,7 @@ local function getAllItems()
 
   -- Apps
   for _, app in ipairs(getApps()) do
+    app.image = appIcon(app.path)
     items[#items + 1] = app
   end
 
@@ -307,6 +358,7 @@ function M.show()
             subText = "Shell — press Enter to execute",
             type = "shell",
             shellCmd = shellCmd,
+            image = emojiImage("💻"),
           },
         }
         -- Fuzzy match history
@@ -318,6 +370,7 @@ function M.show()
               subText = "Shell History",
               type = "shell",
               shellCmd = h,
+              image = emojiImage("🕘"),
             }
           end
         end
