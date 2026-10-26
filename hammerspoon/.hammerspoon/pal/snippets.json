@@ -1,0 +1,7 @@
+[
+  {"name": "PR description skeleton", "body": "## What\n\n- \n\n## Why\n\n- \n\n## How to test\n\n```bash\njust \n```\n\n## Risks / rollout\n\n- \n\nLinear: PUN-"},
+  {"name": "Standup", "body": "Yesterday:\n- \n\nToday:\n- \n\nBlockers:\n- none"},
+  {"name": "git undo cheats", "body": "git restore <file>              # drop unstaged changes\ngit restore --staged <file>     # unstage\ngit reset --soft HEAD~1         # undo last commit, keep changes staged\ngit commit --amend --no-edit    # add staged changes to last commit\ngit reflog                      # find a lost commit\ngit reset --hard ORIG_HEAD      # undo a bad merge/rebase\ngit revert <sha>                # undo a pushed commit safely"},
+  {"name": "Ukrainian polite reply", "body": "Дякую за повідомлення! Подивлюся і повернуся з відповіддю сьогодні до кінця дня. Якщо щось термінове — напишіть, будь ласка, і я пріоритезую."},
+  {"name": "xh request template", "body": "echo \"━━━ xh ━━━  xh POST https://api.example.com/v1/items \\\"Authorization:Bearer \\$TOKEN\\\" name=demo\" >&2\nxh POST https://api.example.com/v1/items \"Authorization:Bearer $TOKEN\" name=demo count:=1"}
+]

@@ -27,9 +27,17 @@ function M.invalidate() stripCacheAt = 0 end
 -- cannot focus, and touching its dead Accessibility element can stall — a real
 -- source of the sluggishness. Detect purely by id against ONE snapshot of live
 -- ids per pass: hs.window.get(id) re-scans every app's windows on each call.
-local function liveIds()
+-- allWindows() costs ~27 ms (an AX scan of every app) and this ran on every
+-- strip read, i.e. on every focus change. A dead window is rare and harmless
+-- for a moment, so one snapshot serves for 2 s.
+-- ponytail: TTL cache; invalidate on windowDestroyed if phantoms linger visibly
+local liveCache, liveAt = nil, 0
+local function liveIds(fresh)
+  local now = hs.timer.secondsSinceEpoch()
+  if not fresh and liveCache and now - liveAt < 2 then return liveCache end
   local set = {}
   for _, w in ipairs(hs.window.allWindows()) do set[w:id()] = w end
+  liveCache, liveAt = set, now
   return set
 end
 
@@ -51,7 +59,7 @@ function M.pruneDead(space)
   if not pwm then return false end
   space = space or hs.spaces.focusedSpace()
   local removed = false
-  local live = liveIds()
+  local live = liveIds(true) -- removal must never trust a stale snapshot: a brand-new window would look dead
   for _ = 1, 12 do
     local list = pwm.state.windowList(space)
     if not list then break end
@@ -94,6 +102,9 @@ local function computeStrip()
   if list then
     for c = 1, #list do
       if isDead(list[c] and list[c][1], live) then
+        -- the cached snapshot may just predate a new window; ask once for real
+        live = liveIds(true)
+        if not isDead(list[c] and list[c][1], live) then break end
         local now = hs.timer.secondsSinceEpoch()
         if now - lastPrune > 3 then
           lastPrune = now
