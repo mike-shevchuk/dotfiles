@@ -435,7 +435,7 @@ alias gb='git branch'
 alias git_dog="git log --all --decorate --oneline --graph"
 
 # forgit — interactive git via fzf. `gi` prefix = "git interactive"; none of these
-# collide with the g* aliases above. (plugin loads in .zsh_zinit; FORGIT_NO_ALIASES=1)
+# collide with the g* aliases above. (plugin loads in .zsh_zinit; export FORGIT_NO_ALIASES=1)
 alias gia='forgit::add'          # stage files (multi-select + diff preview)
 alias gid='forgit::diff'         # browse a diff
 alias gil='forgit::log'          # browse the log
