@@ -882,6 +882,16 @@ open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBB
                        + chunk(b"IDAT", zlib.compress(bytes(rows))) + chunk(b"IEND", b""))
 ]]
 local chatCache = {}
+local SHOT_DIR = HOME .. "/Library/Logs/esp-deck-shots"
+local lastShot -- the board's last 📷, until 📎 pastes it
+local clipSeen = -1 -- pasteboard changeCount already pasted
+local function clipImage() -- an image on the clipboard not pasted yet (no read of the image itself: cheap)
+  if hs.pasteboard.changeCount() == clipSeen then return false end
+  for _, t in ipairs(hs.pasteboard.contentTypes() or {}) do
+    if t == "public.png" or t == "public.tiff" then return true end
+  end
+  return false
+end
 local function chat(id, n, force)
   local now = os.time()
   for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
@@ -1100,6 +1110,7 @@ local function state()
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
+    clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
   }
 end
 
@@ -1257,16 +1268,29 @@ local function handle(method, path, headers, body)
     if f then f:write(body or ""); f:close() end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/shot" then
-    local dir = HOME .. "/Library/Logs/esp-deck-shots"
-    hs.fs.mkdir(dir)
-    local png = dir .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
-    local w, h, t = tonumber(p.w) or 320, tonumber(p.h) or 480, (p.t or ""):match("^@%d+$")
+  if method == "POST" and route == "/shot" then -- saved, not typed: 📎 on the board pastes it where you want
+    hs.fs.mkdir(SHOT_DIR)
+    local png = SHOT_DIR .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
+    local w, h = tonumber(p.w) or 320, tonumber(p.h) or 480
     task("/usr/bin/python3", { "-c", SHOT_PY, "/tmp/deck-shot.raw", tostring(w), tostring(h), png }, function()
-      if hs.fs.attributes(png) and t then task(TMUX, { "send-keys", "-t", t, "-l", png .. " " }) end
-      if hs.fs.attributes(png) then hs.pasteboard.setContents(png) end
+      if hs.fs.attributes(png) then lastShot = png end
     end)
     return reply("ok", 200)
+  end
+  -- 📎: the image on the Mac's clipboard (a copied screenshot) first, else the board's last 📷 → its path typed
+  -- into window t, no Enter (words with 🎤, then ✓)
+  if method == "POST" and route == "/shot/paste" and id then
+    local png = lastShot
+    local img = clipImage() and hs.pasteboard.readImage()
+    if img then
+      hs.fs.mkdir(SHOT_DIR)
+      png = SHOT_DIR .. "/clip-" .. os.date("%Y%m%d-%H%M%S") .. ".png"
+      if not img:saveToFile(png) then png = nil end
+      clipSeen = hs.pasteboard.changeCount() -- pasted: the same clipboard no longer offers 📎
+    end
+    lastShot = nil
+    if png then task(TMUX, { "send-keys", "-t", id, "-l", png .. " " }) end
+    return reply(png and "ok" or "nothing", png and 200 or 404)
   end
   if method == "POST" and route == "/mic/pcm" then
     local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")
