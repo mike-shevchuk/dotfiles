@@ -304,7 +304,7 @@ _mirror-screenlock mode:
 _mirror-locked:
     #!/usr/bin/env bash
     set -uo pipefail
-    s=$(timeout 5 hs -c 'return tostring(hs.caffeinate.sessionProperties().CGSSessionScreenIsLocked == true)' 2>/dev/null | tr -dc 'a-z')
+    s=$(hs -q -t 5 -c 'return tostring(hs.caffeinate.sessionProperties().CGSSessionScreenIsLocked == true)' 2>/dev/null | tr -dc 'a-z')
     case "$s" in
         *true*)  echo true ;;
         *false*) echo false ;;
@@ -323,7 +323,7 @@ _mirror-hs:
     set -uo pipefail
     command -v hs >/dev/null 2>&1 || { echo "  FAIL — no 'hs' CLI; run hs.ipc.cliInstall() inside Hammerspoon" >&2; exit 1; }
     # Capture, then match: `grep -q` in a pipe can SIGPIPE hs and fail under pipefail.
-    _hs_socket_up() { [[ "$(timeout 3 hs -c 'return "ok"' 2>/dev/null)" == *ok* ]]; }
+    _hs_socket_up() { [[ "$(hs -q -t 3 -c 'return "ok"' 2>/dev/null)" == *ok* ]]; }
     _hs_socket_up && exit 0
     if ! pgrep -x Hammerspoon >/dev/null 2>&1; then
         bin=""
@@ -477,7 +477,7 @@ _mirror-front:
     #!/usr/bin/env bash
     set -uo pipefail
     command -v hs >/dev/null 2>&1 || exit 0
-    timeout 8 hs -c 'local w = hs.window.frontmostWindow(); return w and tostring(w:id()) or ""' 2>/dev/null \
+    hs -q -t 8 -c 'local w = hs.window.frontmostWindow(); return w and tostring(w:id()) or ""' 2>/dev/null \
         | tr -dc '0-9' || true
 
 # Put the focus back where it was, so a tiling WM scrolls that window into view
@@ -495,7 +495,7 @@ _mirror-refocus id="":
     command -v hs >/dev/null 2>&1 || exit 0
     sleep 1   # let the WM finish re-tiling for the new screen first
     echo "→ bringing the window you were using back into view ..." >&2
-    timeout 8 hs -c 'local w = hs.window.get({{id}}); if w then w:focus() end; return "ok"' >/dev/null 2>&1 || true
+    hs -q -t 8 -c 'local w = hs.window.get({{id}}); if w then w:focus() end; return "ok"' >/dev/null 2>&1 || true
 
 # Ask Hammerspoon to drive the Screen Mirroring pane, then wait for its answer
 [group('mirror')]
@@ -523,7 +523,7 @@ _mirror cmd device="iPad" mode="":
     # `hs -c` keeps streaming the Hammerspoon console back over its socket, so a
     # slow call would hang here on unrelated log chatter. Fire it and forget it:
     # mirror.lua answers into $res, and its watchdog guarantees an answer lands.
-    timeout 5 hs -c "dofile([[$lua]]).cli([[{{cmd}}]],[[{{device}}]],[[{{mode}}]])" >/dev/null 2>&1 || true
+    hs -q -t 5 -c "dofile([[$lua]]).cli([[{{cmd}}]],[[{{device}}]],[[{{mode}}]])" >/dev/null 2>&1 || true
 
     for _ in $(seq 1 90); do
         [ -f "$res" ] && break

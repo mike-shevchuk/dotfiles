@@ -16,7 +16,10 @@ local caffeineState = false
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 local FONT = { name = "Menlo", size = 12 }
 
+-- vm_stat / swap / ps come from one async task (M.refresh): three sync forks every 10 s could stall all of HS
+local cached = {}
 local function shellExec(cmd)
+    if cached[cmd] then return cached[cmd] end
     return hs.execute(string.format("export PATH='%s'; %s", PATH, cmd))
 end
 
@@ -139,6 +142,7 @@ end
 
 -- Update only the menubar title (called by pomodoro every second)
 -- Uses cached RAM percentage to avoid spawning vm_stat subprocess each time
+local lastTitle
 local function updateTitle()
     if not menubar then return end
 
@@ -152,11 +156,30 @@ local function updateTitle()
 
     table.insert(parts, caffeineState and "☕️" or "💤")
 
-    menubar:setTitle(table.concat(parts, " | "))
+    local title = table.concat(parts, " | ")
+    if title ~= lastTitle then lastTitle = title; menubar:setTitle(title) end -- setTitle redraws the menubar
 end
 
+local buildMenu
+local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", "ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10" }
+local refreshTask
 function M.refresh()
-    if not menubar then return end
+    if not menubar or (refreshTask and refreshTask:isRunning()) then return end
+    refreshTask = hs.task.new("/bin/sh", function(_, out)
+        local i = 0
+        for part in ((out or "") .. "\1\n"):gmatch("(.-)\1\n") do
+            i = i + 1
+            if REFRESH_CMDS[i] then cached[REFRESH_CMDS[i]] = part end
+        end
+        local used, total = getMemoryUsage()
+        cachedRamPct = total > 0 and math.floor(used / total * 100) or 0
+        updateTitle()
+    end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(REFRESH_CMDS, "; printf '\\1\\n'; ") })
+    refreshTask:start()
+end
+
+-- the menu is built only when it opens (setMenu(fn)), from the last async refresh: no styledtext every 10 s
+buildMenu = function()
 
     local used, total, details = getMemoryUsage()
     local procs = getTopProcesses()
@@ -164,9 +187,6 @@ function M.refresh()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
     cachedRamPct = pct
-
-    -- Update title
-    updateTitle()
 
     local menu = {}
 
@@ -276,10 +296,11 @@ function M.refresh()
     table.insert(menu, { title = "-" })
     table.insert(menu, { title = "Refresh Now", fn = M.refresh })
 
-    menubar:setMenu(menu)
+    return menu
 end
 
 function M.ramPct() return cachedRamPct end
+M.menu = function() return buildMenu() end -- debug / test: the items the menubar shows when it opens
 
 function M.start()
     local memStr = shellExec("sysctl -n hw.memsize")
@@ -292,6 +313,7 @@ function M.start()
     guard.onUpdate = updateTitle
 
     menubar = hs.menubar.new()
+    menubar:setMenu(buildMenu)
     M.refresh()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
 end

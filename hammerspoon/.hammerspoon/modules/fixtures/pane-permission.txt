@@ -1,0 +1,23 @@
+[38;5;246m[48;5;237m❯ [38;5;231me2e-тест борда, без пояснень. Запусти Bash: mkdir -p /tmp/deck-qa && touch [39m   
+  [38;5;231m/tmp/deck-qa/a.txt. Потім напиши ГОТОВО.[39m                                      
+
+[38;5;246m[49m⏺[39m Creating test dir and empty file                               
+[38;5;246m  ⎿  $ mkdir -p /tmp/deck-qa && touch /tmp/deck-qa/a.txt
+
+[38;5;153m────────────────────────────────────────────────────────────────────────────────
+[39m [1m[38;5;153mBash command[0m                                                                   
+ [1mTip: auto mode handles these prompts for you — choose "switch to auto mode" 
+[0m [1mbelow[0m                            
+ [38;5;246mCreate test dir and empty file[39m                         
+[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[39m mkdir -p /tmp/deck-qa && touch /tmp/deck-qa/a.txt
+[38;5;239m╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
+[39m Do you want to proceed?                                      
+ [38;5;153m❯[39m [38;5;246m1. [38;5;153mYes[39m                                                                     
+   [38;5;246m2. [39mYes, and don't ask again for [1mmkdir -p /tmp/deck-qa[0m and [1mtouch [0m             
+      [1m/tmp/deck-qa/a.txt[0m commands in [1m/private/tmp/claude-501/-Users-mikeshevchuk
+[0m      [1m-dotfiles/0a07501b-de71-4acd-8bc5-b19d6d432abf/scratchpad/e2e[0m             
+   [38;5;246m3. [39mYes, and switch to auto mode[38;5;246m · auto mode handles these prompts for you
+[39m   [38;5;246m4. [39mNo                                                                        
+                                                                            
+ [38;5;246mEsc to cancel · Tab to amend[39m    

@@ -303,7 +303,7 @@ refresh_tokens_usage() {
   if [ "$stamp_age" -gt 300 ]; then
     echo "$now_s" > "$_tokens_stamp"
     # Write to tmp then rename — avoids truncating cache to 0 before Python finishes
-    ( python3 "$_tokens_script" > "${_tokens_cache}.tmp" 2>/dev/null && mv "${_tokens_cache}.tmp" "$_tokens_cache" ) &
+    ( python3 "$_tokens_script" > "${_tokens_cache}.tmp" 2>/dev/null && mv "${_tokens_cache}.tmp" "$_tokens_cache" ) </dev/null >/dev/null 2>&1 & # own fds: an inherited stdout keeps the caller's pipe open ~11 s
     disown $!
   fi
 }
@@ -489,7 +489,7 @@ if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
           | jq -r 'first(.[] | select(.status == "in_progress" and (((.name // "") + (.workflowName // "")) | test("deploy"; "i")))) | .startedAt // empty')
       fi
       echo "${_st:-none}|${_start}" > "${_deploy_cache}.tmp" && mv "${_deploy_cache}.tmp" "$_deploy_cache"
-    ) &
+    ) </dev/null >/dev/null 2>&1 &
     disown $!
   fi
   if [ -f "$_deploy_cache" ]; then
@@ -550,7 +550,7 @@ if [ -z "$pr_number" ] && [ -n "$cwd" ] && [ -f "$cwd/.planning/STATE.md" ]; the
            end) as $abbr
         | "\($abbr)|\($done)|\($total)|\(.percent // 0)"
       ' > "${_gsd_cache}.tmp" 2>/dev/null && mv "${_gsd_cache}.tmp" "$_gsd_cache"
-    ) &
+    ) </dev/null >/dev/null 2>&1 &
     disown $!
   fi
   if [ -f "$_gsd_cache" ]; then

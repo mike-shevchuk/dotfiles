@@ -1,16 +1,19 @@
 -- ESP32 deck: HTTP API for the Waveshare ESP32-C5 touch board (firmware + web simulator: ~/code/esp-deck)
 -- GET  /state               → dashboard, tmux sessions, recipes, voice state (JSON)
--- GET  /pane?t=@ID          → last lines of that tmux window
+-- GET  /pane?t=@ID[&m=clean] → last lines of that tmux window (clean: no Claude chrome, turns marked \1u / \1a)
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
--- POST /key?t=@ID&k=Enter   → one whitelisted tmux key
+-- POST /key?t=@ID&k=Enter   → one whitelisted tmux key (Escape to a Claude window also marks it done)
 -- POST /run?r=N             → RECIPES[N] in a new tmux window → {"t":"@ID"}
 -- POST /mic?down=1&lang=uk  → hold-to-talk: 1 starts DeckHelper.app, 0 stops it → text in /state.voice
 -- POST /mic?clear=1         → forget the last transcript
 -- POST /log                 → board log lines + timings, appended to ~/Library/Logs/esp-deck.log (`just logs`)
 -- POST /hub, /projlist      → recent hub pages, projctl projects (lazy: only when that tab opens)
 -- POST /page?i=N&w=COLS     → hub page N as plain text cut to COLS   ·  POST /open?i=N → open it on the Mac
--- POST /fleet?w=COLS        → `lead.py fleet` board (plain python, no Claude tokens)
+-- POST /fleet?w=COLS        → compact `lead.py blockers --json` (who waits for Mike first; plain python, no Claude tokens)
 -- POST /proj?n=NAME&a=up|down|restart → projctl
+-- POST /chat?t=@ID&n=N      → that window's Claude conversation, oldest first: {"msgs":[{"r":"u|a|t","x":"…"}]}
+-- POST /net?r=day|month|year → minutes on the home LAN per device, top 15: {"r":"day","top":[{name,mac,min}]}
+-- POST /spawn?p=NAME        → new window in that project's session running `claude "<body>"` → {"t":"@ID"}
 -- POST /deck                → Stream Deck pages from ~/.hammerspoon/deck.json (labels/icons/colors only)
 -- POST /act?d=PAGE&i=N  ·  /act?r=N&app=APP → run that deck / ring button's action (actions never leave the Mac)
 -- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
@@ -24,13 +27,16 @@ local M = {}
 local env = require("modules.env")
 local sysmonitor = require("modules.sysmonitor")
 local todoist = require("modules.todoist")
+local paneclean = require("modules.paneclean")
 
 local PORT = 7777
 local HOME = os.getenv("HOME")
 local TMUX = "/opt/homebrew/bin/tmux"
+local AGENT_STATE = HOME .. "/dotfiles/tmux/scripts/agent-state.sh" -- Claude hook; `chat` reads a session JSONL
 local STATUSLINE = HOME .. "/.claude/statusline.sh"
 local REMINDERS = HOME .. "/.claude/reminders.sh"
 local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
+local NET_DIR = HOME .. "/Library/Application Support/esp-deck" -- net-day|month|year.json (top 15), written by launchd: `just netscan` in esp-deck
 local VOICE_FILE = "/tmp/deck-voice.txt"
 local CAL_FILE = "/tmp/deck-cal.json"
 local FW_SHA = "/tmp/deck-ota.sha" -- written by `just ota`; the board updates when it differs from its own
@@ -41,7 +47,7 @@ local SLASH = { "/mine", "/fleet", "/stuck", "/trylog", "/devnow", "/brief" }
 
 -- Recipes tab: { label, shell command } — each runs in a new tmux window the board then opens
 local RECIPES = {
-  { "fleet",      "just -g fleet plain=1" },
+  { "fleet",      "just -g fleet '' 1" }, -- positional: w (empty = pane width), plain
   { "rem",        "just -g rem" },
   { "pr-stale",   "just -g pr-stale" },
   { "git all",    "just -g git-status-all" },
@@ -74,6 +80,7 @@ local function clean(s, mono)
   if not mono then r = r:gsub("%s+", " "):gsub("^ ", ""):gsub(" $", "") end
   return r
 end
+local function cut(s, n) local o = utf8.offset(s, n + 1); return o and s:sub(1, o - 1) or s end -- never mid-UTF-8
 
 local function task(cmd, args, cb)
   local t = hs.task.new(cmd, function(_, out) if cb then cb(out or "") end end, args)
@@ -96,8 +103,7 @@ local slowTick = 0
 local HUB_DIR = HOME .. "/zettelkasten/claude_code"
 local HUB_URL = "http://localhost:8890/"
 local PROJCTL = HOME .. "/code/projctl"
-local VIEWER = HOME .. "/code/esp-deck/viewer/server.mjs" -- headless-Chrome remote browser for the board (:7779)
-local hub, projects = {}, {}
+local hub, projects, projWhere = {}, {}, {} -- projWhere[name] = { dir, session } for /spawn
 
 local function refreshHub()
   -- newest 30 pages (no .bak copies), title from <title>
@@ -119,22 +125,28 @@ end
 
 local function refreshProjects()
   -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
-  local list = {}
+  -- (one async list-sessions: a sync has-session per project held up every request behind it)
+  local list, where = {}, {}
   for line in (readFile(PROJCTL .. "/registry.conf") or ""):gmatch("[^\n]+") do
-    local name, _, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
+    local name, dir, session, port, _, auto = line:match("^([^#|][^|]*)|([^|]*)|([^|]*)|([^|]*)|([^|]*)|?(%d?)")
     if name then
-      local ok = os.execute(TMUX .. " has-session -t '=" .. session .. "' 2>/dev/null")
-      list[#list + 1] = { n = name, on = ok == true, port = port, auto = auto == "1" }
+      list[#list + 1] = { n = name, session = session, port = port, auto = auto == "1" }
+      where[name] = { dir = dir:gsub("^~", HOME), session = session }
     end
   end
-  projects = list
+  projWhere = where
+  task(TMUX, { "list-sessions", "-F", "#{session_name}" }, function(out)
+    local up = {}
+    for n in out:gmatch("[^\n]+") do up[n] = true end
+    for _, pr in ipairs(list) do pr.on = up[pr.session] == true; pr.session = nil end
+    projects = list
+  end)
 end
 
 local function refreshSlow()
   slowTick = slowTick + 1
-  refreshHub()
-  refreshProjects()
-  if slowTick % 5 == 1 then -- calendar: DeckHelper writes CAL_FILE, state() reads it
+
+  if slowTick % 2 == 1 then -- calendar every ~2 min: DeckHelper writes CAL_FILE, state() reads it
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
   -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
@@ -173,27 +185,159 @@ local function cpuPct()
   return pct
 end
 
-local function sessions()
-  local out = hs.execute(TMUX .. " list-windows -a -F "
-    .. "'#{window_id}\t#{session_name}:#{window_index}\t#{window_name}\t#{@agent_state}\t#{pane_current_command}'") or ""
-  local list = {}
-  for line in out:gmatch("[^\n]+") do
-    local id, idx, name, st, cmd = line:match("^(@%d+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(.*)$")
-    if id then
-      -- Claude Code shows up as its version ("2.1.301") in pane_current_command
-      local claude = st ~= "" or cmd:match("^%d+%.%d+%.%d+$") ~= nil or cmd == "claude"
-      list[#list + 1] = { id = id, idx = idx, name = clean(name), state = st, claude = claude }
+-- tmux windows, cached: refreshed every 3 s by an async task so a /state request never forks tmux
+local sessionCache, askCache = {}, {}
+local tailCache, fetchTail = {}, nil -- id → the terminal above Claude's dialog, for an ask with no ctx (fetchTail is defined below isRule)
+-- the hook's JSON array of strings → cleaned, utf8-safe, each ≤ n chars
+local function strList(json, n)
+  if json:sub(1, 1) ~= "[" then return {} end -- "" (no ask): hs.json.decode logs an ERROR even inside pcall
+  local out, ok, arr = {}, pcall(hs.json.decode, json)
+  for _, l in ipairs(ok and type(arr) == "table" and arr or {}) do
+    local cok, c = pcall(clean, tostring(l))
+    out[#out + 1] = cut(cok and c or "", n)
+  end
+  return out
+end
+local function safeClean(s, n) -- utf8.codes throws on invalid UTF-8; one bad window must not drop the list
+  local ok, c = pcall(clean, s)
+  return cut(ok and c or "", n)
+end
+-- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
+local FIELDS = { "window_id", "session_name}:#{window_index", "window_name", "@agent_state", "pane_current_command",
+  "@agent_ask_kind", "@agent_ask_at", "@agent_ask_opts", "@agent_ask_multi", "@agent_ask_n", "@agent_ask_descs",
+  "@agent_ask_head", "@agent_ask_ctx", "@agent_transcript", "@agent_at", "@agent_ctx_max", "pane_current_path", "@agent_ask" }
+-- transcript path → { mtime, doing, sum, tok, model } from `agent-state.sh info`, re-read only when the file changed
+local infoCache = {}
+local function refreshInfo(list)
+  local keep, stale = {}, {}
+  for _, w in ipairs(list) do
+    if w.tr ~= "" and not keep[w.tr] then
+      local e = infoCache[w.tr] or {}
+      keep[w.tr] = e
+      local m = hs.fs.attributes(w.tr, "modification") -- a stat, no fork
+      if m and m ~= e.mtime then e.mtime = m; stale[#stale + 1] = w.tr end
     end
   end
-  return list
+  infoCache = keep
+  if #stale == 0 then return end
+  task(AGENT_STATE, { "info", table.unpack(stale) }, function(out)
+    for line in out:gmatch("[^\n]+") do
+      local ok, d = pcall(hs.json.decode, line)
+      local e = ok and type(d) == "table" and infoCache[d.f]
+      if e then
+        e.doing, e.sum, e.tok, e.model = safeClean(d.doing, 60), safeClean(d.sum, 140), tonumber(d.tok) or 0, d.model or ""
+      end
+    end
+  end)
+end
+local ST_RANK = { waiting = 1, done = 2, working = 3, idle = 4 }
+local IDLE_TEXT = "Claude is waiting for your input" -- idle_prompt's default: resting at the prompt, not a question
+-- which hook-kept asks reach the board: an open dialog; an "other" Notification ≤ 1 h; an idle one with real text ≤ 10 min
+local function isAsk(st, kind, text, age)
+  if kind == "permission" or kind == "choice" then return st == "waiting" end
+  if kind == "idle" then return text ~= IDLE_TEXT and text ~= "" and age <= 600 end
+  return kind == "other" and age <= 3600
+end
+local function parseSessions(out)
+  local list, asks, seen = {}, {}, {}
+  for line in out:gmatch("[^\n]+") do
+    local f = {}
+    for x in (line .. "\t"):gmatch("([^\t]*)\t") do f[#f + 1] = x end
+    local id, idx, name, st, cmd, kind, at, opts, multi, nq, descs, head, ctx, tr, aat, cmax, cwd, ask =
+      table.unpack(f, 1, #FIELDS)
+    -- a window linked into several sessions (W42 / w42) comes once per session: keep its first, like the asks
+    if id and id:match("^@%d+$") and ask and not seen[id] then
+      seen[id] = true
+      -- Claude Code shows up as its version ("2.1.301") in pane_current_command
+      local claude = st ~= "" or cmd:match("^%d+%.%d+%.%d+$") ~= nil or cmd == "claude"
+      name = clean(name)
+      -- tmux's automatic-rename calls a Claude window by its version: the project folder says more
+      if name == "" or name:match("^%d+%.%d+%.%d+$") or name:lower() == "claude" then
+        name = clean(cwd:match("([^/]+)/*$") or name)
+      end
+      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr,
+                          at = tonumber(aat), cmax = tonumber(cmax), n = #list }
+      local askAt = tonumber(at) or os.time()
+      if isAsk(st, kind, ask, os.time() - askAt) then
+        asks[#asks + 1] = { id = id, idx = idx, name = name, kind = kind ~= "" and kind or "other",
+                            text = safeClean(ask, 160), at = askAt,
+                            opts = strList(opts, 40), multi = multi == "true", nq = tonumber(nq) or 1,
+                            descs = strList(descs, 80), head = safeClean(head, 40), ctx = safeClean(ctx, 600) }
+      end
+    end
+  end
+  local rank = { permission = 1, choice = 2 }
+  table.sort(asks, function(a, b) -- permission, then choice, then the rest; oldest first within each
+    local ra, rb = rank[a.kind] or 3, rank[b.kind] or 3
+    if ra ~= rb then return ra < rb end
+    return a.at < b.at
+  end)
+  -- st: waiting only with an open dialog; at the prompt = done for 30 min after the last event, then idle
+  refreshInfo(list)
+  local now = os.time()
+  for _, w in ipairs(list) do
+    if w.claude then
+      w.at = w.at or (infoCache[w.tr] or {}).mtime -- @agent_at comes with the next hook event; until then the transcript's
+      if w.state == "working" then w.st = "working"
+      elseif w.state == "waiting" and (w.kind == "permission" or w.kind == "choice") then w.st = "waiting"
+      else w.st = w.at and now - w.at <= 1800 and "done" or "idle" end
+    end
+  end
+  -- Claude agents waiting → done → working → idle, the latest event first; other windows after them in tmux order
+  local function rank(w) return w.claude and ST_RANK[w.st] or 5 end
+  table.sort(list, function(a, b)
+    local ra, rb = rank(a), rank(b)
+    if ra ~= rb then return ra < rb end
+    if ra < 5 and (a.at or 0) ~= (b.at or 0) then return (a.at or 0) > (b.at or 0) end
+    return a.n < b.n
+  end)
+  sessionCache, askCache = list, { table.unpack(asks, 1, 5) }
+  local tails = {}
+  for _, a in ipairs(askCache) do
+    if a.ctx == "" then tails[a.id] = tailCache[a.id] or ""; fetchTail(a.id) end
+  end
+  tailCache = tails
+end
+local function refreshSessions()
+  task(TMUX, { "list-windows", "-a", "-F", "#{" .. table.concat(FIELDS, "}\t#{") .. "}" }, parseSessions)
+end
+local function asks()
+  local now, r = os.time(), {}
+  for i, a in ipairs(askCache) do
+    r[i] = { id = a.id, idx = a.idx, name = a.name, kind = a.kind, text = a.text, age = math.max(0, now - a.at),
+             opts = a.opts, multi = a.multi, nq = a.nq, descs = a.descs, head = a.head, ctx = a.ctx,
+             tail = tailCache[a.id] }
+  end
+  return r
+end
+local function sessions()
+  local now, r = os.time(), {}
+  for i, w in ipairs(sessionCache) do
+    local s = { id = w.id, idx = w.idx, name = w.name, state = w.state, claude = w.claude }
+    if w.claude then
+      local e = infoCache[w.tr] or {}
+      s.st = w.st
+      s.age = w.at and math.max(0, now - w.at) or nil
+      s.doing = e.doing
+      if e.tok and e.tok > 0 then
+        local max = w.cmax or ((e.model:find("[1m]", 1, true) or e.tok > 200000) and 1000000 or 200000)
+        s.ctx = math.floor(e.tok * 100 / max + 0.5)
+      end
+      if s.st == "done" then s.sum = e.sum end
+    end
+    r[i] = s
+  end
+  return r
 end
 
 -- ── voice: DeckHelper.app records until SIGINT, then writes the transcript to VOICE_FILE ──
+-- (while recording it keeps the partial transcript in VOICE_FILE .. ".partial" → /state.voice.text)
 local voice = { state = "idle", text = "" }
 local voiceTimer
 
 local function micDown(lang)
   os.remove(VOICE_FILE)
+  os.remove(VOICE_FILE .. ".partial")
   voice = { state = "rec", text = "" }
   task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "listen", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
 end
@@ -267,12 +411,25 @@ end
 -- ── endpoints ──
 
 -- a TUI ─── rule (box-drawing + spaces only): wider than the board, so it would wrap into several lines
-local function isRule(line)
-  if not utf8.len(line) then return false end
-  for _, cp in utf8.codes(line) do
-    if cp ~= 32 and (cp < 0x2500 or cp > 0x257F) then return false end
-  end
-  return line ~= ""
+local isRule = paneclean.isRule
+
+-- the screen above Claude's dialog / input box (its first ─ or ╌ rule in the bottom 30 lines): ≤ 12 lines, ≤ 600 chars
+fetchTail = function(id)
+  task(TMUX, { "capture-pane", "-p", "-J", "-t", id }, function(out)
+    local lines = {}
+    for l in (out .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = (l:gsub("%s+$", "")) end
+    local stop = #lines + 1
+    for i = math.max(1, #lines - 30), #lines do
+      if isRule(lines[i]) then stop = i; break end
+    end
+    local keep = {}
+    for i = 1, stop - 1 do
+      local ok, c = pcall(clean, lines[i])
+      if ok and c ~= "" then keep[#keep + 1] = c end
+    end
+    local text = table.concat(keep, "\n", math.max(1, #keep - 11))
+    if tailCache[id] then tailCache[id] = (text:sub(-600):gsub("^[\128-\191]+", "")) end -- bytes; never mid-UTF-8
+  end)
 end
 
 -- ── terminal colors: tmux SGR → LVGL label recolor ("#rrggbb text#", a literal # is "##") ──
@@ -353,13 +510,19 @@ local function wrap(segs, width, out)
   flush()
 end
 
-local function pane(id, colors, width)
-  width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
-  local out = hs.execute(TMUX .. " capture-pane -p -e -J -S -120 -t '" .. id .. "'") or ""
+-- a capture-pane → the board's text; clean = paneclean's view, its first line of a turn starts "\1u" / "\1a"
+local function render(out, colors, width, clean)
   out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
+  local items = {}
+  for line in (out .. "\n"):gmatch("(.-)\n") do items[#items + 1] = { s = (line:gsub("%s+$", "")) } end
+  if clean then
+    local src = {}
+    for i, it in ipairs(items) do src[i] = it.s end
+    items = paneclean.clean(src)
+  end
   local lines, blank, fg = {}, false, nil
-  for line in (out .. "\n"):gmatch("(.-)\n") do
-    line = line:gsub("%s+$", "")
+  for _, it in ipairs(items) do
+    local line, first = it.s, #lines + 1
     local plain = line:gsub("\27%[[%d;]*m", "")
     local empty = plain:match("^%s*$") ~= nil
     if isRule(plain) then -- a ─── rule: one screen wide, no colour
@@ -369,11 +532,32 @@ local function pane(id, colors, width)
       local segs
       segs, fg = segments(line, fg, colors)
       if #segs == 0 then lines[#lines + 1] = "" else wrap(segs, width, lines) end
+      if it.m and lines[first] then lines[first] = "\1" .. it.m .. lines[first] end
     end
     blank = empty
   end
   while #lines > 60 do table.remove(lines, 1) end -- the board re-renders all of it every second: keep it light
-  return { t = id, text = table.concat(lines, "\n") }
+  return table.concat(lines, "\n")
+end
+
+-- /pane answers from a cache at once; the capture runs async (a sync hs.execute stalled all of HS for up to 1 s),
+-- at most every 0.4 s per window+view, and a view nobody asked for in 60 s is dropped
+local paneCache = {}
+local function pane(id, colors, width, clean)
+  width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
+  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean) }, "|")
+  for k, e in pairs(paneCache) do if now - e.asked > 60 then paneCache[k] = nil end end
+  local e = paneCache[key] or { fetched = 0 }
+  paneCache[key], e.asked = e, now
+  if not e.busy and now - e.fetched >= 0.4 then
+    e.busy, e.fetched = true, now
+    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-120", "-t", id }, function(out)
+      local ok, text = pcall(render, out, colors, width, clean)
+      if ok then e.data = { t = id, text = text } end
+      e.busy = false
+    end)
+  end
+  return e.data or { t = id, text = "", wait = true }
 end
 
 -- ── Mac quick actions (Opie-style): now playing + convert what's selected in Finder ──
@@ -478,7 +662,7 @@ local function htmlText(html, lang)
 end
 
 -- plain multi-line text → board lines cut to width (no colours; # escaped for the recolor label)
-local function plainLines(text, width)
+local function plainLines(text, width, fg)
   local out = {}
   for line in (text .. "\n"):gmatch("(.-)\n") do
     line = clean(line, true)
@@ -487,18 +671,69 @@ local function plainLines(text, width)
     while line ~= "" do
       local len = utf8.len(line)
       if len <= width then
-        wrap({ { nil, line } }, width, out)
+        wrap({ { fg, line } }, width, out)
         break
       end
       local cut = utf8.offset(line, width + 1)
       local sp = line:sub(1, cut - 1):match(".*() ")
       if not sp or sp < cut / 2 then sp = cut end
-      wrap({ { nil, line:sub(1, sp - 1) } }, width, out)
+      wrap({ { fg, line:sub(1, sp - 1) } }, width, out)
       line = line:sub(sp):gsub("^ ", "")
     end
     if #out > 1500 then break end
   end
   return table.concat(out, "\n")
+end
+
+-- compact fleet for the board (`lead.py blockers --json`): windows that wait for Mike first, ≤3 asks each
+-- lead.py runs async: the board gets the last result (its long-press refresh brings the fresh one)
+local fleetRaw
+local function refreshFleet()
+  task("/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
+       function(out) fleetRaw = out end)
+end
+local function fleetText(width)
+  local raw = fleetRaw
+  refreshFleet()
+  if not raw then return "…" end
+  local ok, d = pcall(hs.json.decode, raw or "")
+  if not ok or not d then return "lead.py blockers failed:\n" .. plainLines(raw or "", width) end
+  local rows = d.rows or {}
+  local function asks(r) local a = {}; for _, x in ipairs(r.asks or {}) do a[#a + 1] = x end
+    for _, x in ipairs(r.need or {}) do a[#a + 1] = x end; return a end
+  table.sort(rows, function(a, b)
+    local na, nb = #asks(a) + #(a.plans or {}) > 0, #asks(b) + #(b.plans or {}) > 0
+    if na ~= nb then return na end
+    return (tonumber(a.i) or 0) < (tonumber(b.i) or 0)
+  end)
+  local L = {}
+  -- ind: wrapped lines of a bullet start under its text, not at column 0
+  local function add(text, fg, ind)
+    ind = ind or 0
+    L[#L + 1] = (plainLines(text, width - ind, fg):gsub("\n", "\n" .. (" "):rep(ind)))
+  end
+  add((d.session or "") .. "  " .. (d.ts or "") .. "   long-press = refresh", "808080")
+  for _, r in ipairs(rows) do
+    local a = asks(r)
+    local name = (r.name or ""):gsub("^.-│%S*%s*", "") -- drop the "🙋│🔵 " badge
+    add("")
+    add(r.win .. "  " .. name, (#a + #(r.plans or {}) > 0) and "f5f543" or "cccccc")
+    local meta = { r.state }
+    if r.pct then meta[#meta + 1] = r.pct .. "%" end
+    if (r.eta or "") ~= "" then meta[#meta + 1] = "ETA " .. r.eta end
+    add("  " .. table.concat(meta, " · "), "808080")
+    for k, x in ipairs(a) do
+      if k > 3 then add("  +" .. (#a - 3) .. " more", "808080"); break end
+      add("  • " .. cut(x:gsub("^%-%s*", ""):gsub("%*%*", ""), 160), "ff9e64", 4)
+    end
+    for _, pl in ipairs(r.plans or {}) do add("  plan " .. (pl.id or "?") .. " → «" .. (pl.say or "") .. "»", "6eb5ff") end
+  end
+  if #(d.extra or {}) > 0 then
+    add("")
+    add("Other", "f5f543")
+    for _, x in ipairs(d.extra) do add("  • " .. cut(x, 160), "cccccc", 4) end
+  end
+  return table.concat(L, "\n")
 end
 
 M.pane = pane -- debug: hs -c to inspect one window
@@ -510,9 +745,54 @@ local function currentSession()
 end
 
 local function runRecipe(r)
+  -- one window per recipe: close the previous "deck:<label>" before opening a fresh one
+  for _, w in ipairs(sessions()) do
+    if w.name == clean("deck:" .. r[1]) then task(TMUX, { "kill-window", "-t", w.id }) end
+  end
   local id = hs.execute(TMUX .. " new-window -d -P -F '#{window_id}' -t '" .. currentSession() .. ":' -n 'deck:"
     .. r[1] .. "' \"" .. r[2] .. "; echo; read -sk '?done, any key closes'\" "):gsub("%s+", "")
   return id
+end
+
+-- claude in a new window of the project's session; the task text never meets a shell
+local function spawnClaude(w, text)
+  local function q(s) return "'" .. s:gsub("'", "'\\''") .. "'" end -- registry values only, never the body
+  local has = os.execute(TMUX .. " has-session -t " .. q("=" .. w.session) .. " 2>/dev/null")
+  local cmd = has and ("new-window -d -t " .. q("=" .. w.session .. ":")) or ("new-session -d -s " .. q(w.session))
+  local id = hs.execute(TMUX .. " " .. cmd .. " -P -F '#{window_id}' -c " .. q(w.dir)):gsub("%s+", "")
+  if not id:match("^@%d+$") then return nil end
+  -- ≥2 command args → tmux execvp()s them directly: the body stays one argv, whatever it holds
+  task(TMUX, { "respawn-pane", "-k", "-t", id, "claude", text })
+  return id
+end
+
+-- /chat, cached like sessions: answer from the cache at once, refresh async (≤1 per 2 s per window),
+-- forget a window nobody asked about for 60 s — two sync hs.execute here froze HS ~10% of the time
+local chatCache = {}
+local function chat(id, n)
+  local now = os.time()
+  for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
+  local e = chatCache[id] or { fetched = 0 }
+  chatCache[id], e.asked = e, now
+  if not e.busy and now - e.fetched >= 2 then
+    e.busy, e.fetched = true, now
+    local function done(d) e.data, e.busy = d, false end
+    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
+      local path = out:gsub("%s+$", "")
+      if path == "" then return done({ msgs = {}, err = "no transcript" }) end
+      -- the hook keeps the session JSONL per window; agent-state.sh chat turns it into u/a/t lines
+      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(30, n or 15))) }, function(raw)
+        local ok, d = pcall(hs.json.decode, raw)
+        if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
+        for _, m in ipairs(d.msgs or {}) do -- mono clean keeps the newlines of a chat bubble
+          local cok, c = pcall(clean, tostring(m.x), true)
+          m.x = cut((cok and c or ""):gsub("^%s+", ""), 500) -- the 🔧/❓ the board can't draw leave a space
+        end
+        done(d)
+      end)
+    end)
+  end
+  return e.data or { msgs = {}, wait = true }
 end
 
 local function query(qs)
@@ -587,6 +867,32 @@ local function runAction(a, label)
 end
 
 -- ── control panel (Raven-style): toggles, sliders, what needs you ──
+-- memory: the biggest processes (killable from the board, never system ones) + pressure + free disk
+local NO_KILL = { kernel_task = 1, WindowServer = 1, launchd = 1, loginwindow = 1, Hammerspoon = 1, Finder = 1, Dock = 1,
+  SystemUIServer = 1, coreaudiod = 1, mds = 1, mds_stores = 1, cfprefsd = 1, ["Claude Code"] = 1, claude = 1 }
+local topPids, memRaw = {}, ""
+local function memoryState()
+  local raw = memRaw -- async below: three sync hs.execute here ran on every panel poll
+  task("/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
+    .. "/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level; /bin/df -g / | /usr/bin/awk 'NR==2{print $4}'" },
+    function(out) memRaw = out end)
+  local ps, rest = raw:match("^(.-)\1\n(.*)$")
+  local pressure, free = (rest or ""):match("^(%d+)%s+(%d+)")
+  local procs, pids = {}, {}
+  for pid, rss, cmd in (ps or ""):gmatch("%s*(%d+)%s+(%d+)%s+([^\n]+)") do
+    local name = cmd:match("([^/]+)$") or cmd
+    -- Claude Code shows up as its version ("2.1.303") or "claude …": quitting it would kill the sessions
+    local claude = name:match("^%d+%.%d+%.%d+$") or name:lower():match("^claude")
+    if not NO_KILL[name] and not claude and tonumber(pid) > 300 and #procs < 6 then
+      procs[#procs + 1] = { pid = tonumber(pid), name = clean(name):sub(1, 28), mb = math.floor(tonumber(rss) / 1024) }
+      pids[tonumber(pid)] = true
+    end
+  end
+  if ps then topPids = pids end
+  return { ram = sysmonitor.ramPct(), pressure = ({ ["1"] = "normal", ["2"] = "warning", ["4"] = "critical" })[pressure] or "?",
+           disk = tonumber(free) or 0, procs = procs }
+end
+
 local function panelState()
   local out, inp = hs.audiodevice.defaultOutputDevice(), hs.audiodevice.defaultInputDevice()
   local notes = {}
@@ -604,7 +910,7 @@ local function panelState()
     vol = out and math.floor(out:outputVolume() or 0) or 0, muted = out and out:outputMuted() or false,
     mic = inp and inp:inputMuted() or false, bright = b or -1,
     dark = hs.host.interfaceStyle() == "Dark", awake = hs.caffeinate.get("displayIdle") or false,
-    np = macNP, notes = notes,
+    np = macNP, notes = notes, mem = memoryState(),
   }
 end
 
@@ -615,6 +921,8 @@ local function panelSet(key, v)
   if key == "mic" and inp then inp:setInputMuted(not inp:inputMuted()) end
   if key == "awake" then hs.caffeinate.toggle("displayIdle") end
   if key == "sleep" then task("/usr/bin/pmset", { "displaysleepnow" }) end
+  if key == "kill" and topPids[v] then task("/bin/kill", { tostring(v) }) end -- only a pid the board was shown
+  if key == "hogs" then return runRecipe({ "disk hogs", "just -g disk-hogs" }) end
   if key == "dark" then
     osa('tell application "System Events" to tell appearance preferences to set dark mode to not dark mode')
   end
@@ -622,6 +930,7 @@ end
 
 local frontName = ""
 local function state()
+  if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
   frontName = fa and fa:name() or ""
   local todo = {}
@@ -635,12 +944,13 @@ local function state()
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(),
+    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
   }
 end
 
+local enterTimers = {} -- id → the pending Enter of a /send (kept so it is not collected before it fires)
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
@@ -652,15 +962,37 @@ local function handle(method, path, headers, body)
   local id = p.t and p.t:match("^@%d+$")
 
   if method == "GET" and route == "/state" then return reply(state(), 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w)), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
-      if p.enter == "1" then task(TMUX, { "send-keys", "-t", id, "Enter" }) end
+      -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
+      if p.enter == "1" then
+        enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+      end
     end)
     return reply("ok", 200)
   end
+  if method == "POST" and route == "/net" then
+    local r = p.r or "day"
+    if r ~= "day" and r ~= "month" and r ~= "year" then return reply("r=day|month|year", 400) end
+    local ok, top = pcall(hs.json.decode, readFile(NET_DIR .. "/net-" .. r .. ".json") or "[]")
+    top = ok and type(top) == "table" and top or {}
+    for _, d in ipairs(top) do d.name = safeClean(tostring(d.name), 40) end
+    return reply({ r = r, top = top }, 200, true)
+  end
   if method == "POST" and route == "/key" and id and validKey(p.k) then
     task(TMUX, { "send-keys", "-t", id, p.k })
+    -- Escape interrupts Claude (the board's "Ні" too) and an interrupt fires no Stop hook: without this the window
+    -- would keep its answered ask / "working" for good. agent-state.sh done drops them (the hook wants $TMUX)
+    if p.k == "Escape" then
+      for _, w in ipairs(sessionCache) do
+        if w.id == id and w.state ~= "" then
+          task("/bin/sh", { "-c", 'TMUX="$(tmux display -p "#{socket_path}"),0,0" TMUX_PANE="$1" "$0" done </dev/null',
+                                   AGENT_STATE, id })
+          break
+        end
+      end
+    end
     return reply("ok", 200)
   end
   local r = RECIPES[tonumber(p.r or "")]
@@ -673,7 +1005,10 @@ local function handle(method, path, headers, body)
     return reply({ title = h.t, text = plainLines(text, width) }, 200, true)
   end
   -- heavy lists only when the board opens that tab (lazy), not in every 2-second /state
-  if method == "POST" and route == "/hub" then return reply({ hub = hub }, 200, true) end
+  if method == "POST" and route == "/hub" then
+    refreshHub() -- async: the board gets the cached list now, a fresh one on its next open
+    return reply({ hub = hub }, 200, true)
+  end
   if method == "POST" and route == "/projlist" then
     refreshProjects()
     return reply({ proj = projects }, 200, true)
@@ -696,9 +1031,11 @@ local function handle(method, path, headers, body)
     return reply({ t = t or "" }, 200, true)
   end
   if method == "POST" and route == "/panel" then
-    if p.set then panelSet(p.set, tonumber(p.v) or 0) end
+    local t = p.set and panelSet(p.set, tonumber(p.v) or 0)
     refreshMac()
-    return reply(panelState(), 200, true)
+    local st = panelState()
+    st.t = t -- disk hogs opens its tmux window on the board
+    return reply(st, 200, true)
   end
   if method == "POST" and route == "/mac" then
     local names = {}
@@ -725,8 +1062,7 @@ local function handle(method, path, headers, body)
     return reply("ok", 200)
   end
   if method == "POST" and route == "/fleet" then
-    local out = hs.execute("PATH=" .. PATH .. ":$HOME/.pyenv/shims python3 " .. HOME .. "/.claude/scripts/lead.py fleet 2>&1") or ""
-    return reply({ title = "Fleet", text = plainLines(out:gsub("\27%[[%d;]*m", ""), width) }, 200, true)
+    return reply({ title = "Fleet", text = fleetText(width) }, 200, true)
   end
   if method == "POST" and route == "/proj" and p.n and ({ up = 1, down = 1, restart = 1 })[p.a] then
     for _, pr in ipairs(projects) do
@@ -736,6 +1072,17 @@ local function handle(method, path, headers, body)
       end
     end
     return reply("ok", 200)
+  end
+  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n)), 200, true) end
+  if method == "POST" and route == "/spawn" then
+    refreshProjects()
+    local w = projWhere[p.p or ""]
+    if not w then return reply("unknown project", 400) end
+    if not (body or ""):match("%S") then return reply("empty task", 400) end -- voice that wasn't recognised
+    local id = spawnClaude(w, body)
+    if not id then return reply("tmux failed", 500) end
+    refreshSessions()
+    return reply({ t = id }, 200, true)
   end
   if method == "POST" and route == "/log" then
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
@@ -754,24 +1101,45 @@ local function handle(method, path, headers, body)
   return reply("not found", 404)
 end
 
--- the remote browser lives as long as Hammerspoon; restart it if it dies
-local function startViewer()
-  M.viewer = hs.task.new("/bin/sh", function(code)
-    print("deck viewer exited " .. tostring(code) .. ", restarting in 5 s")
-    M.viewerTimer = hs.timer.doAfter(5, startViewer) -- keep a reference: an unreferenced timer gets collected
-  end, { "-c", "exec node " .. VIEWER .. " >> /tmp/deck-viewer.log 2>&1" })
-  M.viewer:setEnvironment({ PATH = PATH .. ":" .. HOME .. "/.local/share/mise/installs/node/latest/bin", HOME = HOME,
-                            DECK_TOKEN = env.get("DECK_TOKEN") or "" })
-  M.viewer:start()
+-- a slow request (>300 ms in the handler) or an HS main-thread stall (the 0.25 s tick late by >1 s: some module's
+-- sync hs.execute) goes to ~/Library/Logs/deck-slow.log — the board's "perf state 4153ms" lines name neither
+local SLOW_LOG = HOME .. "/Library/Logs/deck-slow.log"
+local function slowLog(line)
+  print("deck slow: " .. line)
+  local f = io.open(SLOW_LOG, "a")
+  if f then f:write(os.date("%H:%M:%S "), line, "\n"); f:close() end
+end
+local function timed(method, path, headers, body)
+  local t0 = hs.timer.absoluteTime()
+  local a, b, c = handle(method, path, headers, body)
+  local ms = (hs.timer.absoluteTime() - t0) / 1e6
+  if ms > 300 then slowLog(string.format("%s %s %.0f ms", method, path:match("^[^?]*"), ms)) end
+  return a, b, c
 end
 
 function M.start()
-  if not M.viewer then startViewer() end
   loadDeck()
+  refreshHub() -- warm the cache once; later only when the board opens Hub
   M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
   refreshSlow()
-  M.slowTimer = hs.timer.doEvery(20, refreshSlow)
-  M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(handle):start()
+  M.slowTimer = hs.timer.doEvery(60, refreshSlow) -- statusline.sh (bash + python) + reminders: once a minute is plenty
+  refreshSessions()
+  refreshProjects() -- warm: /spawn and /projlist answer from it
+  refreshFleet()
+  memoryState()
+  M.sessionTimer = hs.timer.doEvery(3, refreshSessions)
+  local last = hs.timer.absoluteTime()
+  M.stallTimer = hs.timer.doEvery(0.25, function()
+    local t = hs.timer.absoluteTime()
+    local gap = (t - last) / 1e6
+    last = t
+    if gap > 1250 then
+      local l = (package.loaded["modules.stallprof"] or {}).last -- the callback that ended last: the stall's suspect
+      slowLog(string.format("HS stall %.0f ms%s", gap - 250,
+        l and string.format(" · last cb %s (%.0f ms, ended %.0f ms ago)", l.label, l.ms, (t - l.at) / 1e6) or ""))
+    end
+  end)
+  M.server = hs.httpserver.new(false, false):setPort(PORT):setCallback(timed):start()
 end
 
 return M
