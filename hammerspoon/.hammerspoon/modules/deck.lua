@@ -231,6 +231,30 @@ local function safeClean(s, n) -- utf8.codes throws on invalid UTF-8; one bad wi
   local ok, c = pcall(clean, s)
   return cut(ok and c or "", n)
 end
+-- windows Claude's hooks never tag: a `claude agents` client (its hook-reported file is never written; the agent it
+-- shows is a background job) and a claude whose hook never ran. Their state comes from the background jobs' own
+-- state.json (every ~10 s) or from how fresh their transcript is.
+local jobPick = {} -- window id → the transcript its chat shows (a job's, or the project's newest unclaimed)
+local jobs = { by = {}, latest = nil } -- background job transcript → its state; the latest active one
+local JQ = "/usr/bin/jq"
+local function jobStates()
+  local r = {}
+  for f in hs.fs.dir(HOME .. "/.claude/jobs") do
+    local p = HOME .. "/.claude/jobs/" .. f .. "/state.json"
+    if f:sub(1, 1) ~= "." and hs.fs.attributes(p) then r[#r + 1] = p end
+  end
+  return r
+end
+local function refreshJobs()
+  task(JQ, { "-r", 'select(.linkScanPath) | "\\(.updatedAt)\t\\(.state)\t\\(.linkScanPath)"', table.unpack(jobStates()) }, function(o)
+    local by, best, bestAt = {}, nil, ""
+    for at, st, tr in o:gmatch("([^\t\n]+)\t([^\t\n]+)\t([^\n]+)") do
+      by[tr] = st
+      if st ~= "done" and st ~= "failed" and at > bestAt and hs.fs.attributes(tr) then best, bestAt = tr, at end
+    end
+    jobs = { by = by, latest = best }
+  end)
+end
 -- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
 local FIELDS = { "window_id", "session_name}:#{window_index", "window_name", "@agent_state", "pane_current_command",
   "@agent_ask_kind", "@agent_ask_at", "@agent_ask_opts", "@agent_ask_multi", "@agent_ask_n", "@agent_ask_descs",
@@ -303,12 +327,25 @@ local function parseSessions(out)
     return a.at < b.at
   end)
   -- st: waiting only with an open dialog; at the prompt = done for 30 min after the last event, then idle
+  for _, w in ipairs(list) do -- untagged Claude windows: the transcript they most likely show
+    if w.claude and w.state == "" then
+      local live = w.tr ~= "" and hs.fs.attributes(w.tr)
+      if not live then w.tr = jobPick[w.id] or (w.tr ~= "" and jobs.latest) or "" end
+      w.untagged = true
+    end
+  end
   refreshInfo(list)
   local now = os.time()
   for _, w in ipairs(list) do
     if w.claude then
       w.at = w.at or (infoCache[w.tr] or {}).mtime -- @agent_at comes with the next hook event; until then the transcript's
-      if w.state == "working" then w.st = "working"
+      local m = w.untagged and w.tr ~= "" and hs.fs.attributes(w.tr, "modification")
+      local js = w.untagged and jobs.by[w.tr]
+      -- a fresh transcript beats the job's own state, which lags (still "blocked" while it already works again)
+      if m and now - m <= 90 then w.st = "working"
+      elseif js == "blocked" then w.st = "waiting"
+      elseif js == "working" then w.st = "working"
+      elseif w.state == "working" then w.st = "working"
       elseif w.state == "waiting" and (w.kind == "permission" or w.kind == "choice") then w.st = "waiting"
       else w.st = w.at and now - w.at <= 1800 and "done" or "idle" end
     end
@@ -328,7 +365,10 @@ local function parseSessions(out)
   end
   tailCache = tails
 end
+local jobTick = 0
 local function refreshSessions()
+  jobTick = jobTick + 1
+  if jobTick % 3 == 1 then refreshJobs() end -- every ~9 s
   task(TMUX, { "list-windows", "-a", "-F", "#{" .. table.concat(FIELDS, "}\t#{") .. "}" }, parseSessions)
 end
 local function asks()
@@ -824,6 +864,23 @@ end
 
 -- /chat, cached like sessions: answer from the cache at once, refresh async (≤1 per 2 s per window),
 -- forget a window nobody asked about for 60 s — two sync hs.execute here froze HS ~10% of the time
+-- RGB565 little-endian → PNG with the stdlib (zlib + struct): no Pillow needed
+local SHOT_PY = [[
+import sys, zlib, struct
+raw, w, h, out = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+d = open(raw, "rb").read()
+rows = bytearray()
+for y in range(h):
+    rows.append(0)
+    for x in range(w):
+        i = (y * w + x) * 2
+        if i + 1 >= len(d): rows += b"\0\0\0"; continue
+        p = d[i] | d[i + 1] << 8
+        rows += bytes(((p >> 11) << 3, ((p >> 5) & 63) << 2, (p & 31) << 3))
+chunk = lambda t, b: struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b))
+open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                       + chunk(b"IDAT", zlib.compress(bytes(rows))) + chunk(b"IEND", b""))
+]]
 local chatCache = {}
 local function chat(id, n, force)
   local now = os.time()
@@ -855,20 +912,34 @@ local function chat(id, n, force)
         done(d)
       end)
     end
-    -- no hook-kept transcript (the hook never ran there) or a dead one (a client attached to background jobs):
-    -- the newest transcript no other window claims, from this window's own project folder when it has one
-    -- ponytail: newest-unclaimed heuristic, read the attached job id if two bg jobs talk at once
+    -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
+    -- window's own project folder. A dead one = a `claude agents` client: the background job it most likely
+    -- shows (the latest active one), kept for that window until ↻ — never a teammate's transcript.
+    -- ponytail: latest-active-job guess, read the attached job id if Claude Code ever exposes it
     task(TMUX, { "display", "-p", "-t", id, "#{@agent_transcript}\t#{pane_current_path}" }, function(out)
       local path, cwd = out:gsub("%s+$", ""):match("^([^\t]*)\t?(.*)$")
       if path ~= "" and hs.fs.attributes(path) then return withPath(path) end
-      local dir = path == "" and cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or nil
-      local glob = dir and hs.fs.attributes(dir) and (dir .. "/*.jsonl") or (HOME .. "/.claude/projects/*/*.jsonl")
-      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. glob .. " | head -20" }, function(o)
+      if path ~= "" then
+        if force then jobPick[id] = nil end
+        if jobPick[id] then return withPath(jobPick[id]) end
+        return task(JQ, { "-r", 'select(.state != "done" and .state != "failed" and .linkScanPath) | "\\(.updatedAt)\t\\(.linkScanPath)"',
+          table.unpack(jobStates()) }, function(o)
+          local best, bestAt = "", ""
+          for at, tr in o:gmatch("([^\t\n]+)\t([^\n]+)") do
+            if at > bestAt and hs.fs.attributes(tr) then best, bestAt = tr, at end
+          end
+          jobPick[id] = best ~= "" and best or nil
+          withPath(best)
+        end)
+      end
+      local dir = cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or ""
+      if not hs.fs.attributes(dir) then return withPath("") end
+      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. dir .. "/*.jsonl | head -20" }, function(o)
         local claimed, past = {}, false
         for l in o:gmatch("[^\n]+") do
           if l == "--" then past = true
           elseif not past then claimed[l] = true
-          elseif not claimed[l] then return withPath(l) end
+          elseif not claimed[l] then jobPick[id] = l; return withPath(l) end
         end
         withPath("")
       end)
@@ -1178,6 +1249,23 @@ local function handle(method, path, headers, body)
       for line in (body or ""):gmatch("[^\n]+") do f:write(os.date("%H:%M:%S "), line, "\n") end
       f:close()
     end
+    return reply("ok", 200)
+  end
+  -- 📷 on the board: RGB565 chunks, then /shot?w=&h=&t= → a PNG; its path typed into window t (no Enter)
+  if method == "POST" and route == "/shot/part" then
+    local f = io.open("/tmp/deck-shot.raw", p.seq == "0" and "wb" or "ab")
+    if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/shot" then
+    local dir = HOME .. "/Library/Logs/esp-deck-shots"
+    hs.fs.mkdir(dir)
+    local png = dir .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
+    local w, h, t = tonumber(p.w) or 320, tonumber(p.h) or 480, (p.t or ""):match("^@%d+$")
+    task("/usr/bin/python3", { "-c", SHOT_PY, "/tmp/deck-shot.raw", tostring(w), tostring(h), png }, function()
+      if hs.fs.attributes(png) and t then task(TMUX, { "send-keys", "-t", t, "-l", png .. " " }) end
+      if hs.fs.attributes(png) then hs.pasteboard.setContents(png) end
+    end)
     return reply("ok", 200)
   end
   if method == "POST" and route == "/mic/pcm" then
