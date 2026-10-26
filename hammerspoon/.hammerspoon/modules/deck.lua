@@ -255,6 +255,7 @@ local function refreshInfo(list)
       local e = ok and type(d) == "table" and infoCache[d.f]
       if e then
         e.doing, e.sum, e.tok, e.model = safeClean(d.doing, 60), safeClean(d.sum, 140), tonumber(d.tok) or 0, d.model or ""
+        e.title = safeClean(d.title or "", 60) -- the Claude session's own name (/rename, else its ai-title)
       end
     end
   end)
@@ -348,6 +349,7 @@ local function sessions()
       s.st = w.st
       s.age = w.at and math.max(0, now - w.at) or nil
       s.doing = e.doing
+      if e.title and e.title ~= "" and e.title ~= w.name then s.title = e.title end
       if e.tok and e.tok > 0 then
         local max = w.cmax or ((e.model:find("[1m]", 1, true) or e.tok > 200000) and 1000000 or 200000)
         s.ctx = math.floor(e.tok * 100 / max + 0.5)
@@ -838,10 +840,18 @@ local function chat(id, n, force)
       task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(60, n or 15))) }, function(raw)
         local ok, d = pcall(hs.json.decode, raw)
         if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
-        for _, m in ipairs(d.msgs or {}) do -- mono clean keeps the newlines of a chat bubble
-          local cok, c = pcall(clean, tostring(m.x), true)
-          m.x = cut((cok and c or ""):gsub("^%s+", ""), 500) -- the 🔧/❓ the board can't draw leave a space
+        -- newest first, whole messages up to 3000 chars, until ~36 KB: the board reads at most 48 KB per reply
+        local msgs, kept, budget = d.msgs or {}, {}, 36000
+        for i = #msgs, 1, -1 do
+          local m = msgs[i]
+          local cok, c = pcall(clean, tostring(m.x), true) -- mono clean keeps the newlines of a chat bubble
+          c = (cok and c or ""):gsub("^%s+", ""):gsub("%*%*", "") -- the 🔧/❓ the board can't draw leave a space; no bold
+          m.x = cut(c, 3000)
+          budget = budget - #m.x - 20
+          if budget < 0 and #kept > 0 then break end
+          table.insert(kept, 1, m)
         end
+        d.msgs = kept
         done(d)
       end)
     end

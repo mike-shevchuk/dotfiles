@@ -33,12 +33,12 @@ TURNS='select((.isSidechain // false | not) and (.isMeta // false | not))
 if [ "$1" = chat ]; then
   [ -r "${2:-}" ] || { echo '{"msgs":[],"err":"no transcript"}'; exit 0; }
   # ponytail: last 4000 lines only — a huge session's early turns never reach the board
-  tail -n 4000 "$2" | jq -nc --argjson n "${3:-15}" "[inputs | $TURNS | .x |= .[:500]] | {msgs: .[-\$n:]}" 2>/dev/null \
+  tail -n 4000 "$2" | jq -nc --argjson n "${3:-15}" "[inputs | $TURNS | .x |= .[:3000]] | {msgs: .[-\$n:]}" 2>/dev/null \
     || echo '{"msgs":[],"err":"bad transcript"}'
   exit 0
 fi
 
-if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing ≤60, sum ≤140, tok, model} on one line
+if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing ≤60, sum ≤140, tok, model, title ≤60} on one line
   shift
   for f; do
     [ -r "$f" ] || continue
@@ -51,7 +51,9 @@ if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing 
          doing: ($t | last // {r: "a", x: ""} | if .r == "t" then .x | sub("^(🔧|❓) "; "") else (.x | lines | .[0] // "") end | .[:60]),
          sum: ([$t[] | select(.r == "a")] | last | .x // "" | lines | .[:2] | join(" · ") | .[:140]),
          tok: ($m.usage // {} | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)),
-         model: ($m.model // "")}' 2>/dev/null
+         model: ($m.model // ""),
+         title: ([$l[] | select(.type == "custom-title") | .customTitle] | last
+                 // ([$l[] | select(.type == "ai-title") | .aiTitle] | last) // "" | .[:60])}' 2>/dev/null
   done
   exit 0
 fi
