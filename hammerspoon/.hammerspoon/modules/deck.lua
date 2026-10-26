@@ -123,6 +123,34 @@ local function refreshHub()
   end)
 end
 
+-- "+ task" targets beyond projctl: every tmux session (its active pane's dir) and every git repo under
+-- ~/code (depth 3, no worktrees), ~/dotfiles, ~/zettelkasten — refreshed async, looked up by /spawn
+local extraWhere, extraNames = {}, {}
+local function refreshTargets()
+  task(TMUX, { "list-sessions", "-F", "#{session_name}\t#{pane_current_path}" }, function(out)
+    local w, names = {}, {}
+    for name, dir in out:gmatch("([^\t\n]+)\t([^\n]+)") do
+      w[name] = { dir = dir, session = name }
+      names[#names + 1] = name
+    end
+    task("/usr/bin/find", { HOME .. "/code", "-maxdepth", "3", "-name", ".git", "-type", "d" }, function(found)
+      local repos = { HOME .. "/dotfiles", HOME .. "/zettelkasten" }
+      for g in found:gmatch("[^\n]+") do
+        if not g:find("/worktrees/") and not g:find("/%.claude/") then repos[#repos + 1] = g:gsub("/%.git$", "") end
+      end
+      table.sort(repos)
+      for _, dir in ipairs(repos) do
+        local name = dir:match("([^/]+)$"):gsub("[^%w_%-]", "_")
+        if not w[name] then
+          w[name] = { dir = dir, session = name }
+          names[#names + 1] = name
+        end
+      end
+      extraWhere, extraNames = w, names
+    end)
+  end)
+end
+
 local function refreshProjects()
   -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
   -- (one async list-sessions: a sync has-session per project held up every request behind it)
@@ -141,6 +169,7 @@ local function refreshProjects()
     for _, pr in ipairs(list) do pr.on = up[pr.session] == true; pr.session = nil end
     projects = list
   end)
+  refreshTargets()
 end
 
 local function refreshSlow()
@@ -1011,7 +1040,13 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/projlist" then
     refreshProjects()
-    return reply({ proj = projects }, 200, true)
+    local live, new, seen = {}, {}, {}
+    for _, w in ipairs(sessions()) do
+      if w.claude then live[#live + 1] = { id = w.id, n = w.idx .. "  " .. w.name, st = w.state } end
+    end
+    for _, pr in ipairs(projects) do if not seen[pr.n] then new[#new + 1] = pr.n; seen[pr.n] = true end end
+    for _, n in ipairs(extraNames) do if not seen[n] then new[#new + 1] = n; seen[n] = true end end
+    return reply({ proj = projects, live = live, new = new }, 200, true)
   end
   if method == "POST" and route == "/deck" then
     local pages = {}
@@ -1076,7 +1111,7 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n)), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
-    local w = projWhere[p.p or ""]
+    local w = projWhere[p.p or ""] or extraWhere[p.p or ""]
     if not w then return reply("unknown project", 400) end
     if not (body or ""):match("%S") then return reply("empty task", 400) end -- voice that wasn't recognised
     local id = spawnClaude(w, body)
