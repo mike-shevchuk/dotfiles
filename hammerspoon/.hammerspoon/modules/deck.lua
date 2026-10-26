@@ -806,8 +806,7 @@ local function chat(id, n)
   if not e.busy and now - e.fetched >= 2 then
     e.busy, e.fetched = true, now
     local function done(d) e.data, e.busy = d, false end
-    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
-      local path = out:gsub("%s+$", "")
+    local function withPath(path)
       if path == "" then return done({ msgs = {}, err = "no transcript" }) end
       -- the hook keeps the session JSONL per window; agent-state.sh chat turns it into u/a/t lines
       task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(30, n or 15))) }, function(raw)
@@ -818,6 +817,22 @@ local function chat(id, n)
           m.x = cut((cok and c or ""):gsub("^%s+", ""), 500) -- the 🔧/❓ the board can't draw leave a space
         end
         done(d)
+      end)
+    end
+    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
+      local path = out:gsub("%s+$", "")
+      if path == "" or hs.fs.attributes(path) then return withPath(path) end
+      -- a client attached to background jobs reports its own (never written) session file: show the newest
+      -- transcript no other window claims — the job it is watching.
+      -- ponytail: newest-unclaimed heuristic, read the attached job id if two bg jobs talk at once
+      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. HOME .. "/.claude/projects/*/*.jsonl | head -20" }, function(o)
+        local claimed, past = {}, false
+        for l in o:gmatch("[^\n]+") do
+          if l == "--" then past = true
+          elseif not past then claimed[l] = true
+          elseif not claimed[l] then return withPath(l) end
+        end
+        withPath("")
       end)
     end)
   end
