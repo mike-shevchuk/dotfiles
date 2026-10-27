@@ -1262,6 +1262,7 @@ local function refreshHealth()
                move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
                steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask, bb = d.board.bb,
                stress = d.board.stress, stress_now = d.stress and d.stress.now, score = d.board.score, sleep_q = d.board.sleep,
+               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone,
                load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
                                    focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
                                    zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
@@ -1417,6 +1418,9 @@ local function handle(method, path, headers, body)
     if h then task("/usr/bin/open", { HUB_URL .. h.path }) end
     -- a Hacker News discussion from the board's Dash; only https links to news.ycombinator.com
     if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
+    -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
+    local hu = p.h and health and health.links and health.links[p.h]
+    if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
   end
   if method == "POST" and route == "/fleet" then
