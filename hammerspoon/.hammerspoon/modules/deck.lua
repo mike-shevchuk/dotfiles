@@ -1213,7 +1213,7 @@ local garmin
 local function refreshGarmin()
   if not hs.fs.attributes(HOME .. "/.garminconnect") then return end -- not logged in yet
   task(UV, { "run", "--quiet", "--with", "garminconnect", "python", GARMIN_PY, "fetch" }, function(out)
-    local ok, d = pcall(hs.json.decode, (out or ""):match("[^\n]*$") or "")
+    local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "") -- the last non-empty line
     if ok and type(d) == "table" then d.at = os.time(); garmin = d end
   end)
 end
