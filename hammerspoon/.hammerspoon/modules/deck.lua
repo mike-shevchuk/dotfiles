@@ -455,6 +455,7 @@ end
 -- (while recording it keeps the partial transcript in VOICE_FILE .. ".partial" → /state.voice.text)
 local voice = { state = "idle", text = "" }
 local voiceTimer
+local journalAdd -- the board's 📝 (hold the mic on the Garmin card): set below, next to Garmin's data
 
 local function micDown(lang)
   os.remove(VOICE_FILE)
@@ -476,7 +477,7 @@ local function micBoardUp(rate, lang)
   local f = io.open(PCM_FILE, "rb")
   local pcm = f and f:read("a") or ""
   if f then f:close() end
-  if #pcm < rate then voice = { state = "done", text = "" }; return end -- under ½ s: nothing said
+  if #pcm < rate then voice = { state = "done", text = "", journal = voice.journal }; return end -- under ½ s: nothing said
   local w = io.open(WAV_FILE, "wb")
   w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
     "data", #pcm), pcm)
@@ -484,7 +485,9 @@ local function micBoardUp(rate, lang)
   lang = lang == "en" and "en" or "uk"
   task(WHISPER, { "-m", WHISPER_MODEL, "-l", lang, "--prompt", WHISPER_PROMPT[lang], "--suppress-nst", "--beam-size", "8",
     "--best-of", "8", "-nt", "-np", "-f", WAV_FILE }, function(out)
-    voice = { state = "done", text = clean(((out or ""):gsub("%s+", " "):gsub("^ ", ""))) }
+    local j = voice.journal
+    voice = { state = "done", text = clean(((out or ""):gsub("%s+", " "):gsub("^ ", ""))), journal = j }
+    if j and voice.text ~= "" then journalAdd(voice.text, lang) end
   end)
 end
 
@@ -1218,9 +1221,35 @@ local function refreshGarmin()
   end)
 end
 
+-- 📝 voice journal: "я зараз іду гуляти" → one JSON line with the time and what Garmin said at that moment,
+-- for the teammate's patterns/advice (helper/health_metrics.py reads it); the board shows the last 3
+local health -- (the composite metrics, filled below; the journal notes the question it answers)
+local JOURNAL = HOME .. "/.local/share/esp-deck/journal.jsonl"
+local journalTail = {}
+journalAdd = function(text, lang)
+  local g = garmin or {}
+  local f = io.open(JOURNAL, "a")
+  if not f then return end
+  f:write(hs.json.encode({ at = os.date("%Y-%m-%dT%H:%M:%S"), text = text, lang = lang, steps = g.steps,
+    hr = g.hr_now, battery = g.battery, stress = g.stress, kcal_active = g.kcal_active,
+    q = health and health.ask or nil }), "\n") -- q: the metrics' question this answers, when one was up
+  f:close()
+  table.insert(journalTail, 1, os.date("%H:%M") .. "  " .. text)
+  journalTail[4] = nil
+end
+do -- the last 3 after a reload
+  local f = io.open(JOURNAL)
+  if f then
+    for l in f:lines() do
+      local ok, e = pcall(hs.json.decode, l)
+      if ok and e then table.insert(journalTail, 1, (e.at or ""):sub(12, 16) .. "  " .. (e.text or "")); journalTail[4] = nil end
+    end
+    f:close()
+  end
+end
+
 -- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
 local HM_PY = HOME .. "/code/esp-deck/helper/health_metrics.py"
-local health
 local function refreshHealth()
   if not hs.fs.attributes(HOME .. "/.garminconnect") then return end
   task(UV, { "run", "--quiet", "--with", "garminconnect", "python", HM_PY }, function(out)
@@ -1231,7 +1260,7 @@ local function refreshHealth()
     health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
                alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
                move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
-               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg,
+               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask,
                load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
                                    focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
                                    zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
@@ -1266,6 +1295,7 @@ local function state()
     notes = notesState(),
     garmin = garmin,
     health = health,
+    journal = journalTail,
   }
 end
 
@@ -1473,7 +1503,7 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/mic" then
     if p.clear == "1" then voice = { state = "idle", text = "" }
-    elseif p.down == "1" and p.board == "1" then os.remove(PCM_FILE); voice = { state = "rec", text = "" }
+    elseif p.down == "1" and p.board == "1" then os.remove(PCM_FILE); voice = { state = "rec", text = "", journal = p.j == "1" }
     elseif p.down == "1" then micDown(p.lang)
     elseif p.board == "1" then micBoardUp(tonumber(p.rate) or 22050, p.lang)
     else micUp() end
