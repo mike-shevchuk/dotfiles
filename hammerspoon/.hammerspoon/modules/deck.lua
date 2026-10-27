@@ -1177,6 +1177,53 @@ local function panelSet(key, v)
 end
 
 local frontName = ""
+-- ── Mac notifications → the board: only the app's name flashes there; the text waits in the board's ✉ panel ──
+-- helper/notes.py reads Notification Center's database (Hammerspoon needs Full Disk Access); it runs only when
+-- the database file changed (one stat every 3 s)
+local NOTES_PY = HOME .. "/code/esp-deck/helper/notes.py"
+local NOTES_DB = HOME .. "/Library/Group Containers/group.com.apple.usernoted/db2/db"
+local notes, notesLast, notesSeen, notesMtime, notesBusy = {}, nil, 0, -1, false
+local function appName(bundle)
+  return hs.application.nameForBundleID(bundle) or bundle:match("([^.]+)$") or bundle
+end
+local function refreshNotes()
+  local m = math.max(hs.fs.attributes(NOTES_DB, "modification") or 0, hs.fs.attributes(NOTES_DB .. "-wal", "modification") or 0)
+  if notesBusy or m == notesMtime then return end -- no Full Disk Access: stat says 0, one try, then quiet
+  notesBusy, notesMtime = true, m
+  task("/usr/bin/python3", { NOTES_PY, tostring(notesLast or 0) }, function(out)
+    notesBusy = false
+    for line in (out or ""):gmatch("[^\n]+") do
+      local ok, d = pcall(hs.json.decode, line)
+      if ok and type(d) == "table" then
+        if d.last then notesLast, notesSeen = d.last, d.last -- first run: start from now, no replay
+        elseif d.id then
+          table.insert(notes, 1, { id = d.id, app = safeClean(appName(d.bundle), 30), title = safeClean(d.title, 120),
+                                   subtitle = safeClean(d.subtitle, 120), body = safeClean(d.body, 400), at = d.at })
+          notes[21] = nil
+          notesLast = math.max(notesLast or 0, d.id)
+        end
+      end
+    end
+  end)
+end
+-- ── Garmin (helper/garmin.py, unofficial garminconnect): once logged in (`just garmin-login` in esp-deck),
+-- every 15 min → /state.garmin for the board's Здоров'я tab ──
+local GARMIN_PY, UV = HOME .. "/code/esp-deck/helper/garmin.py", HOME .. "/.local/bin/uv"
+local garmin
+local function refreshGarmin()
+  if not hs.fs.attributes(HOME .. "/.garminconnect") then return end -- not logged in yet
+  task(UV, { "run", "--quiet", "--with", "garminconnect", "python", GARMIN_PY, "fetch" }, function(out)
+    local ok, d = pcall(hs.json.decode, (out or ""):match("[^\n]*$") or "")
+    if ok and type(d) == "table" then d.at = os.time(); garmin = d end
+  end)
+end
+
+local function notesState() -- for /state: no text, only how many are new and whose the newest is
+  local n = 0
+  for _, x in ipairs(notes) do if x.id > notesSeen then n = n + 1 end end
+  return notes[1] and { n = n, last = notes[1].id, app = notes[1].app } or nil
+end
+
 local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
@@ -1196,6 +1243,8 @@ local function state()
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
+    notes = notesState(),
+    garmin = garmin,
   }
 end
 
@@ -1387,8 +1436,18 @@ local function handle(method, path, headers, body)
     return reply("ok", 200)
   end
   -- the board's pull-down on the Dash: everything the minute timers would bring, now
+  -- the board's ✉ panel: the last 20 with their text; opening it marks them seen
+  if method == "POST" and route == "/notes" then
+    local now = os.time()
+    local list = {}
+    for i, x in ipairs(notes) do
+      list[i] = { app = x.app, title = x.title, subtitle = x.subtitle, body = x.body, ago = math.max(0, now - (x.at or now)) }
+    end
+    if notes[1] then notesSeen = notes[1].id end
+    return reply({ notes = list }, 200, true)
+  end
   if method == "POST" and route == "/refresh" then
-    refreshJobs(); refreshSessions(); refreshSlow()
+    refreshJobs(); refreshSessions(); refreshSlow(); refreshGarmin()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/mic" then
@@ -1428,7 +1487,9 @@ function M.start()
   refreshProjects() -- warm: /spawn and /projlist answer from it
   refreshFleet()
   memoryState()
-  M.sessionTimer = hs.timer.doEvery(3, refreshSessions)
+  M.sessionTimer = hs.timer.doEvery(3, function() refreshSessions(); refreshNotes() end)
+  refreshGarmin()
+  M.garminTimer = hs.timer.doEvery(15 * 60, refreshGarmin)
   local last = hs.timer.absoluteTime()
   M.stallTimer = hs.timer.doEvery(0.25, function()
     local t = hs.timer.absoluteTime()
