@@ -1218,6 +1218,23 @@ local function refreshGarmin()
   end)
 end
 
+-- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
+local HM_PY = HOME .. "/code/esp-deck/helper/health_metrics.py"
+local health
+local function refreshHealth()
+  if not hs.fs.attributes(HOME .. "/.garminconnect") then return end
+  task(UV, { "run", "--quiet", "--with", "garminconnect", "python", HM_PY }, function(out)
+    local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
+    if not ok or type(d) ~= "table" or type(d.board) ~= "table" then return end
+    local alerts = {}
+    for i, a in ipairs(d.alerts or {}) do if i <= 3 then alerts[i] = { a[1], a[3] } end end
+    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
+               alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
+               move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
+               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil }
+  end)
+end
+
 local function notesState() -- for /state: no text, only how many are new and whose the newest is
   local n = 0
   for _, x in ipairs(notes) do if x.id > notesSeen then n = n + 1 end end
@@ -1245,6 +1262,7 @@ local function state()
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
     garmin = garmin,
+    health = health,
   }
 end
 
@@ -1447,7 +1465,7 @@ local function handle(method, path, headers, body)
     return reply({ notes = list }, 200, true)
   end
   if method == "POST" and route == "/refresh" then
-    refreshJobs(); refreshSessions(); refreshSlow(); refreshGarmin()
+    refreshJobs(); refreshSessions(); refreshSlow(); refreshGarmin(); refreshHealth()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/mic" then
@@ -1488,8 +1506,8 @@ function M.start()
   refreshFleet()
   memoryState()
   M.sessionTimer = hs.timer.doEvery(3, function() refreshSessions(); refreshNotes() end)
-  refreshGarmin()
-  M.garminTimer = hs.timer.doEvery(15 * 60, refreshGarmin)
+  refreshGarmin(); refreshHealth()
+  M.garminTimer = hs.timer.doEvery(15 * 60, function() refreshGarmin(); refreshHealth() end)
   local last = hs.timer.absoluteTime()
   M.stallTimer = hs.timer.doEvery(0.25, function()
     local t = hs.timer.absoluteTime()
