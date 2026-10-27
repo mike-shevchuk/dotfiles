@@ -1231,7 +1231,7 @@ local function refreshHealth()
     health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
                alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
                move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
-               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil }
+               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg }
   end)
 end
 
