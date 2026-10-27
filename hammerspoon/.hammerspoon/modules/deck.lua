@@ -1314,6 +1314,8 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/open" then
     local h = hub[tonumber(p.i or "")]
     if h then task("/usr/bin/open", { HUB_URL .. h.path }) end
+    -- a Hacker News discussion from the board's Dash; only https links to news.ycombinator.com
+    if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
     return reply("ok", 200)
   end
   if method == "POST" and route == "/fleet" then
