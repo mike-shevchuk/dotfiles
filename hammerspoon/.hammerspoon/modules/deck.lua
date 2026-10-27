@@ -1262,7 +1262,7 @@ local function refreshHealth()
                move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
                steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask, bb = d.board.bb,
                stress = d.board.stress, stress_now = d.stress and d.stress.now, score = d.board.score, sleep_q = d.board.sleep,
-               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone,
+               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
                load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
                                    focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
                                    zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
