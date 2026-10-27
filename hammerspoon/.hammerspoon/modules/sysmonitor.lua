@@ -302,6 +302,21 @@ end
 function M.ramPct() return cachedRamPct end
 M.menu = function() return buildMenu() end -- debug / test: the items the menubar shows when it opens
 
+-- caffeine on a schedule: on at CAFF_FROM, off at CAFF_TO; it flips only at those boundaries, so a manual
+-- toggle in between holds until the next one (the board has the same 10–19 window for its screen)
+local CAFF_FROM, CAFF_TO = 10, 19
+local caffInWindow
+local function caffeineSchedule()
+    local h = tonumber(os.date("%H"))
+    local inWin = h >= CAFF_FROM and h < CAFF_TO
+    if inWin ~= caffInWindow then
+        caffInWindow = inWin
+        hs.caffeinate.set("displayIdle", inWin)
+        caffeineState = inWin
+        updateTitle()
+    end
+end
+
 function M.start()
     local memStr = shellExec("sysctl -n hw.memsize")
     totalMemoryBytes = tonumber(memStr) or 0
@@ -316,6 +331,8 @@ function M.start()
     menubar:setMenu(buildMenu)
     M.refresh()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
+    caffeineSchedule()
+    M.caffTimer = hs.timer.doEvery(60, caffeineSchedule)
 end
 
 return M
