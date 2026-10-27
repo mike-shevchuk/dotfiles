@@ -1240,7 +1240,7 @@ local function state()
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
