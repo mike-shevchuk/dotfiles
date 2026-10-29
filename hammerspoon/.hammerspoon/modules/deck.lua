@@ -1248,6 +1248,44 @@ do -- the last 3 after a reload
   end
 end
 
+-- 🎙 meetings (Plaud-style): the board streams the room's PCM (/meet/pcm), on stop helper/meeting.py runs whisper
+-- + a Claude summary → ~/.local/share/esp-deck/meetings/<id>.md; /state.meet = {state, note, last[3]}
+local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
+local meet = { state = "idle", last = {} }
+local meetId
+do
+  local f = io.open(MEET_DIR .. "/index.jsonl")
+  if f then
+    for l in f:lines() do
+      local ok, e = pcall(hs.json.decode, l)
+      if ok and e then table.insert(meet.last, 1, e); meet.last[4] = nil end
+    end
+    f:close()
+  end
+end
+local function meetState()
+  if meetId and (meet.state == "stt" or meet.state == "sum") then
+    local st = readFile(MEET_DIR .. "/" .. meetId .. ".stage")
+    if st == "sum" then meet.state = "sum" end
+  end
+  return meet
+end
+local function meetStop(rate)
+  if not meetId then return end
+  meet.state, meet.note = "stt", nil
+  local id = meetId
+  task("/usr/bin/python3", { MEET_PY, MEET_DIR .. "/" .. id .. ".pcm", tostring(rate) }, function(out, code)
+    local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
+    if ok and type(e) == "table" and e.title then
+      table.insert(meet.last, 1, e); meet.last[4] = nil
+      meet.state = "done"
+      hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
+    else
+      meet.state, meet.note = "err", "не вдалося розшифрувати (" .. tostring(code) .. ") — аудіо збережено"
+    end
+  end)
+end
+
 -- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
 local HM_PY = HOME .. "/code/esp-deck/helper/health_metrics.py"
 local function refreshHealth()
@@ -1298,6 +1336,7 @@ local function state()
     garmin = garmin,
     health = health,
     journal = journalTail,
+    meet = meetState(),
   }
 end
 
@@ -1485,6 +1524,19 @@ local function handle(method, path, headers, body)
     lastShot = nil
     if png then task(TMUX, { "send-keys", "-t", id, "-l", png .. " " }) end
     return reply(png and "ok" or "nothing", png and 200 or 404)
+  end
+  if method == "POST" and route == "/meet" then
+    if p.start == "1" then
+      hs.fs.mkdir(MEET_DIR)
+      meetId = os.date("%Y-%m-%d_%H%M%S")
+      meet.state, meet.note = "rec", nil
+    elseif p.stop == "1" then meetStop(tonumber(p.rate) or 22050) end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/meet/pcm" and meetId then
+    local f = io.open(MEET_DIR .. "/" .. meetId .. ".pcm", p.seq == "0" and "wb" or "ab")
+    if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
   end
   if method == "POST" and route == "/mic/pcm" then
     local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")
