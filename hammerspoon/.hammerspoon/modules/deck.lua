@@ -1304,9 +1304,35 @@ local function meetStop(id, rate, fmt, len)
 end
 
 -- 🎙 in the menu bar: start / stop a meeting on the board from the Mac, see where it is, open the last summaries
+-- a meeting recorded by the Mac alone (no board): ffmpeg from any input device → the same 16 kHz μ-law .pcm, and
+-- on stop the same meeting.py (transcript, speakers, summary, screenshots). Needs the mic permission for Hammerspoon
+local FFMPEG = "/opt/homebrew/bin/ffmpeg"
+local meetMac -- the running ffmpeg task while the Mac records
+local function macRecStart(dev, lang)
+  local id = os.date("%Y-%m-%d_%H%M%S")
+  hs.fs.mkdir(MEET_DIR)
+  local path = MEET_DIR .. "/" .. id .. ".pcm"
+  meetId, meet.bid = id, nil
+  meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm, meet.src = "rec", nil, lang, os.time(), os.time(), "mac"
+  meetMac = hs.task.new(FFMPEG, function(code, _, err)
+    meetMac = nil
+    local size = hs.fs.attributes(path, "size") or 0
+    if size < 16000 then -- under a second: the device gave nothing (mic permission? a silent virtual device?)
+      meet.state, meet.note, meet.src = "err", "Mac нічого не записав: " .. ((err or ""):match("[^\n]+") or ("код " .. tostring(code))), nil
+      return
+    end
+    meet.src = nil
+    meetStop(id, 16000, "ulaw", size)
+  end, { "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", ":" .. dev, "-ac", "1", "-ar", "16000",
+    "-f", "mulaw", "-y", path })
+  meetMac:start()
+end
+
 local function meetMenu()
   local items = {}
-  if meet.state == "rec" then
+  if meet.state == "rec" and meetMac then
+    table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
+  elseif meet.state == "rec" then
     table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
     if meet.note then -- the board is away: process what arrived so far (whatever it sends later is ignored)
       table.insert(items, { title = "Обробити те, що вже прийшло", fn = function() meetStop(meetId, 16000, "ulaw") end })
@@ -1316,6 +1342,13 @@ local function meetMenu()
       table.insert(items, { title = "● Почати мітинг на платі (" .. l[2] .. ")",
         fn = function() meetCmd = { n = meetCmd.n + 1, act = "start", lang = l[1] } end })
     end
+    local devs = {} -- "● only the Mac": every input device, UA / EN
+    for _, d in ipairs(hs.audiodevice.allInputDevices()) do
+      for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
+        table.insert(devs, { title = d:name() .. " · " .. l[2], fn = function() macRecStart(d:name(), l[1]) end })
+      end
+    end
+    table.insert(items, { title = "● Записати лише Маком", menu = devs })
   end
   table.insert(items, { title = "-" })
   for _, e in ipairs(meet.last) do
@@ -1347,6 +1380,7 @@ end
 local function meetBar()
   meetClips()
   -- the board went quiet mid-meeting: it keeps recording into its flash and sends it all when it's back
+  if meetMac then meet.lastPcm = os.time() end -- the Mac records itself: never "the board went away"
   meet.note = meet.state == "rec" and meet.lastPcm and os.time() - meet.lastPcm > 90
     and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
   if not M.meetBar then return end
@@ -1598,6 +1632,11 @@ local function handle(method, path, headers, body)
   end
   -- the board retries each of these until a 200, maybe minutes later (it kept the audio while the Mac was away):
   -- start / pcm at a byte offset / stop are all idempotent
+  -- 1029-20xxxx firmware wrote NVS from a PSRAM-stack task after a 200 here → int-wdt reboot loop; answering 503
+  -- to that one stuck meeting keeps its uploader retrying (no NVS write) so the fixed firmware can be flashed
+  if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id == "1793298707" then
+    return reply("busy", 503)
+  end
   if method == "POST" and route == "/meet" and p.id then
     local id, t = meetName(p.id)
     if p.start == "1" and not meetDone[id] and meetId ~= id then
