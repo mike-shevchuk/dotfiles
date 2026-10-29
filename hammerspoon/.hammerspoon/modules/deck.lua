@@ -1266,15 +1266,18 @@ end
 local function meetState()
   if meetId and (meet.state == "stt" or meet.state == "sum") then
     local st = readFile(MEET_DIR .. "/" .. meetId .. ".stage")
-    if st == "sum" then meet.state = "sum" end
+    if st == "spk" or st == "sum" then meet.state = st end
   end
-  return meet
+  local last = {} -- the full summary (body) only for the newest: /state stays small
+  for i, e in ipairs(meet.last) do last[i] = { id = e.id, at = e.at, title = e.title, summary = e.summary, body = i == 1 and e.body or nil } end
+  return { state = meet.state, note = meet.note, last = last }
 end
 local function meetStop(rate)
   if not meetId then return end
   meet.state, meet.note = "stt", nil
   local id = meetId
-  task("/usr/bin/python3", { MEET_PY, MEET_DIR .. "/" .. id .. ".pcm", tostring(rate) }, function(out, code)
+  task(UV, { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
+    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk" }, function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
       table.insert(meet.last, 1, e); meet.last[4] = nil
@@ -1458,6 +1461,8 @@ local function handle(method, path, headers, body)
     -- a Hacker News discussion from the board's Dash; only https links to news.ycombinator.com
     if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
     -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
+    -- a meeting's summary (.md) in the default app; the id is ours (date_time), nothing else opens
+    if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { MEET_DIR .. "/" .. p.meet .. ".md" }) end
     local hu = p.h and health and health.links and health.links[p.h]
     if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
@@ -1529,7 +1534,7 @@ local function handle(method, path, headers, body)
     if p.start == "1" then
       hs.fs.mkdir(MEET_DIR)
       meetId = os.date("%Y-%m-%d_%H%M%S")
-      meet.state, meet.note = "rec", nil
+      meet.state, meet.note, meet.lang = "rec", nil, p.lang == "en" and "en" or "uk"
     elseif p.stop == "1" then meetStop(tonumber(p.rate) or 22050) end
     return reply("ok", 200)
   end
