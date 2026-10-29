@@ -1264,28 +1264,41 @@ do
   end
 end
 local function meetState()
-  if meetId and (meet.state == "stt" or meet.state == "sum") then
-    local st = readFile(MEET_DIR .. "/" .. meetId .. ".stage")
+  if meet.proc and (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") then
+    local st = readFile(MEET_DIR .. "/" .. meet.proc .. ".stage")
     if st == "spk" or st == "sum" then meet.state = st end
   end
   local last = {} -- the full summary (body) only for the newest: /state stays small
-  for i, e in ipairs(meet.last) do last[i] = { id = e.id, at = e.at, title = e.title, summary = e.summary, body = i == 1 and e.body or nil } end
+  for i, e in ipairs(meet.last) do
+    -- '#' is a colour code on the board's label: markdown headings become plain lines there
+    last[i] = { id = e.id, at = e.at, title = e.title, summary = e.summary, body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
+  end
   return { state = meet.state, note = meet.note, last = last, cmd = meetCmd }
 end
-local function meetStop(rate)
-  if not meetId then return end
-  meet.state, meet.note = "stt", nil
-  local id = meetId
+-- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
+local function meetName(bid)
+  local t = tonumber(bid) or 0
+  return os.date("%Y-%m-%d_%H%M%S", t > 1700000000 and t or os.time()), t
+end
+local meetDone = {} -- names already sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op
+local function meetStop(id, rate, fmt, len)
+  if not id or meetDone[id] then return end
+  meetDone[id] = true
+  if meetId == id then meetId = nil end
+  meet.state, meet.note, meet.proc = "stt", nil, id
+  -- screenshots: from the start to start + the recorded length
+  local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (meet.t0 or os.time()))
   task(UV, { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
-    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk", tostring(meet.t0 or 0), tostring(os.time()) },
+    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk", tostring(meet.t0 or 0),
+    tostring((meet.t0 or os.time()) + secs), fmt or "pcm" },
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
       table.insert(meet.last, 1, e); meet.last[4] = nil
-      meet.state = "done"
+      if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
       hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
     else
-      meet.state, meet.note = "err", "не вдалося розшифрувати (" .. tostring(code) .. ") — аудіо збережено"
+      if meet.state ~= "rec" then meet.state, meet.note = "err", "не вдалося розшифрувати — аудіо збережено в " .. id end
     end
   end)
 end
@@ -1295,6 +1308,9 @@ local function meetMenu()
   local items = {}
   if meet.state == "rec" then
     table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
+    if meet.note then -- the board is away: process what arrived so far (whatever it sends later is ignored)
+      table.insert(items, { title = "Обробити те, що вже прийшло", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    end
   else
     for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
       table.insert(items, { title = "● Почати мітинг на платі (" .. l[2] .. ")",
@@ -1330,6 +1346,9 @@ local function meetClips()
 end
 local function meetBar()
   meetClips()
+  -- the board went quiet mid-meeting: it keeps recording into its flash and sends it all when it's back
+  meet.note = meet.state == "rec" and meet.lastPcm and os.time() - meet.lastPcm > 90
+    and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
   if not M.meetBar then return end
   local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
   M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
@@ -1577,17 +1596,55 @@ local function handle(method, path, headers, body)
     if png then task(TMUX, { "send-keys", "-t", id, "-l", png .. " " }) end
     return reply(png and "ok" or "nothing", png and 200 or 404)
   end
-  if method == "POST" and route == "/meet" then
+  -- the board retries each of these until a 200, maybe minutes later (it kept the audio while the Mac was away):
+  -- start / pcm at a byte offset / stop are all idempotent
+  if method == "POST" and route == "/meet" and p.id then
+    local id, t = meetName(p.id)
+    if p.start == "1" and not meetDone[id] and meetId ~= id then
+      hs.fs.mkdir(MEET_DIR)
+      meetId, meet.bid = id, p.id
+      meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, p.lang == "en" and "en" or "uk",
+        t > 1700000000 and t or os.time(), os.time()
+    elseif p.stop == "1" then meetStop(id, tonumber(p.rate) or 16000, p.fmt, tonumber(p.len)) end
+    return reply("ok", 200)
+  end
+  -- the older firmware (no id: start / pcm?seq= appended / stop): kept until every board runs the flash-log one
+  if method == "POST" and route == "/meet" and not p.id then
     if p.start == "1" then
       hs.fs.mkdir(MEET_DIR)
       meetId = os.date("%Y-%m-%d_%H%M%S")
-      meet.state, meet.note, meet.lang, meet.t0 = "rec", nil, p.lang == "en" and "en" or "uk", os.time()
-    elseif p.stop == "1" then meetStop(tonumber(p.rate) or 22050) end
+      meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, p.lang == "en" and "en" or "uk", os.time(), os.time()
+    elseif p.stop == "1" and meetId then meetStop(meetId, tonumber(p.rate) or 22050, "pcm") end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/meet/pcm" and meetId then
-    local f = io.open(MEET_DIR .. "/" .. meetId .. ".pcm", p.seq == "0" and "wb" or "ab")
-    if f then f:write(body or ""); f:close() end
+  if method == "POST" and route == "/meet/pcm" and not p.id then
+    if not meetId then -- Hammerspoon reloaded mid-meeting: the newest unprocessed .pcm is the one being recorded
+      local best, bt
+      for f in hs.fs.dir(MEET_DIR) do
+        local a = f:match("^(%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d)%.pcm$")
+        local m = a and hs.fs.attributes(MEET_DIR .. "/" .. f, "modification")
+        if m and (not bt or m > bt) then best, bt = a, m end
+      end
+      if best then
+        meetId = best
+        meet.state, meet.lang, meet.t0 = "rec", meet.lang or "uk", os.time({ year = tonumber(best:sub(1, 4)),
+          month = tonumber(best:sub(6, 7)), day = tonumber(best:sub(9, 10)), hour = tonumber(best:sub(12, 13)),
+          min = tonumber(best:sub(14, 15)), sec = tonumber(best:sub(16, 17)) })
+      end
+    end
+    if meetId then
+      local f = io.open(MEET_DIR .. "/" .. meetId .. ".pcm", p.seq == "0" and "wb" or "ab")
+      if f then f:write(body or ""); f:close() end
+      meet.lastPcm = os.time()
+    end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/meet/pcm" and p.id and tonumber(p.off) then
+    local path = MEET_DIR .. "/" .. meetName(p.id) .. ".pcm"
+    local f = io.open(path, "r+b") or io.open(path, "wb")
+    if not f then return reply("can't write", 500) end
+    f:seek("set", tonumber(p.off)); f:write(body or ""); f:close()
+    meet.lastPcm = os.time()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/mic/pcm" then
