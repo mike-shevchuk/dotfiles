@@ -1309,7 +1309,27 @@ local function meetMenu()
   table.insert(items, { title = "Відкрити папку мітингів", fn = function() task("/usr/bin/open", { MEET_DIR }) end })
   return items
 end
+-- screenshots go to the clipboard here (screencapture target = clipboard): mid-meeting, every new image on the
+-- clipboard is saved to <id>_clips/<unix>.png; meeting.py attaches them at their moment
+local meetClipSeen
+local function meetClips()
+  local cc = hs.pasteboard.changeCount()
+  if meet.state ~= "rec" or not meetId then meetClipSeen = cc; return end
+  if cc == meetClipSeen then return end
+  meetClipSeen = cc
+  for _, t in ipairs(hs.pasteboard.contentTypes() or {}) do
+    if t == "public.png" or t == "public.tiff" then
+      local img = hs.pasteboard.readImage()
+      if img then
+        hs.fs.mkdir(MEET_DIR .. "/" .. meetId .. "_clips")
+        img:saveToFile(MEET_DIR .. "/" .. meetId .. "_clips/" .. os.time() .. ".png")
+      end
+      return
+    end
+  end
+end
 local function meetBar()
+  meetClips()
   if not M.meetBar then return end
   local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
   M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
