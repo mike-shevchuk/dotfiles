@@ -1252,7 +1252,7 @@ end
 -- + a Claude summary → ~/.local/share/esp-deck/meetings/<id>.md; /state.meet = {state, note, last[3]}
 local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
 local meet = { state = "idle", last = {} }
-local meetId
+local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
 do
   local f = io.open(MEET_DIR .. "/index.jsonl")
   if f then
@@ -1270,14 +1270,15 @@ local function meetState()
   end
   local last = {} -- the full summary (body) only for the newest: /state stays small
   for i, e in ipairs(meet.last) do last[i] = { id = e.id, at = e.at, title = e.title, summary = e.summary, body = i == 1 and e.body or nil } end
-  return { state = meet.state, note = meet.note, last = last }
+  return { state = meet.state, note = meet.note, last = last, cmd = meetCmd }
 end
 local function meetStop(rate)
   if not meetId then return end
   meet.state, meet.note = "stt", nil
   local id = meetId
   task(UV, { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
-    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk" }, function(out, code)
+    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk", tostring(meet.t0 or 0), tostring(os.time()) },
+    function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
       table.insert(meet.last, 1, e); meet.last[4] = nil
@@ -1287,6 +1288,32 @@ local function meetStop(rate)
       meet.state, meet.note = "err", "не вдалося розшифрувати (" .. tostring(code) .. ") — аудіо збережено"
     end
   end)
+end
+
+-- 🎙 in the menu bar: start / stop a meeting on the board from the Mac, see where it is, open the last summaries
+local function meetMenu()
+  local items = {}
+  if meet.state == "rec" then
+    table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
+  else
+    for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
+      table.insert(items, { title = "● Почати мітинг на платі (" .. l[2] .. ")",
+        fn = function() meetCmd = { n = meetCmd.n + 1, act = "start", lang = l[1] } end })
+    end
+  end
+  table.insert(items, { title = "-" })
+  for _, e in ipairs(meet.last) do
+    table.insert(items, { title = (e.at or "") .. "  " .. (e.title or ""),
+      fn = function() task("/usr/bin/open", { MEET_DIR .. "/" .. e.id .. ".md" }) end })
+  end
+  table.insert(items, { title = "Відкрити папку мітингів", fn = function() task("/usr/bin/open", { MEET_DIR }) end })
+  return items
+end
+local function meetBar()
+  if not M.meetBar then return end
+  local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
+  M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
+    or (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "🎙…" or "🎙")
 end
 
 -- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
@@ -1534,7 +1561,7 @@ local function handle(method, path, headers, body)
     if p.start == "1" then
       hs.fs.mkdir(MEET_DIR)
       meetId = os.date("%Y-%m-%d_%H%M%S")
-      meet.state, meet.note, meet.lang = "rec", nil, p.lang == "en" and "en" or "uk"
+      meet.state, meet.note, meet.lang, meet.t0 = "rec", nil, p.lang == "en" and "en" or "uk", os.time()
     elseif p.stop == "1" then meetStop(tonumber(p.rate) or 22050) end
     return reply("ok", 200)
   end
@@ -1591,6 +1618,9 @@ local function timed(method, path, headers, body)
 end
 
 function M.start()
+  M.meetBar = hs.menubar.new():setMenu(meetMenu)
+  M.meetTimer = hs.timer.doEvery(1, meetBar)
+  meetBar()
   loadDeck()
   refreshHub() -- warm the cache once; later only when the board opens Hub
   M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
