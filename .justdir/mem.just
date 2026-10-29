@@ -15,6 +15,8 @@
 # pressure `top` can fail ("sysmond service not found") → fallback to ps RSS,
 # marked "(RSS, занижено)" because RSS misses compressed/swapped memory.
 
+alias ram-mem := mem
+
 mem_plugins := "playwright@claude-plugins-official aws-serverless@claude-plugins-official"
 
 # RAM/swap: overview → gum menu (claude · slim · on <plugin> · fat); with an action — run it directly
