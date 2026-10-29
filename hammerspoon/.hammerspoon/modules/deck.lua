@@ -1281,7 +1281,29 @@ local function meetName(bid)
   return os.date("%Y-%m-%d_%H%M%S", t > 1700000000 and t or os.time()), t
 end
 local meetDone = {} -- names already sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op
+-- 🛟 the backup: while the board records, the Mac records too (the device picked in the 🎙 menu) into <id>.mac.ulaw;
+-- meeting.py takes whichever is longer (the board's has gaps when Wi-Fi fails) and keeps the Mac's as <id>.mac.m4a
+local meetBackup -- the running ffmpeg of the backup
+local function backupStart(id)
+  local dev = hs.settings.get("deck.meetBackup")
+  if not dev or dev == "" or meetBackup then return end
+  meetBackup = hs.task.new("/opt/homebrew/bin/ffmpeg", function() meetBackup = nil end, { "-hide_banner", "-loglevel",
+    "error", "-f", "avfoundation", "-i", ":" .. dev, "-ac", "1", "-ar", "16000", "-f", "mulaw", "-y",
+    MEET_DIR .. "/" .. id .. ".mac.ulaw" })
+  meetBackup:start()
+end
+local meetStopNow
 local function meetStop(id, rate, fmt, len)
+  if not id or meetDone[id] then return end
+  if meetBackup then -- let ffmpeg close the backup file first, then process both
+    local b = meetBackup
+    b:setCallback(function() meetBackup = nil; meetStopNow(id, rate, fmt, len) end)
+    b:interrupt()
+    return
+  end
+  meetStopNow(id, rate, fmt, len)
+end
+meetStopNow = function(id, rate, fmt, len)
   if not id or meetDone[id] then return end
   meetDone[id] = true
   if meetId == id then meetId = nil end
@@ -1290,7 +1312,7 @@ local function meetStop(id, rate, fmt, len)
   local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (meet.t0 or os.time()))
   task(UV, { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
     MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk", tostring(meet.t0 or 0),
-    tostring((meet.t0 or os.time()) + secs), fmt or "pcm" },
+    tostring((meet.t0 or os.time()) + secs), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" },
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
@@ -1349,6 +1371,12 @@ local function meetMenu()
       end
     end
     table.insert(items, { title = "● Записати лише Маком", menu = devs })
+    local cur, bk = hs.settings.get("deck.meetBackup") or "", { { title = "вимкнено", checked = (hs.settings.get("deck.meetBackup") or "") == "",
+      fn = function() hs.settings.set("deck.meetBackup", "") end } }
+    for _, d in ipairs(hs.audiodevice.allInputDevices()) do
+      table.insert(bk, { title = d:name(), checked = cur == d:name(), fn = function() hs.settings.set("deck.meetBackup", d:name()) end })
+    end
+    table.insert(items, { title = "🛟 Запасний запис Маком під час плати: " .. (cur ~= "" and cur or "вимк."), menu = bk })
   end
   table.insert(items, { title = "-" })
   for _, e in ipairs(meet.last) do
@@ -1644,6 +1672,7 @@ local function handle(method, path, headers, body)
       meetId, meet.bid = id, p.id
       meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, p.lang == "en" and "en" or "uk",
         t > 1700000000 and t or os.time(), os.time()
+      backupStart(id)
     elseif p.stop == "1" then meetStop(id, tonumber(p.rate) or 16000, p.fmt, tonumber(p.len)) end
     return reply("ok", 200)
   end
