@@ -5,11 +5,11 @@
 # swap fills up and the machine hangs. These recipes show where the GB went
 # and switch the heavy plugins off for NEW sessions (running ones keep theirs).
 #
-#   just -g mem                 overview: RAM, swap, pressure, groups, verdict
-#   just -g mem-claude          every Claude session (tmux window) + its MCP kids, biggest first
-#   just -g mcp-slim [plugins]  disable heavy MCP plugins globally (scope user)
-#   just -g mcp-on plugin       enable a plugin only in the current dir (scope local, not committed)
-#   just -g mcp-fat [plugins]   undo mcp-slim — enable globally again
+#   just -g mem           overview → gum menu of actions (no gum / no TTY: overview + hint)
+#   just -g mem claude    every Claude session (tmux window) + its MCP kids, biggest first
+#   just -g mem slim      disable heavy MCP plugins globally (scope user) — new sessions only
+#   just -g mem on [p]    enable plugin p only in the current dir (scope local, not committed)
+#   just -g mem fat       undo slim — enable the heavy plugins globally again
 #
 # Memory = footprint (top MEM: counts compressed + swapped pages). Under heavy
 # pressure `top` can fail ("sysmond service not found") → fallback to ps RSS,
@@ -17,20 +17,17 @@
 
 mem_plugins := "playwright@claude-plugins-official aws-serverless@claude-plugins-official"
 
-# Overview: RAM, swap, memory pressure, compressor, groups (Claude/MCP/browsers/top-5) + verdict
+# RAM/swap: overview → gum menu (claude · slim · on <plugin> · fat); with an action — run it directly
 [group('mem')]
-mem: (_mem "all")
-
-# Every Claude session (tmux session:window) = own memory + its MCP children, biggest first
-[group('mem')]
-mem-claude: (_mem "claude")
-
-[private]
-_mem view:
-    #!/usr/bin/env python3
+[no-cd]
+mem action="" plugin="":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    report() {
+        python3 - "$1" <<'PY'
     import os, re, subprocess, sys
     from collections import defaultdict
-    view = "{{view}}"
+    view = sys.argv[1]
     sys.stdout.reconfigure(line_buffering=True)  # keep stdout/stderr in order
     err = lambda s: print(s, file=sys.stderr)
     sh = lambda *a: subprocess.run(a, capture_output=True, text=True).stdout
@@ -113,9 +110,6 @@ _mem view:
         for tot, own, km, pid, label in rows:
             print(f"  {gb(tot)}  {gb(own)}  {gb(km)}  {pid:>6}  {label}")
         print(f"  {gb(sum(r[0] for r in rows))}  разом")
-        err("")
-        err("Що далі: перезапусти найважчу сесію (/exit → claude --continue) — MCP-копії звільняться;")
-        err("         нові сесії без важких MCP: just -g mcp-slim")
         sys.exit(0)
 
     # ── system numbers ──
@@ -167,47 +161,60 @@ _mem view:
             print(f"  MCP-копії по сесіях тримають ~{dup / (1 << 30):.1f} GB — найлегша економія.")
     else:
         print("Вердикт: памʼяті вистачає.")
-    err("")
-    err("Що далі:")
-    err("  just -g mem-claude     яку сесію перезапустити (найважчі зверху)")
-    err("  just -g mcp-slim       нові сесії без playwright/aws-serverless (запущені — до рестарту)")
-    err("  just -g mcp-on <p>     увімкнути плагін лише в цьому проєкті")
+    PY
+    }
+    plugins() {  # $1 = enable|disable, scope user
+        set -- "$1" {{mem_plugins}}; local verb=$1; shift; local i=0 fail=0
+        for p in "$@"; do
+            i=$((i+1))
+            echo "→ [$i/$#] claude plugin $verb $p --scope user" >&2
+            claude plugin "$verb" "$p" --scope user && echo "  OK" >&2 || { echo "  FAIL" >&2; fail=1; }
+        done
+        return $fail
+    }
+    run() {
+        case "$1" in
+            claude) report claude ;;
+            slim)
+                plugins disable; rc=$?
+                echo "" >&2
+                echo "Нові сесії стартують без них; уже запущені тримають копії до рестарту." >&2
+                echo "Потрібен у проєкті:  cd <проєкт> && just -g mem on   (scope local, не комітиться)" >&2
+                echo "Повернути все:       just -g mem fat" >&2
+                return $rc ;;
+            on)
+                p="$2"
+                if [ -z "$p" ]; then
+                    echo "→ claude plugin list   (вибір плагіна)" >&2
+                    p=$(claude plugin list 2>/dev/null | sed -n 's/^ *❯ //p' | gum choose --header "Плагін для $PWD") || return 1
+                fi
+                echo "→ claude plugin enable $p --scope local   (in $PWD)" >&2
+                claude plugin enable "$p" --scope local && echo "  OK — діє для нових сесій у $PWD" >&2 || { echo "  FAIL" >&2; return 1; } ;;
+            fat) plugins enable ;;
+            *) echo "FAIL: невідома дія '$1' — є: claude | slim | on [plugin] | fat" >&2; return 2 ;;
+        esac
+    }
 
-# Disable heavy MCP plugins globally (scope user) — NEW sessions start without them
-[group('mem')]
-mcp-slim plugins=mem_plugins:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    set -- {{plugins}}; i=0; fail=0
-    for p in "$@"; do
-        i=$((i+1))
-        echo "→ [$i/$#] claude plugin disable $p --scope user" >&2
-        claude plugin disable "$p" --scope user && echo "  OK" >&2 || { echo "  FAIL" >&2; fail=1; }
-    done
+    if [ -n "{{action}}" ]; then run "{{action}}" "{{plugin}}"; exit $?; fi
+    report all
+    if ! command -v gum >/dev/null || [ ! -t 0 ] || [ ! -t 2 ]; then
+        echo "" >&2
+        echo "Дії: just -g mem claude | slim | on [plugin] | fat" >&2
+        exit 0
+    fi
     echo "" >&2
-    echo "Нові сесії стартують без них; уже запущені тримають копії до рестарту." >&2
-    echo "Потрібен у проєкті:  cd <проєкт> && just -g mcp-on <plugin>   (scope local, не комітиться)" >&2
-    echo "Повернути все:       just -g mcp-fat" >&2
-    exit $fail
-
-# Enable one plugin only in the current directory (scope local — not committed)
-[group('mem')]
-[no-cd]
-mcp-on plugin:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    echo "→ claude plugin enable {{plugin}} --scope local   (in $PWD)" >&2
-    claude plugin enable "{{plugin}}" --scope local && echo "  OK — діє для нових сесій у $PWD" >&2 || { echo "  FAIL" >&2; exit 1; }
-
-# Undo mcp-slim — enable the plugins globally again (scope user)
-[group('mem')]
-mcp-fat plugins=mem_plugins:
-    #!/usr/bin/env bash
-    set -uo pipefail
-    set -- {{plugins}}; i=0; fail=0
-    for p in "$@"; do
-        i=$((i+1))
-        echo "→ [$i/$#] claude plugin enable $p --scope user" >&2
-        claude plugin enable "$p" --scope user && echo "  OK" >&2 || { echo "  FAIL" >&2; fail=1; }
-    done
-    exit $fail
+    choice=$(gum choose --header "Що далі?" \
+        "сесії Claude (найважчі)" \
+        "mcp-slim: вимкнути playwright+aws-serverless глобально" \
+        "увімкнути плагін у цьому проєкті" \
+        "повернути плагіни глобально" \
+        "вийти") || exit 0
+    case "$choice" in
+        сесії*)    a=claude ;;
+        mcp-slim*) a=slim ;;
+        увімкнути*) a=on ;;
+        повернути*) a=fat ;;
+        *) exit 0 ;;
+    esac
+    echo "━━━ just ━━━  just -g mem $a" >&2
+    run "$a" ""
