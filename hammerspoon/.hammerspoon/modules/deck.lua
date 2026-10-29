@@ -172,6 +172,30 @@ local function refreshProjects()
   refreshTargets()
 end
 
+-- the board's ":80" tab: what listens on which TCP port of the Mac — [[port, "what"]], refreshed once a minute
+local PORT_NAMES = { [7777] = "Hammerspoon · плата", [7778] = "прошивка для плати (just ota)", [8893] = "сайт здоров'я",
+  [8894] = "сайт мітингів", [8890] = "hub", [8069] = "stt-host (whisper)" }
+local ports = {}
+local function refreshPorts()
+  task("/usr/sbin/lsof", { "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn" }, function(out)
+    local seen, list, pid, cmd = {}, {}, nil, nil
+    for l in (out or ""):gmatch("[^\n]+") do
+      local k, v = l:sub(1, 1), l:sub(2)
+      if k == "p" then pid = v elseif k == "c" then cmd = v
+      elseif k == "n" then
+        local port = tonumber(v:match(":(%d+)$"))
+        if port and not seen[port] then
+          seen[port] = true
+          local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
+          table.insert(list, { port, (PORT_NAMES[port] or cmd or "?") .. loc })
+        end
+      end
+    end
+    table.sort(list, function(a, b) return a[1] < b[1] end)
+    ports = list
+  end)
+end
+
 local function refreshSlow()
   slowTick = slowTick + 1
 
@@ -1308,11 +1332,11 @@ meetStopNow = function(id, rate, fmt, len)
   meetDone[id] = true
   if meetId == id then meetId = nil end
   meet.state, meet.note, meet.proc = "stt", nil, id
-  -- screenshots: from the start to start + the recorded length
+  -- screenshots: from the start to now (start + the audio length is too early when the board dropped audio)
   local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (meet.t0 or os.time()))
   task(UV, { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
     MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), meet.lang or "uk", tostring(meet.t0 or 0),
-    tostring((meet.t0 or os.time()) + secs), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" },
+    tostring(math.max((meet.t0 or os.time()) + secs, os.time())), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" },
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
@@ -1468,6 +1492,7 @@ local function state()
     health = health,
     journal = journalTail,
     meet = meetState(),
+    ports = ports,
   }
 end
 
@@ -1763,6 +1788,8 @@ local function timed(method, path, headers, body)
 end
 
 function M.start()
+  refreshPorts()
+  M.portsTimer = hs.timer.doEvery(60, refreshPorts)
   M.meetBar = hs.menubar.new():setMenu(meetMenu)
   M.meetTimer = hs.timer.doEvery(1, meetBar)
   meetBar()
