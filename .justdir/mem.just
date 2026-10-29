@@ -131,7 +131,7 @@ mem action="" plugin="":
 
     # ── groups ──
     print(f"\n── хто їсть памʼять ({how}) ──")
-    print(f"  {gb(sum(r[1] for r in rows))}  Claude сесії ×{len(rows)} (без MCP)   → just -g mem-claude")
+    print(f"  {gb(sum(r[1] for r in rows))}  Claude сесії ×{len(rows)} (без MCP)   → just -g mem claude")
     for name, (n, m) in sorted(mcp.items(), key=lambda x: -x[1][1]):
         if m >= 50 << 20:
             print(f"  {gb(m)}  MCP {name} ×{n}")
