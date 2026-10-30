@@ -1,8 +1,8 @@
 # --- LAN — who is on the home network, by MAC (macOS) ------------------------
 #
 # WHY — IPs float (DHCP, macOS private Wi-Fi MAC rotation), so anything that
-# needs "the Pi" or "the projector" reads LAN_<LABEL>_IP from ~/dotfiles/.env,
-# and this recipe keeps those lines true.
+# needs "the Pi" or "the projector" reads LAN_<LABEL>_IP from the shell env,
+# and this recipe keeps ~/.lan.env (sourced by .zshrc) true.
 #
 #   just -g lan        sweep, write, table → gum menu (no gum / no TTY: table only)
 #   just -g lan scan   sweep, write, table
@@ -11,12 +11,14 @@
 #
 # ~/dotfiles/.lan-devices (untracked, repo is public): one `label MAC` per line.
 # The Mac itself is always `mac`, by its IP — its MAC rotates, so it is not listed.
-# Also writes MAC_IP to ~/dotfiles/.env and manjaro:~/.mac_ip.env.
+# ~/.lan.env is rewritten whole on every run: `export LAN_<LABEL>_IP=` per named device
+# (an offline one keeps its last IP) + `export MAC_IP=`. Separate from ~/dotfiles/.env,
+# which holds secrets and must not be sourced. MAC_IP also goes to manjaro:~/.mac_ip.env.
 # Off the home LAN only the Mac's IP is refreshed: a café's devices are not ours.
 
 alias mac-ip := lan
 
-# LAN devices by MAC: sweep → LAN_<LABEL>_IP in .env + MAC_IP (also on the Pi) → table → gum menu (scan · name)
+# LAN devices by MAC: sweep → ~/.lan.env (LAN_<LABEL>_IP, MAC_IP; MAC_IP also on the Pi) → table → gum menu (scan · name)
 [group('system')]
 [no-cd]
 lan action="":
@@ -25,7 +27,7 @@ lan action="":
     export PATH="$PATH:/usr/sbin:/sbin" # route, arp, ping, ifconfig
     action="{{ action }}"
     devices=~/dotfiles/.lan-devices
-    env_file=~/dotfiles/.env
+    lan_env=~/.lan.env
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     rc=0
@@ -35,16 +37,6 @@ lan action="":
         name) [ -t 0 ] && [ -t 2 ] && command -v gum >/dev/null || { echo "FAIL: lan name потребує TTY і gum" >&2; exit 2; } ;;
         *) echo "FAIL: невідома дія '$action' — є: scan | name" >&2; exit 2 ;;
     esac
-
-    env_set() { # KEY VALUE — replace in place, never duplicate
-        if grep -qx "$1=$2" "$env_file"; then
-            return
-        elif grep -q "^$1=" "$env_file"; then
-            sed -i '' "s/^$1=.*/$1=$2/" "$env_file"; echo "  $1=$2 (замінено)" >&2
-        else
-            echo "$1=$2" >> "$env_file"; echo "  $1=$2 (додано)" >&2
-        fi
-    }
 
     scan() {
         echo "[1/4] IP мака (en1, fallback en0)..." >&2
@@ -71,10 +63,10 @@ lan action="":
         fi
 
         echo "[3/4] імена (DNS роутера, mDNS) і мітки..." >&2
-        touch "$env_file" "$devices"
-        python3 - "$tmp" "$ip" "$mac" "$devices" "$env_file" <<'PY'
+        touch "$lan_env" "$devices"
+        python3 - "$tmp" "$ip" "$mac" "$devices" "$lan_env" <<'PY'
     import re, subprocess, sys
-    tmp, own_ip, own_mac, devices, env_file = sys.argv[1:]
+    tmp, own_ip, own_mac, devices, lan_env = sys.argv[1:]
     GW = "192.168.50.1"
     # DHCP name "espressif" catches most boards; a few common Espressif OUIs for the ones that hide it
     ESP_OUI = {"10:bd:a3", "24:0a:c4", "24:6f:28", "30:ae:a4", "34:85:18", "3c:71:bf", "40:4c:ca",
@@ -93,7 +85,7 @@ lan action="":
         p = line.split()
         if len(p) == 2 and not line.startswith("#"):
             labels[p[1].lower()] = p[0]
-    prev = dict(l.strip().split("=", 1) for l in open(env_file) if re.match(r"LAN_\w+_IP=", l))
+    prev = dict(re.findall(r"^export (LAN_\w+_IP)=(\S+)$", open(lan_env).read(), re.M))
 
     seen = {}  # mac → (ip, name)
     for ip, raw in re.findall(r"\((\d+\.\d+\.\d+\.\d+)\) at ([0-9a-f:]+) on", open(f"{tmp}/arp").read()):
@@ -124,8 +116,9 @@ lan action="":
         old = prev.get(k)
         if ip is None:
             table.append((label, old or "—", m, name, "offline"))
+            envs += [f"export {k}={old}"] if old else []
             continue
-        envs.append(f"{k} {ip}")
+        envs.append(f"export {k}={ip}")
         table.append((label, ip, m, name, "новий" if not old else "=" if old == ip else f"було {old}"))
     for m, (ip, name) in sorted(seen.items(), key=lambda s: int(s[1][0].rsplit(".", 1)[1])):
         if m not in labels:
@@ -140,15 +133,15 @@ lan action="":
     PY
         [ $? -eq 0 ] || { echo "  FAIL — розбір скану" >&2; exit 1; }
 
-        echo "[4/4] запис: $env_file + Pi ~/.mac_ip.env..." >&2
-        env_set MAC_IP "$ip"
-        while read -r k v; do env_set "$k" "$v"; done < "$tmp/env"
+        echo "[4/4] запис: $lan_env + Pi ~/.mac_ip.env..." >&2
+        { echo "export MAC_IP=$ip"; cat "$tmp/env"; } > "$tmp/lan.env" && mv "$tmp/lan.env" "$lan_env"
+        echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
         cmd="printf 'MAC_IP=%s\n' $ip > ~/.mac_ip.env && cat ~/.mac_ip.env"
         echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro \"$cmd\"" >&2
         if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro "$cmd"); then
             echo "  OK ($out)" >&2
         else
-            echo "  FAIL — Pi недоступний; локальний .env оновлено" >&2; rc=1
+            echo "  FAIL — Pi недоступний; $lan_env оновлено" >&2; rc=1
         fi
     }
 
@@ -164,7 +157,7 @@ lan action="":
         fi
         echo "$label $dev_mac" >> "$devices"
         echo "  OK ($label = $dev_mac у $devices)" >&2
-        env_set "LAN_$(printf %s "$label" | tr 'a-z-' 'A-Z_')_IP" "$dev_ip"
+        echo "export LAN_$(printf %s "$label" | tr 'a-z-' 'A-Z_')_IP=$dev_ip" >> "$lan_env"
         grep -v " $dev_mac " "$tmp/unknown" > "$tmp/unknown.new"; mv "$tmp/unknown.new" "$tmp/unknown"
     }
 
@@ -173,10 +166,10 @@ lan action="":
         name_device
     elif [ -z "$action" ] && [ -t 0 ] && [ -t 2 ] && command -v gum >/dev/null; then
         while :; do
-            choice=$(gum choose --header "Що далі?" "назвати невідомий пристрій" "показати .env рядки" "вийти") || break
+            choice=$(gum choose --header "Що далі?" "назвати невідомий пристрій" "показати ~/.lan.env" "вийти") || break
             case "$choice" in
                 назвати*) name_device ;;
-                показати*) grep -E '^(MAC_IP|LAN_[A-Z0-9_]+_IP)=' "$env_file" ;;
+                показати*) cat "$lan_env" ;;
                 *) break ;;
             esac
         done
