@@ -115,7 +115,7 @@ lan action="":
             open(devices, "a").write(f"{auto} {m}\n")
             print(f"  нова мітка: {auto} = {m} ({name or 'OUI Espressif'})", file=sys.stderr)
 
-    rows, envs, unknown = [("mac", own_ip, own_mac, "цей мак", key("mac"))], [], []
+    rows, envs, unknown = [("mac", own_ip, own_mac, "mac", key("mac"))], [], []
     for m, label in labels.items():
         ip, name = seen.get(m, (None, ""))
         rows.append((label, ip, m, name, key(label)))
