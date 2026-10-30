@@ -44,3 +44,6 @@ projctl/code/projctl/projctl.log
 .lgtm/
 .playwright-mcp/
 hammerspoon/.hammerspoon/pal/icons/
+
+# just -g lan: label ↔ MAC of home devices (public repo)
+/.lan-devices
