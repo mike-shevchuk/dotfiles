@@ -964,7 +964,9 @@ local lastShot -- the board's last 📷, until 📎 pastes it
 local clipSeen = -1 -- pasteboard changeCount already pasted
 local function clipImage() -- an image on the clipboard not pasted yet (no read of the image itself: cheap)
   if hs.pasteboard.changeCount() == clipSeen then return false end
-  for _, t in ipairs(hs.pasteboard.contentTypes() or {}) do
+  local types = hs.pasteboard.contentTypes() or {}
+  for i = 1, rawlen(types) do -- rawlen: terminates on a stubbed hs too (deck_state_test.lua)
+    local t = types[i]
     if t == "public.png" or t == "public.tiff" then return true end
   end
   return false
@@ -1282,7 +1284,7 @@ do
   if f then
     for l in f:lines() do
       local ok, e = pcall(hs.json.decode, l)
-      if ok and e then table.insert(meet.last, 1, e); meet.last[4] = nil end
+      if ok and e then table.insert(meet.last, 1, e); meet.last[6] = nil end
     end
     f:close()
   end
@@ -1295,9 +1297,21 @@ local function meetState()
   local last = {} -- the full summary (body) only for the newest: /state stays small
   for i, e in ipairs(meet.last) do
     -- '#' is a colour code on the board's label: markdown headings become plain lines there
-    last[i] = { id = e.id, at = e.at, title = e.title, summary = e.summary, body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
+    last[i] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title, summary = e.summary,
+      actions = e.actions or {}, body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
   end
-  return { state = meet.state, note = meet.note, last = last, cmd = meetCmd }
+  local pending = {} -- <id>.stage files with a <id>.bid: captures the Mac is still processing
+  local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
+  for f in (ok and it or function() end), d do
+    local id = f:match("^(.+)%.stage$")
+    local stage = id and readFile(MEET_DIR .. "/" .. f)
+    local bid = id and readFile(MEET_DIR .. "/" .. id .. ".bid")
+    stage = stage and stage:match("%a+")
+    -- meeting.py leaves 'done' behind: only the stages of the contract are still processing
+    if bid and (stage == "stt" or stage == "spk" or stage == "sum") then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
+  end
+  table.sort(pending, function(a, b) return a.bid < b.bid end)
+  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd }
 end
 -- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
 local function meetName(bid)
@@ -1340,7 +1354,7 @@ meetStopNow = function(id, rate, fmt, len)
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
-      table.insert(meet.last, 1, e); meet.last[4] = nil
+      table.insert(meet.last, 1, e); meet.last[6] = nil
       if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
       hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
     else
@@ -1468,10 +1482,12 @@ local function notesState() -- for /state: no text, only how many are new and wh
   return notes[1] and { n = n, last = notes[1].id, app = notes[1].app } or nil
 end
 
+local function safe(fn, dflt) local ok, v = pcall(fn); if ok then return v end; return dflt end -- one bad source must not kill /state
 local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
-  frontName = fa and fa:name() or ""
+  local fn = fa and fa:name()
+  frontName = type(fn) == "string" and fn or ""
   local todo = {}
   for i, t in ipairs(todoist.tasks or {}) do
     if i > 6 then break end
@@ -1482,9 +1498,10 @@ local function state()
   for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
-    limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
+    limits = limits, lim = safe(limitGauges, {}), -- a bad cache must not kill /state
+    cpu = safe(cpuPct, 0), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
+    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_sig = readFile(FW_SHA) and readFile("/tmp/deck-ota.sig"), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
     front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
@@ -1497,6 +1514,29 @@ local function state()
 end
 
 local enterTimers = {} -- id → the pending Enter of a /send (kept so it is not collected before it fires)
+-- the ETag ignores what moves on every poll (cpu tick delta, ram, clock, the seconds-old ages of sessions/asks) so an
+-- idle Mac gets a 304; the minute bucket forces a fresh 200 once a minute to refresh them (ADR-0005 trade-off)
+local MOVING = { cpu = true, ram = true, time = true }
+local function noAge(list)
+  local r = {}
+  for i, e in ipairs(list or {}) do
+    local c = {}
+    for k, v in pairs(e) do if k ~= "age" then c[k] = v end end
+    r[i] = c
+  end
+  return r
+end
+local function stateEtag(st)
+  local k = {}
+  for f, v in pairs(st) do if not MOVING[f] then k[f] = v end end
+  k.sessions, k.asks = noAge(st.sessions), noAge(st.asks)
+  local key = hs.json.encode(k) .. os.time() // 60
+  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
+  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
+  return string.format('"%016x"', h64)
+end
+M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
+
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
@@ -1507,7 +1547,13 @@ local function handle(method, path, headers, body)
   local p = query(qs)
   local id = p.t and p.t:match("^@%d+$")
 
-  if method == "GET" and route == "/state" then return reply(state(), 200, true) end
+  if method == "GET" and route == "/state" then
+    local st = state()
+    local out, code, h = reply(st, 200, true)
+    h.ETag = stateEtag(st)
+    if headers["If-None-Match"] == h.ETag then return "", 304, h end
+    return out, code, h
+  end
   if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
@@ -1774,6 +1820,7 @@ end
 -- a slow request (>300 ms in the handler) or an HS main-thread stall (the 0.25 s tick late by >1 s: some module's
 -- sync hs.execute) goes to ~/Library/Logs/deck-slow.log — the board's "perf state 4153ms" lines name neither
 local SLOW_LOG = HOME .. "/Library/Logs/deck-slow.log"
+M._handle = handle -- test hook (deck_state_test.lua)
 local function slowLog(line)
   print("deck slow: " .. line)
   local f = io.open(SLOW_LOG, "a")
