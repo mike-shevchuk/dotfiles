@@ -1108,6 +1108,19 @@ local function ringFor(app)
   return r[app] or r["*"] or {}, r[app] and app or "*"
 end
 
+-- the board's flex tab: the app in front or, in a browser, the site by its window title (no tab-URL scripting needed)
+local BROWSERS = { ["Brave Browser"] = 1, ["Google Chrome"] = 1, Thorium = 1, DuckDuckGo = 1, Safari = 1 }
+local function flexFor(app, title)
+  local f = deckCfg.flex or {}
+  if BROWSERS[app] then
+    for site, btns in pairs(f.sites or {}) do
+      if title:find(site, 1, true) then return btns, site end
+    end
+    return (f.apps or {}).Browser or {}, "Browser"
+  end
+  return (f.apps or {})[app] or {}, app
+end
+
 local function strip(buttons) -- what the board needs: no actions
   local out = {}
   for i, b in ipairs(buttons or {}) do out[i] = { label = clean(b.label or ""), icon = b.icon, color = b.color } end
@@ -1472,6 +1485,8 @@ local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
   frontName = fa and fa:name() or ""
+  local fw = fa and fa:focusedWindow()
+  local flexBtns, flexCtx = flexFor(frontName, fw and fw:title() or "")
   local todo = {}
   for i, t in ipairs(todoist.tasks or {}) do
     if i > 6 then break end
@@ -1485,7 +1500,7 @@ local function state()
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
-    front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
+    front = frontName, ring = strip((ringFor(frontName))), flex = { ctx = flexCtx, buttons = strip(flexBtns) }, deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
     garmin = garmin,
@@ -1577,6 +1592,9 @@ local function handle(method, path, headers, body)
       b = pg and (pg.buttons or {})[tonumber(p.i) or 0]
     elseif p.r then
       b = (ringFor(p.app or ""))[tonumber(p.r) or 0]
+    elseif p.f then
+      local f = deckCfg.flex or {}
+      b = ((f.sites or {})[p.ctx] or (f.apps or {})[p.ctx] or {})[tonumber(p.f) or 0]
     end
     if not b then return reply("no such button", 404) end
     local t = runAction(b.action, b.label)
