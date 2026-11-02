@@ -83,7 +83,7 @@ end
 local function cut(s, n) local o = utf8.offset(s, n + 1); return o and s:sub(1, o - 1) or s end -- never mid-UTF-8
 
 local function task(cmd, args, cb)
-  local t = hs.task.new(cmd, function(_, out) if cb then cb(out or "") end end, args)
+  local t = hs.task.new(cmd, function(code, out) if cb then cb(out or "", code) end end, args)
   t:setEnvironment({ PATH = PATH, HOME = HOME, LANG = "en_US.UTF-8" })
   t:start()
   return t
@@ -1258,15 +1258,15 @@ end
 local health -- (the composite metrics, filled below; the journal notes the question it answers)
 local JOURNAL = HOME .. "/.local/share/esp-deck/journal.jsonl"
 local journalTail = {}
-journalAdd = function(text, lang)
-  local g = garmin or {}
+journalAdd = function(text, lang, at) -- at: said back then (a note from the outbox), so today's Garmin and question don't fit
+  local g = not at and garmin or {}
   local f = io.open(JOURNAL, "a")
   if not f then return end
-  f:write(hs.json.encode({ at = os.date("%Y-%m-%dT%H:%M:%S"), text = text, lang = lang, steps = g.steps,
+  f:write(hs.json.encode({ at = os.date("%Y-%m-%dT%H:%M:%S", at), text = text, lang = lang, steps = g.steps,
     hr = g.hr_now, battery = g.battery, stress = g.stress, kcal_active = g.kcal_active,
-    q = health and health.ask or nil }), "\n") -- q: the metrics' question this answers, when one was up
+    q = not at and health and health.ask or nil }), "\n") -- q: the metrics' question this answers, when one was up
   f:close()
-  table.insert(journalTail, 1, os.date("%H:%M") .. "  " .. text)
+  table.insert(journalTail, 1, os.date("%H:%M", at) .. "  " .. text)
   journalTail[4] = nil
 end
 do -- the last 3 after a reload
@@ -1423,7 +1423,7 @@ local function meetStop(id, rate, fmt, len, x)
   meetStopNow(id, rate, fmt, len, x)
   return true
 end
--- x (a capture from the outbox): {past, kind, t0, lang, close = path of the CaptureClose json (marks, gaps)}
+-- x (a capture from the outbox): {past, kind, t0, lang, target, close = path of the CaptureClose json (marks, gaps)}
 meetStopNow = function(id, rate, fmt, len, x)
   local live = meetId == id
   if live then meetId = nil end
@@ -1434,13 +1434,14 @@ meetStopNow = function(id, rate, fmt, len, x)
   local args = { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
     MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), lang or "uk", tostring(t0 or 0),
     tostring(x and x.past and (t0 or 0) + secs or math.max((t0 or os.time()) + secs, os.time())), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" }
-  if x then args[#args + 1] = x.kind or "meet"; args[#args + 1] = x.past and "1" or "0"; args[#args + 1] = x.close or ""; args[#args + 1] = x.target or "" end
+  if x then args[#args + 1] = x.kind or "meet"; args[#args + 1] = x.past and "1" or "0"; args[#args + 1] = x.close or "" end
   task(UV, args,
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
       table.insert(meet.last, 1, e); meet.last[6] = nil
       meet.bids[id] = e.bid
+      if e.kind == "note" then meet.route(e.text or "", x) end
       if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
       hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
     else
@@ -1611,6 +1612,29 @@ local function state()
 end
 
 local enterTimers = {} -- id → the pending Enter of a /send (kept so it is not collected before it fires)
+function meet.typeInto(id, text, enter, onFail)
+  task(TMUX, { "send-keys", "-t", id, "-l", "--", text }, function(_, code)
+    if code ~= 0 and onFail then return onFail() end
+    -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
+    if enter then
+      enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+    end
+  end)
+end
+-- a finished voice note: its words go where the board tagged them. A session lost after the 200 can't refuse any more
+function meet.route(text, x)
+  if text == "" then return end
+  if not x.target then return journalAdd(text, x.lang, x.past and x.t0 or nil) end
+  meet.typeInto(x.target, text, true, function()
+    hs.notify.new({ title = "Нотатку не доставлено: " .. x.target, informativeText = text }):send()
+  end)
+end
+function meet.gone(target) -- an empty list = not read yet (just reloaded): not proof of anything
+  if not sessionCache[1] then return false end
+  for _, w in ipairs(sessionCache) do if w.id == target then return false end end
+  return true
+end
+function meet.sessionGone() return reply({ code = "meet.session_gone", message = "Agent session is gone" }, 422, true) end
 -- the ETag ignores what moves on every poll (cpu tick delta, ram, clock, the seconds-old ages of sessions/asks) so an
 -- idle Mac gets a 304; the minute bucket forces a fresh 200 once a minute to refresh them (ADR-0005 trade-off)
 local MOVING = { cpu = true, ram = true, time = true }
@@ -1633,6 +1657,7 @@ local function stateEtag(st)
   return string.format('"%016x"', h64)
 end
 M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
+M._parseSessions = parseSessions -- test hook (deck_meet_test.lua)
 
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
@@ -1653,12 +1678,7 @@ local function handle(method, path, headers, body)
   end
   if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
-    task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
-      -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
-      if p.enter == "1" then
-        enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
-      end
-    end)
+    meet.typeInto(id, body or "", p.enter == "1")
     return reply("ok", 200)
   end
   if method == "POST" and route == "/net" then
@@ -1872,9 +1892,12 @@ local function handle(method, path, headers, body)
       local past = p.past == "1" and meetId ~= id -- began live, finished after a link drop: still live (its backup counts)
       local lang = p.lang == "en" and "en" or "uk"
       local t0 = t > 1700000000 and t or os.time()
+      local target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil
+      if p.kind == "agent" and not target then return reply({ code = "meet.damaged", message = "bad agent target" }, 422, true) end
+      if target and meet.gone(target) then return meet.sessionGone() end
       local pf = io.open(path, "ab"); if pf then pf:close() end
       if not pf or not writeFile(MEET_DIR .. "/" .. id .. ".meta", hs.json.encode({ kind = kind, -- kind/past/lang survive a reload until the stop
-        target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil, past = past, lang = lang, t0 = t0 })) then
+        target = target, past = past, lang = lang, t0 = t0 })) then
         return meet.full()
       end
       if not past and kind == "meet" and meetId ~= id then -- a voice note is never a live meeting
@@ -1900,6 +1923,7 @@ local function handle(method, path, headers, body)
       end
       local ok, meta = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "{}")
       meta = ok and type(meta) == "table" and meta or {}
+      if meta.target and meet.gone(meta.target) then return meet.sessionGone() end
       local x = { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target }
       if not meetStop(id, tonumber(p.rate) or 16000, p.fmt, len, x) then return meet.full() end
       return meet.delivery(id)

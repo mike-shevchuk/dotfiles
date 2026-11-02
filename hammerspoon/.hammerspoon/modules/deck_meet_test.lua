@@ -58,7 +58,7 @@ hs = setmetatable({
     mkdir = function(p) os.execute("mkdir -p '" .. p .. "'"); return true end, dir = function(p) local f = io.popen("ls '" .. p .. "' 2>/dev/null"); local names = {}
     for n in f:lines() do names[#names + 1] = n end; f:close(); local k = 0
     return function() k = k + 1; return names[k] end end },
-  timer = { absoluteTime = function() return 0 end },
+  timer = { absoluteTime = function() return 0 end, doAfter = function(_, f) f(); return {} end },
 }, { __index = function() return nop end })
 package.preload["modules.env"] = function() return { get = function(k) return k == "DECK_TOKEN" and "tok" or nil end } end
 package.preload["modules.sysmonitor"] = function() return setmetatable({ ramPct = function() return 1 end }, { __index = function() return nop end }) end
@@ -227,11 +227,54 @@ print("→ AC-18 a voice note never enters the live path")
 for i, kind in ipairs({ "journal", "agent" }) do
   local n0 = #spawned
   local nid = (AT + 400 + i) .. "-1"
-  c = start(nid, "&kind=" .. kind)
+  c = start(nid, "&kind=" .. kind .. (kind == "agent" and "&target=@7" or ""))
   check(kind .. " without past → 200, no recording, no ffmpeg", c == 200 and meetState().state ~= "rec" and #spawned == n0)
   stop(nid, 0)
   check(kind .. " reaches meeting.py as a note", spawned[#spawned]:find(" note ", 1, true) ~= nil)
 end
+
+print("→ AC-17/27 a note goes to the journal or the agent")
+local JF = home .. "/.local/share/esp-deck/journal.jsonl"
+local function journal() return rd(JF) or "" end
+local function finish(text, kind) tasks[#tasks].cb(0, enc({ title = "Нотатка", summary = "s", kind = kind or "note", text = text }) .. "\n", "") end
+local function windows(...) local o = {}; for i, x in ipairs({ ... }) do o[i] = x .. "\t0:1\tw" .. string.rep("\t", 17) end; deck._parseSessions(table.concat(o, "\n") .. "\n") end
+local function typed() local n = 0; for _, s in ipairs(spawned) do if s:find("send-keys", 1, true) then n = n + 1 end end; return n end
+local notified; hs.notify = { new = function(t) notified = t; return { send = function() end } end }
+local R = AT + 5000
+start(R .. "-1", "&kind=journal"); stop(R .. "-1", 0); finish("іду гуляти")
+check("journal note → journal.jsonl, nothing typed", journal():find("іду гуляти", 1, true) and typed() == 0)
+start(R .. "-2", "&kind=journal&past=1"); stop(R .. "-2", 0); finish("повернувся")
+check("past note → the journal says when it was said", journal():find(os.date("%Y-%m-%dT%H:%M:%S", R), 1, true) ~= nil)
+local j0 = journal()
+start(R .. "-3", "&kind=journal"); stop(R .. "-3", 0); finish("")
+check("nothing recognised → no journal line", journal() == j0)
+start(R .. "-4", "&kind=meet&past=1"); stop(R .. "-4", 0); finish("слова", "meet")
+check("a meeting is not a note", journal() == j0 and typed() == 0)
+windows("@5", "@6")
+c = start(R .. "-5", "&kind=agent&target=@5"); stop(R .. "-5", 0); finish("скажи так")
+check("agent reply → its words typed into the session", c == 200 and spawned[#spawned]:find("send-keys -t @5 -l -- скажи так", 1, true) ~= nil)
+tasks[#tasks].cb(0, "", "")
+check("then Enter", spawned[#spawned]:find("send-keys -t @5 Enter", 1, true) ~= nil and journal() == j0)
+start(R .. "-6", "&kind=agent&target=@6"); stop(R .. "-6", 0); finish("пізно")
+tasks[#tasks].cb(1, "", "can't find window")
+check("session gone after the transcription → Mike is told, no Enter", notified and (notified.informativeText or ""):find("пізно", 1, true) and spawned[#spawned]:find(" Enter", 1, true) == nil)
+c, j = start(R .. "-7", "&kind=agent&target=@9")
+check("start for a gone session → 422 meet.session_gone", c == 422 and j.code == "meet.session_gone" and #j.message <= 47)
+for _, q in ipairs({ "&kind=agent", "&kind=agent&target=abc" }) do
+  c, j = start(R .. "-8", q)
+  check("agent reply with no usable target " .. q .. " → 422 meet.damaged", c == 422 and j.code == "meet.damaged")
+end
+check("a refused start leaves no capture", rd(MD .. "/" .. name(R) .. "-7.meta") == nil and rd(MD .. "/" .. name(R) .. "-8.meta") == nil)
+start(R .. "-9", "&kind=agent&target=@5"); windows("@6")
+nsp = noprocess()
+c, j = stop(R .. "-9", 0)
+check("gone by delivery time → 422, not processed", c == 422 and j.code == "meet.session_gone" and noprocess() == nsp)
+windows("@5"); c, j = stop(R .. "-9", 0)
+check("back again → the retry delivers", c == 200 and j.delivered == true)
+finish("живий")
+start(R .. "-10", "&kind=agent&target=@5")
+reload(); c = stop(R .. "-10", 0); finish("після релоада")
+check("no window list yet after a reload → not refused, target survives", c == 200 and spawned[#spawned]:find("send-keys -t @5 -l -- після релоада", 1, true) ~= nil)
 
 print("→ a past capture during a live meeting")
 local L = AT + 500; local LID = L .. "-1"
