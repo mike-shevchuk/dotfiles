@@ -1674,3 +1674,8 @@ ls:
 [group('self')]
 show recipe:
     @just -g --show {{recipe}}
+
+# after a reboot: reopen the Claude sessions that were alive, one tmux window each (gum picks; hours=6, --all also b2b, --yes no picker, --dry only list)
+claude-restore *args="":
+    @echo "━━━ python ━━━  python3 ~/.claude/scripts/restore-sessions.py {{args}}" >&2
+    python3 ~/.claude/scripts/restore-sessions.py {{args}}
