@@ -1090,6 +1090,30 @@ local function reply(body, code, json)
   return json and hs.json.encode(body) or body, code, h
 end
 
+-- ── the board's traffic, for the radar page: the last requests with their bodies, and how often it should ask.
+-- deck-net.json is written by helper/wifi_test.py (it validates); /state carries it, the board applies it on the next poll.
+local netTrace = { log = {}, file = HOME .. "/.hammerspoon/deck-net.json" }
+local function traceText(s, n)
+  s = tostring(s or "")
+  if not utf8.len(s) then return "<" .. #s .. " байт, не текст>" end
+  if #s <= n then return s end
+  local cut = utf8.offset(s, 1, n) or n -- the letter that holds byte n starts here
+  return s:sub(1, cut - 1) .. "…"
+end
+function netTrace.add(method, path, body, res, code, ms)
+  table.insert(netTrace.log, 1, { t = os.time(), m = method, p = path, c = code, ms = math.floor(ms), rq = traceText(body, 1500),
+                                  rs = traceText(res, 3000), n = #tostring(res or "") })
+  netTrace.log[151] = nil
+end
+function netTrace.cfg()
+  local m = hs.fs.attributes(netTrace.file, "modification")
+  if m ~= netTrace.at then
+    local ok, d = pcall(hs.json.decode, readFile(netTrace.file) or "null")
+    netTrace.at, netTrace.data = m, ok and d or nil
+  end
+  return netTrace.data
+end
+
 -- ── Agents tab + Grill: helper/fleet_data.py gathers (gh, Linear, tasks.json, transcripts), never on HS's thread.
 -- A request answers from the cache and refreshes it behind the reply; the board asks only while that view is open.
 local fleetData = { cache = {}, py = HOME .. "/code/esp-deck/helper/fleet_data.py" }
@@ -1701,7 +1725,7 @@ local function state()
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
+    net = netTrace.cfg(), rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
     front = frontName, ring = strip((ringFor(frontName))), flex = flex.state(frontName, fw and fw:title() or "", deckVer), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
@@ -1726,6 +1750,7 @@ local function handle(method, path, headers, body)
   local id = p.t and p.t:match("^@%d+$")
 
   if method == "GET" and route == "/state" then return reply(state(), 200, true) end
+  if method == "GET" and route == "/netlog" then return reply({ log = netTrace.log }, 200, true) end
   if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
     task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
@@ -2031,6 +2056,7 @@ local function timed(method, path, headers, body)
   local a, b, c = handle(method, path, headers, body)
   local ms = (hs.timer.absoluteTime() - t0) / 1e6
   if ms > 300 then slowLog(string.format("%s %s %.0f ms", method, path:match("^[^?]*"), ms)) end
+  if headers["X-Deck-Ver"] then netTrace.add(method, path, body, a, b, ms) end -- the board's own, not the radar asking
   return a, b, c
 end
 
