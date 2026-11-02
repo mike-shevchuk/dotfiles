@@ -1108,17 +1108,95 @@ local function ringFor(app)
   return r[app] or r["*"] or {}, r[app] and app or "*"
 end
 
--- the board's flex tab: the app in front or, in a browser, the site by its window title (no tab-URL scripting needed)
+-- the board's flex tab: the app in front or, in a browser, the site by its window title. A context = named groups of
+-- buttons, sent to the board one group at a time: deck.json `flex`, then live ones (tmux windows, tmux hotkeys, menus).
 local BROWSERS = { ["Brave Browser"] = 1, ["Google Chrome"] = 1, Thorium = 1, DuckDuckGo = 1, Safari = 1 }
-local function flexFor(app, title)
+local KEYS_HELP = os.getenv("HOME") .. "/dotfiles/tmux/scripts/keys-help.sh"
+local MENU_SKIP = { "^Quit", "^Hide", "^Log Out", "^Shut", "Trash", "^Delete", "^Force Quit" } -- no mis-tap on these
+local flexMenus, flexMenuApp = {}, nil
+
+local function flexCtx(app, title)
   local f = deckCfg.flex or {}
-  if BROWSERS[app] then
-    for site, btns in pairs(f.sites or {}) do
-      if title:find(site, 1, true) then return btns, site end
-    end
-    return (f.apps or {}).Browser or {}, "Browser"
+  if not BROWSERS[app] then return app end
+  for site in pairs(f.sites or {}) do
+    if title:find(site, 1, true) then return site end
   end
-  return (f.apps or {})[app] or {}, app
+  return "Browser"
+end
+
+local function tmuxActive() -- the client Mike touched last: list-clients order says nothing about that
+  local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
+  local client, session = out:match("%S+%s+(%S+)%s+(%S+)")
+  return client, session
+end
+
+local function menuWalk(items, path, out) -- every enabled item with a shortcut, under its menu path
+  for _, it in ipairs(items or {}) do
+    local title, p, skip = it.AXTitle or "", { table.unpack(path) }, false
+    p[#p + 1] = title
+    for _, pat in ipairs(MENU_SKIP) do skip = skip or title:find(pat) ~= nil end
+    if it.AXChildren then menuWalk(it.AXChildren[1], p, out)
+    elseif not skip and it.AXEnabled and (it.AXMenuItemCmdChar or "") ~= "" then
+      out[#out + 1] = { label = title, icon = "keyboard", action = { menu = p } }
+    end
+  end
+end
+
+local function flexReadMenus(fa) -- async: a big app takes seconds; the board refetches when `v` changes
+  local name = fa and fa:name()
+  if not name or name == flexMenuApp then return end
+  flexMenuApp, flexMenus = name, {}
+  fa:getMenuItems(function(tree)
+    if flexMenuApp ~= name then return end
+    local groups = {}
+    for _, top in ipairs(tree or {}) do
+      local out = {}
+      if top.AXTitle ~= "Apple" and top.AXTitle ~= name then menuWalk(top.AXChildren and top.AXChildren[1], { top.AXTitle }, out) end
+      if out[1] then groups[#groups + 1] = { group = top.AXTitle, buttons = out } end
+    end
+    flexMenus = groups
+  end)
+end
+
+local function tmuxHelpGroups() -- the `prefix X` rows of the cheat-sheet = what's really bound, custom keys included
+  local groups, cur = {}, nil
+  for line in (readFile(KEYS_HELP) or ""):gmatch("[^\n]+") do
+    local g = line:match('^%s*grp "([^"]+)"')
+    local key, text = line:match('^%s*row "prefix ([^"]+)"%s+"([^"]+)"')
+    if g then
+      cur = { group = g:gsub(" %(.*", ""), buttons = {} }
+      groups[#groups + 1] = cur
+    elseif key and cur and key ~= "?" and key ~= "PgUp" then
+      local b = cur.buttons
+      b[#b + 1] = { label = text:gsub(" [—(].*", ""), icon = "keyboard", action = { tk = key } }
+    end
+  end
+  local out = {}
+  for _, g in ipairs(groups) do if g.buttons[1] then out[#out + 1] = g end end
+  return out
+end
+
+local function flexGroups(ctx)
+  local f, out = deckCfg.flex or {}, {}
+  local function add(list) for _, g in ipairs(list or {}) do out[#out + 1] = g end end
+  local sites, apps = f.sites or {}, f.apps or {}
+  if ctx == "Ghostty" then
+    local _, session = tmuxActive()
+    local wins = {}
+    for _, w in ipairs(sessions()) do
+      if session and w.idx:find(session .. ":", 1, true) == 1 and #wins < 24 then
+        wins[#wins + 1] = { label = w.idx:match(":(%d+)$") .. " " .. w.name, icon = w.claude and "bolt" or "list",
+                            action = { tmux = "select-window -t " .. w.id } }
+      end
+    end
+    out[1] = { group = "Зараз", buttons = wins }
+  end
+  add(sites[ctx] or apps[ctx])
+  if sites[ctx] then add(apps.Browser) end
+  if ctx == "Ghostty" then add(tmuxHelpGroups()) end
+  add(f.all)
+  add(flexMenus)
+  return out
 end
 
 local function strip(buttons) -- what the board needs: no actions
@@ -1151,6 +1229,12 @@ local function runAction(a, label)
     if fn then pcall(fn) else print("deck lua: " .. tostring(err)) end
   end
   if a.convert then convert(macFiles, a.convert) end
+  if a.menu then local fa = hs.application.frontmostApplication(); if fa then fa:selectMenuItem(a.menu) end end
+  if a.tmux or a.tk then -- the client in front, whatever keyboard layout is on (keyStroke needs Latin for a letter)
+    local client, session = tmuxActive()
+    if a.tk and client then task(TMUX, { "send-keys", "-K", "-c", client, "C-b", a.tk }) end
+    if a.tmux and session then task("/bin/zsh", { "-lc", TMUX .. " " .. (a.tmux:gsub("{s}", session)) }) end
+  end
   if a.term then return runRecipe({ label or "deck", a.term }) end -- the board opens this tmux window
 end
 
@@ -1486,7 +1570,7 @@ local function state()
   local fa = hs.application.frontmostApplication()
   frontName = fa and fa:name() or ""
   local fw = fa and fa:focusedWindow()
-  local flexBtns, flexCtx = flexFor(frontName, fw and fw:title() or "")
+  flexReadMenus(fa)
   local todo = {}
   for i, t in ipairs(todoist.tasks or {}) do
     if i > 6 then break end
@@ -1500,7 +1584,7 @@ local function state()
     limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
     rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
     recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA), fw_notes = readFile(FW_SHA) and readFile("/tmp/deck-ota.notes"),
-    front = frontName, ring = strip((ringFor(frontName))), flex = { ctx = flexCtx, buttons = strip(flexBtns) }, deckv = deckVer, board = M.boardVer,
+    front = frontName, ring = strip((ringFor(frontName))), flex = { ctx = flexCtx(frontName, fw and fw:title() or ""), v = deckVer .. "." .. #flexMenus }, deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
     garmin = garmin,
@@ -1585,6 +1669,14 @@ local function handle(method, path, headers, body)
     for i, pg in ipairs(deckCfg.deck or {}) do pages[i] = { page = clean(pg.page or ("Page " .. i)), buttons = strip(pg.buttons) } end
     return reply({ pages = pages, v = deckVer }, 200, true)
   end
+  if method == "POST" and route == "/flex" then
+    local groups, names, g = flexGroups(p.ctx or ""), {}, tonumber(p.g) or 0
+    for i, gr in ipairs(groups) do names[i] = clean(gr.group or "") end
+    if not groups[g + 1] then g = 0 end
+    local btns = strip(groups[g + 1] and groups[g + 1].buttons or {})
+    while #btns > 24 do btns[#btns] = nil end
+    return reply({ ctx = p.ctx or "", g = g, groups = names, buttons = btns }, 200, true)
+  end
   if method == "POST" and route == "/act" then
     local b
     if p.d then
@@ -1593,8 +1685,8 @@ local function handle(method, path, headers, body)
     elseif p.r then
       b = (ringFor(p.app or ""))[tonumber(p.r) or 0]
     elseif p.f then
-      local f = deckCfg.flex or {}
-      b = ((f.sites or {})[p.ctx] or (f.apps or {})[p.ctx] or {})[tonumber(p.f) or 0]
+      local g = flexGroups(p.ctx or "")[(tonumber(p.g) or 0) + 1]
+      b = g and g.buttons[tonumber(p.f) or 0]
     end
     if not b then return reply("no such button", 404) end
     local t = runAction(b.action, b.label)
