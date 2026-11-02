@@ -468,11 +468,30 @@ running = ""; reload()
 check("stt + .pcm + no process → run again", ran(M3) == 1)
 local cmd = ""; for _, x in ipairs(spawned) do if x:find(M3 .. ".pcm", 1, true) then cmd = x end end
 check("with its rate, fmt, language, kind, past and close", cmd:find(" 16000 en " .. (AT + 6400) .. " ", 1, true) and cmd:find(" ulaw ", 1, true) and cmd:find(" meet 1 ", 1, true) and cmd:find(M3 .. ".close.json", 1, true))
-check("a later stage, err, or no .pcm → not rerun", ran(M3spk) == 0 and ran(M3err) == 0 and ran(M3gone) == 0)
+check("reload during whisper or later: .pcm kept → run again (M3b)", ran(M3spk) == 1)
+check("err, or no .pcm → not rerun", ran(M3err) == 0 and ran(M3gone) == 0)
 nsp = noprocess()
 c, j = stop((AT + 6400) .. "-1", 4)
 check("the repeated stop still answers, nothing doubled", c == 200 and j.delivered == true and j.have == 4 and noprocess() == nsp)
 w(MD .. "/" .. M3 .. ".stage", "err"); os.remove(MD .. "/" .. M3 .. ".pcm")
+w(MD .. "/" .. M3spk .. ".stage", "err"); os.remove(MD .. "/" .. M3spk .. ".pcm")
+local M3idx = seedStt(AT + 6404, "sum", true) -- died between its index line and `done`
+local fi = assert(io.open(MD .. "/index.jsonl", "a")); fi:write(enc({ id = M3idx, title = "Test meeting", len = 4 }), "\n"); fi:close()
+local M3mac = name(AT + 6405); w(MD .. "/" .. M3mac .. ".stage", "stt"); w(MD .. "/" .. M3mac .. ".pcm", "abcd"); w(MD .. "/" .. M3mac .. ".len", "4 16000 ulaw") -- Mac-alone: no .meta, no .bid
+os.execute("touch -t 202601011234.56 '" .. MD .. "/" .. M3mac .. ".len'")
+reload()
+check("already in the index → not run twice", ran(M3idx) == 0)
+local mc = ""; for _, x in ipairs(spawned) do if x:find(M3mac .. ".pcm", 1, true) then mc = x end end
+local t0s, t1s = mc:match(" uk (%d+) (%d+) ulaw")
+check("a Mac-alone rerun keeps its clock from the id (N2)", tonumber(t0s) == AT + 6405)
+check("screenshots end at the stop, not at the reload", tonumber(t1s) == os.time({ year = 2026, month = 1, day = 1, hour = 12, min = 34, sec = 56 }))
+w(MD .. "/" .. M3mac .. ".stage", "err")
+local M3old = name(AT + 6406); w(MD .. "/" .. M3old .. ".stage", "sum"); w(MD .. "/" .. M3old .. ".pcm", "abcd"); w(MD .. "/" .. M3old .. ".bid", (AT + 6406) .. "-1")
+os.execute("touch -t 203001010000 '" .. MD .. "/" .. M3old .. ".pcm'") -- the newest .pcm
+running = "4242\n"; reload(); running = ""
+post("/meet/pcm?seq=1", "zz")
+check("the old firmware's route never appends to a capture in processing", rd(MD .. "/" .. M3old .. ".pcm") == "abcd")
+w(MD .. "/" .. M3old .. ".stage", "err"); os.remove(MD .. "/" .. M3old .. ".pcm")
 
 print("→ AC-31 /log (M7, M8)")
 local seq1 = rd(SEQF)

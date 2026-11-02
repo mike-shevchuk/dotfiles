@@ -1288,7 +1288,7 @@ local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the 
 -- names sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op; their received length (the
 -- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
 local meetDone = {}
-meet.len, meet.bids, meet.unsynced = {}, {}, {} -- (fields of meet: deck.lua is at Lua's 200-locals limit)
+meet.len, meet.bids, meet.unsynced, meet.indexed = {}, {}, {}, {} -- (fields of meet: deck.lua is at Lua's 200-locals limit)
 meet.MAX = 4294967295 -- the contract's uint32
 function meet.addLast(e) -- AC-24: the board's 5 are meetings; a voice note never takes a place
   if e.kind == "note" then return end
@@ -1306,7 +1306,7 @@ do
       if ok and type(e) == "table" then
         meet.addLast(e)
         if e.id then
-          meetDone[e.id], meet.len[e.id], meet.bids[e.id] = true, e.len, e.bid
+          meetDone[e.id], meet.len[e.id], meet.bids[e.id], meet.indexed[e.id] = true, e.len, e.bid, true
           meet.noteBid(e.bid, e.id)
         end
       end
@@ -1453,7 +1453,7 @@ meetStopNow = function(id, rate, fmt, len, x)
   local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (t0 or os.time()))
   local args = { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
     MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), lang or "uk", tostring(t0 or 0),
-    tostring(x and x.past and (t0 or 0) + secs or math.max((t0 or os.time()) + secs, os.time())), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" }
+    tostring(x and (x.t1 or x.past and (t0 or 0) + secs) or math.max((t0 or os.time()) + secs, os.time())), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" }
   if x then args[#args + 1] = x.kind or "meet"; args[#args + 1] = x.past and "1" or "0"; args[#args + 1] = x.close or "" end
   task(UV, args,
     function(out, code)
@@ -1471,17 +1471,22 @@ meetStopNow = function(id, rate, fmt, len, x)
     end
   end)
 end
-do -- answered delivered, then a reload before meeting.py took the .pcm (meetStop's ffmpeg wait, or the task died with
-  -- Hammerspoon): the board has freed its audio, so run it again. Anything past stt, or err, has no .pcm to trust
+do -- answered delivered, then a reload before meeting.py took the .pcm (meetStop's ffmpeg wait) or
+  -- during it (the task died with Hammerspoon): the board has freed its audio, so run it again. meeting.py keeps the
+  -- .pcm until its index line is written; err stays err
   local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
   for f in (ok and it or function() end), d do
     local id = f:match("^([%d_%-]+)%.stage$")
-    if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("^%s*stt") and fsize(MEET_DIR .. "/" .. id .. ".pcm") > 0
+    local st = id and (readFile(MEET_DIR .. "/" .. f) or ""):match("%a+")
+    if (st == "stt" or st == "spk" or st == "sum") and not meet.indexed[id] and fsize(MEET_DIR .. "/" .. id .. ".pcm") > 0
       and not (hs.execute("/usr/bin/pgrep -f 'meeting.py .*/" .. id .. "\\.pcm'") or ""):match("%d") then
       local have, rate, fmt = (readFile(MEET_DIR .. "/" .. id .. ".len") or ""):match("^(%d+) (%d+) (%a+)")
       local okm, x = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "null")
-      x = okm and type(x) == "table" and x or nil
-      if x and readFile(MEET_DIR .. "/" .. id .. ".close.json") then x.close = MEET_DIR .. "/" .. id .. ".close.json" end
+      x = okm and type(x) == "table" and x or {}
+      local Y, M, D, h, m, sec = id:match("^(%d+)%-(%d+)%-(%d+)_(%d%d)(%d%d)(%d%d)")
+      x.t0 = x.t0 or (Y and os.time({ year = tonumber(Y), month = tonumber(M), day = tonumber(D), hour = tonumber(h), min = tonumber(m), sec = tonumber(sec) }))
+      x.t1 = hs.fs.attributes(MEET_DIR .. "/" .. id .. ".len", "modification") -- .len: written at the stop
+      if readFile(MEET_DIR .. "/" .. id .. ".close.json") then x.close = MEET_DIR .. "/" .. id .. ".close.json" end
       writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt") -- pending counts from now
       meetStopNow(id, tonumber(rate) or 16000, fmt or "ulaw", tonumber(have), x)
     end
@@ -1994,7 +1999,7 @@ local function handle(method, path, headers, body)
       local best, bt
       for f in hs.fs.dir(MEET_DIR) do
         local a = f:match("^(%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d)%.pcm$")
-        local m = a and hs.fs.attributes(MEET_DIR .. "/" .. f, "modification")
+        local m = a and not meetDone[a] and hs.fs.attributes(MEET_DIR .. "/" .. f, "modification")
         if m and (not bt or m > bt) then best, bt = a, m end
       end
       if best then
