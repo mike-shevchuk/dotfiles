@@ -104,14 +104,14 @@
           "group": "Вікна",
           "buttons": [
             {
-              "label": "Вікно ←",
+              "label": "Вікно назад",
               "icon": "left",
               "action": {
                 "tmux": "previous-window -t {s}:"
               }
             },
             {
-              "label": "Вікно →",
+              "label": "Вікно далі",
               "icon": "right",
               "action": {
                 "tmux": "next-window -t {s}:"
@@ -207,14 +207,14 @@
           "group": "Панелі",
           "buttons": [
             {
-              "label": "Спліт |",
+              "label": "Спліт верт",
               "icon": "bars",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}'"
               }
             },
             {
-              "label": "Спліт —",
+              "label": "Спліт гориз",
               "icon": "minus",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}'"
@@ -228,28 +228,28 @@
               }
             },
             {
-              "label": "← панель",
+              "label": "Панель ліво",
               "icon": "left",
               "action": {
                 "tmux": "select-pane -t {s}: -L"
               }
             },
             {
-              "label": "↑ панель",
+              "label": "Панель верх",
               "icon": "up",
               "action": {
                 "tmux": "select-pane -t {s}: -U"
               }
             },
             {
-              "label": "→ панель",
+              "label": "Панель право",
               "icon": "right",
               "action": {
                 "tmux": "select-pane -t {s}: -R"
               }
             },
             {
-              "label": "↓ панель",
+              "label": "Панель низ",
               "icon": "down",
               "action": {
                 "tmux": "select-pane -t {s}: -D"
@@ -284,14 +284,14 @@
               }
             },
             {
-              "label": "Міняти ↑",
+              "label": "Міняти верх",
               "icon": "up",
               "action": {
                 "tk": "{"
               }
             },
             {
-              "label": "Міняти ↓",
+              "label": "Міняти низ",
               "icon": "down",
               "action": {
                 "tk": "}"
@@ -310,14 +310,14 @@
           "group": "Сесії",
           "buttons": [
             {
-              "label": "Сесія →",
+              "label": "Сесія далі",
               "icon": "right",
               "action": {
                 "tk": ")"
               }
             },
             {
-              "label": "Сесія ←",
+              "label": "Сесія назад",
               "icon": "left",
               "action": {
                 "tk": "("
@@ -364,14 +364,14 @@
           "group": "Тули",
           "buttons": [
             {
-              "label": "btop |",
+              "label": "btop верт",
               "icon": "eye",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' btop"
               }
             },
             {
-              "label": "btop —",
+              "label": "btop гориз",
               "icon": "eye",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' btop"
@@ -385,14 +385,14 @@
               }
             },
             {
-              "label": "htop |",
+              "label": "htop верт",
               "icon": "list",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' htop"
               }
             },
             {
-              "label": "htop —",
+              "label": "htop гориз",
               "icon": "list",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' htop"
@@ -406,14 +406,14 @@
               }
             },
             {
-              "label": "lazygit |",
+              "label": "lazygit верт",
               "icon": "loop",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' lazygit"
               }
             },
             {
-              "label": "lazygit —",
+              "label": "lazygit гориз",
               "icon": "loop",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' lazygit"
@@ -427,14 +427,14 @@
               }
             },
             {
-              "label": "yazi |",
+              "label": "yazi верт",
               "icon": "folder",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' yazi"
               }
             },
             {
-              "label": "yazi —",
+              "label": "yazi гориз",
               "icon": "folder",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' yazi"
@@ -448,14 +448,14 @@
               }
             },
             {
-              "label": "docker |",
+              "label": "docker верт",
               "icon": "drive",
               "action": {
                 "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' lazydocker"
               }
             },
             {
-              "label": "docker —",
+              "label": "docker гориз",
               "icon": "drive",
               "action": {
                 "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' lazydocker"
@@ -516,14 +516,14 @@
               }
             },
             {
-              "label": "↑",
+              "label": "Вгору",
               "icon": "up",
               "action": {
                 "keys": "up"
               }
             },
             {
-              "label": "↓",
+              "label": "Вниз",
               "icon": "down",
               "action": {
                 "keys": "down"
@@ -850,14 +850,14 @@
               }
             },
             {
-              "label": "Вкладка ←",
+              "label": "Вкладка лів",
               "icon": "left",
               "action": {
                 "keys": "cmd+alt+left"
               }
             },
             {
-              "label": "Вкладка →",
+              "label": "Вкладка прав",
               "icon": "right",
               "action": {
                 "keys": "cmd+alt+right"
@@ -908,14 +908,14 @@
               }
             },
             {
-              "label": "Стор ↑",
+              "label": "Стор вгору",
               "icon": "up",
               "action": {
                 "keys": "pageup"
               }
             },
             {
-              "label": "Стор ↓",
+              "label": "Стор вниз",
               "icon": "down",
               "action": {
                 "keys": "pagedown"
@@ -957,28 +957,28 @@
               }
             },
             {
-              "label": "−10 с",
+              "label": "Назад 10с",
               "icon": "left",
               "action": {
                 "keys": "j"
               }
             },
             {
-              "label": "+10 с",
+              "label": "Вперед 10с",
               "icon": "right",
               "action": {
                 "keys": "l"
               }
             },
             {
-              "label": "−5 с",
+              "label": "Назад 5с",
               "icon": "prev",
               "action": {
                 "keys": "left"
               }
             },
             {
-              "label": "+5 с",
+              "label": "Вперед 5с",
               "icon": "next",
               "action": {
                 "keys": "right"
@@ -1152,14 +1152,14 @@
             }
           },
           {
-            "label": "Гучн +",
+            "label": "Гучніше",
             "icon": "volup",
             "action": {
               "media": "volup"
             }
           },
           {
-            "label": "Гучн −",
+            "label": "Тихіше",
             "icon": "voldown",
             "action": {
               "media": "voldown"
