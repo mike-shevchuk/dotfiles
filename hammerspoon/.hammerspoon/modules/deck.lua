@@ -1090,6 +1090,58 @@ local function reply(body, code, json)
   return json and hs.json.encode(body) or body, code, h
 end
 
+-- ── Agents tab + Grill: helper/fleet_data.py gathers (gh, Linear, tasks.json, transcripts), never on HS's thread.
+-- A request answers from the cache and refreshes it behind the reply; the board asks only while that view is open.
+local fleetData = { cache = {}, py = HOME .. "/code/esp-deck/helper/fleet_data.py" }
+local function fleetClean(v) -- the board's font: the same filter as every other text
+  if type(v) == "string" then return safeClean(v, 600) end
+  if type(v) ~= "table" then return v end
+  local r = {}
+  for k, x in pairs(v) do r[k] = fleetClean(x) end
+  return r
+end
+function fleetData.get(key, ttl, args)
+  local c = fleetData.cache[key] or {}
+  fleetData.cache[key] = c
+  if not c.running and os.time() - (c.at or 0) >= ttl then
+    c.running = true
+    task("/bin/sh", { "-c", 'PATH=$PATH:$HOME/.pyenv/shims exec python3 "$@"', "sh", fleetData.py, table.unpack(args) }, function(out)
+      local ok, d = pcall(hs.json.decode, out)
+      c.running, c.at = false, os.time()
+      if ok and d then c.data = fleetClean(d) end
+    end)
+  end
+  return c.data or { loading = true }
+end
+function fleetData.window(id)
+  for _, w in ipairs(sessionCache) do if w.id == id then return w end end
+end
+-- Other in AskUserQuestion, tried live on 2.1.x: digit n+1 opens the field, text, Enter. Only into the dialog that is
+-- still open, else the text would land in the prompt as a new message.
+function fleetData.other(id, text)
+  for _, a in ipairs(askCache) do
+    if a.id == id and a.kind == "choice" and not a.multi and #a.opts > 0 then
+      task(TMUX, { "send-keys", "-t", id, tostring(#a.opts + 1) }, function()
+        hs.timer.doAfter(0.4, function()
+          task(TMUX, { "send-keys", "-t", id, "-l", "--", text }, function()
+            hs.timer.doAfter(0.3, function() task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+          end)
+        end)
+      end)
+      return true
+    end
+  end
+  return false
+end
+function fleetData.rename(id, name)
+  local f = HOME .. "/.hammerspoon/deck-prnames.json"
+  local ok, d = pcall(hs.json.decode, readFile(f) or "{}")
+  d = ok and d or {}
+  d[id] = name ~= "" and name or nil
+  hs.json.write(d, f, true, true)
+  fleetData.cache.prs = nil
+end
+
 -- ── deck.json: Stream Deck pages + per-app ring; reloaded when the file changes ──
 local DECK_FILE = HOME .. "/.hammerspoon/deck.json"
 local deckCfg, deckVer = { deck = {}, ring = {} }, ""
@@ -1734,6 +1786,23 @@ local function handle(method, path, headers, body)
     for i, pg in ipairs(deckCfg.deck or {}) do pages[i] = { page = clean(pg.page or ("Page " .. i)), buttons = strip(pg.buttons) } end
     return reply({ pages = pages, v = deckVer }, 200, true)
   end
+  if method == "POST" and route == "/prs" then return reply(fleetData.get("prs", 120, { "prs" }), 200, true) end
+  if method == "POST" and route == "/prname" and p.id then
+    fleetData.rename(p.id, safeClean(body or "", 70))
+    return reply(fleetData.get("prs", 120, { "prs" }), 200, true)
+  end
+  if method == "POST" and route == "/project" then
+    return reply(fleetData.get("project:" .. (p.s or ""), 60, { "project", p.s or "" }), 200, true)
+  end
+  if method == "POST" and route == "/grill" and id then
+    local w = fleetData.window(id)
+    if not w or (w.tr or "") == "" then return reply({ blocks = {} }, 200, true) end
+    return reply(fleetData.get("grill:" .. id, 20, { "grill", w.tr, w.idx }), 200, true)
+  end
+  if method == "POST" and route == "/askother" and id then
+    local ok = (body or "") ~= "" and fleetData.other(id, body)
+    return reply({ ok = ok }, 200, true)
+  end
   if method == "POST" and route == "/flex" then
     return reply(flex.reply(p.ctx or "", tonumber(p.g) or 0), 200, true)
   end
@@ -1785,6 +1854,8 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/open" then
     local h = hub[tonumber(p.i or "")]
     if h then task("/usr/bin/open", { HUB_URL .. h.path }) end
+    -- a PR nobody works on in a window; only this org's PR pages
+    if p.pr and p.pr:match("^https://github%.com/back2back%-team/[%w%-]+/pull/%d+$") then task("/usr/bin/open", { p.pr }) end
     -- a Hacker News discussion from the board's Dash; only https links to news.ycombinator.com
     if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
     -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
