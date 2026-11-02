@@ -1289,14 +1289,26 @@ local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the 
 -- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
 local meetDone = {}
 meet.len, meet.bids, meet.unsynced = {}, {}, {} -- (fields of meet: deck.lua is at Lua's 200-locals limit)
+meet.MAX = 4294967295 -- the contract's uint32
+function meet.addLast(e) -- AC-24: the board's 5 are meetings; a voice note never takes a place
+  if e.kind == "note" then return end
+  table.insert(meet.last, 1, e); meet.last[6] = nil
+end
+function meet.noteBid(bid, name) -- the newest capture of an unsynced id, so a reload keeps its chunks together
+  local at = bid and bid:match("^%d+")
+  if at and tonumber(at) <= 1700000000 and (meet.unsynced[at] or "") < name then meet.unsynced[at] = name end
+end
 do
   local f = io.open(MEET_DIR .. "/index.jsonl")
   if f then
     for l in f:lines() do
       local ok, e = pcall(hs.json.decode, l)
       if ok and type(e) == "table" then
-        table.insert(meet.last, 1, e); meet.last[6] = nil
-        if e.id then meetDone[e.id], meet.len[e.id], meet.bids[e.id] = true, e.len, e.bid end
+        meet.addLast(e)
+        if e.id then
+          meetDone[e.id], meet.len[e.id], meet.bids[e.id] = true, e.len, e.bid
+          meet.noteBid(e.bid, e.id)
+        end
       end
     end
     f:close()
@@ -1349,8 +1361,10 @@ do -- FM-6: after a Hammerspoon reload any .stage (index.jsonl above: the archiv
   for f in (ok and it or function() end), d do
     local id = f:match("^(.+)%.stage$")
     if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("%a") then
-      meetDone[id], meet.len[id] = true, tonumber(readFile(MEET_DIR .. "/" .. id .. ".len") or "")
+      meetDone[id], meet.len[id] = true, tonumber((readFile(MEET_DIR .. "/" .. id .. ".len") or ""):match("^%d+"))
     end
+    local named = f:match("^(.+)%.bid$")
+    if named then meet.noteBid((readFile(MEET_DIR .. "/" .. f) or ""):match("%S+"), named) end
   end
 end
 local function fsize(path)
@@ -1382,10 +1396,15 @@ function meet.delivery(id)
   return reply({ id = id, have = meet.len[id] or fsize(MEET_DIR .. "/" .. id .. ".pcm"), delivered = meetDone[id] or false }, 200, true)
 end
 function meet.full() return reply({ code = "meet.disk_full", message = "Disk full on the Mac" }, 507, true) end
+-- the query of a stop: rate and fmt are all meeting.py gets told about the audio, a bad len would skip the length check
+function meet.validStop(p)
+  local len = p.len and p.len:match("^%d+$") and tonumber(p.len)
+  return (not p.len or (len and len <= meet.MAX)) and (not p.rate or p.rate == "16000") and (not p.fmt or p.fmt == "ulaw")
+end
 -- CaptureClose: what meeting.py relies on; a bookmark or gap past the audio is fine (it clamps them)
 function meet.validClose(c)
   local function list(v) return v == nil or (type(v) == "table" and (next(v) == nil or v[1] ~= nil)) end
-  local function num(v, min) return type(v) == "number" and v >= min end
+  local function num(v, min) return type(v) == "number" and v >= min and v <= meet.MAX end
   if type(c) ~= "table" or c[1] ~= nil or not list(c.marks) or not list(c.gaps) then return false end
   for _, e in ipairs(c.marks or {}) do
     if type(e) ~= "table" or not (num(e.offset, 0) and num(e.at, 0)) then return false end
@@ -1408,11 +1427,12 @@ local function backupStart(id)
 end
 local meetStopNow
 -- false: the disk refused, nothing accepted. The stop is accepted here, before ffmpeg closes: .stage = "processing" and
--- FM-6's mark (last, so a reload never trusts a half-done stop), .len = the length that outlives the .pcm
+-- FM-6's mark (last, so a reload never trusts a half-done stop), .len = "<length> <rate> <fmt>": the length outlives the
+-- .pcm, and a reload can rerun what never reached meeting.py
 local function meetStop(id, rate, fmt, len, x)
   if not id or meetDone[id] then return true end
   local have = fsize(MEET_DIR .. "/" .. id .. ".pcm")
-  if not (writeFile(MEET_DIR .. "/" .. id .. ".len", tostring(have)) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
+  if not (writeFile(MEET_DIR .. "/" .. id .. ".len", have .. " " .. rate .. " " .. (fmt or "pcm")) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
   meetDone[id], meet.len[id] = true, have
   if meetBackup and meetId == id then -- let ffmpeg close the backup file first, then process both
     local b = meetBackup
@@ -1439,7 +1459,7 @@ meetStopNow = function(id, rate, fmt, len, x)
     function(out, code)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
-      table.insert(meet.last, 1, e); meet.last[6] = nil
+      meet.addLast(e)
       meet.bids[id] = e.bid
       if e.kind == "note" then meet.route(e.text or "", x) end
       if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
@@ -1450,6 +1470,22 @@ meetStopNow = function(id, rate, fmt, len, x)
       if meet.state ~= "rec" then meet.state, meet.note = "err", "не вдалося розшифрувати — аудіо збережено в " .. id end
     end
   end)
+end
+do -- answered delivered, then a reload before meeting.py took the .pcm (meetStop's ffmpeg wait, or the task died with
+  -- Hammerspoon): the board has freed its audio, so run it again. Anything past stt, or err, has no .pcm to trust
+  local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
+  for f in (ok and it or function() end), d do
+    local id = f:match("^([%d_%-]+)%.stage$")
+    if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("^%s*stt") and fsize(MEET_DIR .. "/" .. id .. ".pcm") > 0
+      and not (hs.execute("/usr/bin/pgrep -f 'meeting.py .*/" .. id .. "\\.pcm'") or ""):match("%d") then
+      local have, rate, fmt = (readFile(MEET_DIR .. "/" .. id .. ".len") or ""):match("^(%d+) (%d+) (%a+)")
+      local okm, x = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "null")
+      x = okm and type(x) == "table" and x or nil
+      if x and readFile(MEET_DIR .. "/" .. id .. ".close.json") then x.close = MEET_DIR .. "/" .. id .. ".close.json" end
+      writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt") -- pending counts from now
+      meetStopNow(id, tonumber(rate) or 16000, fmt or "ulaw", tonumber(have), x)
+    end
+  end
 end
 
 -- 🎙 in the menu bar: start / stop a meeting on the board from the Mac, see where it is, open the last summaries
@@ -1625,13 +1661,13 @@ end
 function meet.route(text, x)
   if text == "" then return end
   if not x.target then return journalAdd(text, x.lang, x.past and x.t0 or nil) end
-  meet.typeInto(x.target, text, true, function()
-    hs.notify.new({ title = "Нотатку не доставлено: " .. x.target, informativeText = text }):send()
-  end)
+  local function lost() hs.notify.new({ title = "Нотатку не доставлено: " .. x.target, informativeText = text }):send() end
+  if meet.gone(x.target) then return lost() end -- it may be a shell by now: words must not run there
+  meet.typeInto(x.target, text, true, lost)
 end
 function meet.gone(target) -- an empty list = not read yet (just reloaded): not proof of anything
   if not sessionCache[1] then return false end
-  for _, w in ipairs(sessionCache) do if w.id == target then return false end end
+  for _, w in ipairs(sessionCache) do if w.id == target and w.claude then return false end end
   return true
 end
 function meet.sessionGone() return reply({ code = "meet.session_gone", message = "Agent session is gone" }, 422, true) end
@@ -1812,25 +1848,32 @@ local function handle(method, path, headers, body)
     local from, to = tonumber(p.from), tonumber(p.to)
     if not (from and to) or to < from then return reply({ code = "log.bad_batch", message = "bad batch range" }, 422, true) end
     local SEQ = HOME .. "/.local/share/esp-deck/boardlog.seq"
-    local last = tonumber((readFile(SEQ) or ""):match("%d+")) or 0
+    -- meet.logLast: lines written but not yet confirmed (the seq file failed), so a retry doesn't double them
+    local last = math.max(tonumber((readFile(SEQ) or ""):match("%d+")) or 0, meet.logLast or 0)
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
     if not f then return reply({ code = "log.write", message = "can't write the log" }, 507, true) end
     local rows, okw = {}, true
     for l in (body or ""):gmatch("[^\n]+") do -- validate every line before writing anything
       local sq, at, text = l:match("^(%d+) (%d+) ?(.*)$")
-      local seq = tonumber(sq)
-      if not seq or seq < from or seq > to then
+      local seq, stamp = tonumber(sq), tonumber(at)
+      if not seq or seq < from or seq > to or seq > meet.MAX or stamp > meet.MAX then -- os.date throws on a huge at
         f:close()
         return reply({ code = "log.bad_batch", message = "Line " .. (#rows + 1) .. " has no sequence number" }, 422, true)
       end
-      rows[#rows + 1] = { seq, tonumber(at), text }
+      rows[#rows + 1] = { seq, stamp, text }
     end
     for _, r in ipairs(rows) do
-      if r[1] > last then okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and okw; last = r[1] end
+      if r[1] > last then
+        okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and f:flush()
+        if not okw then break end
+        last = r[1]
+      end
     end
     okw = f:close() and okw
+    meet.logLast = last
     hs.fs.mkdir(HOME .. "/.local/share/esp-deck")
-    if not (okw and writeFile(SEQ, tostring(last))) then -- the board frees what's confirmed: only what's really stored
+    -- the board frees what's confirmed: only what's really stored; a temp file, so a full disk can't wipe the seq
+    if not (okw and writeFile(SEQ .. ".tmp", tostring(last)) and os.rename(SEQ .. ".tmp", SEQ)) then
       return reply({ code = "log.write", message = "can't write the log" }, 507, true)
     end
     return reply({ confirmed = last }, 200, true)
@@ -1886,7 +1929,14 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/meet" and p.id then
     local id, t = meetResolve(p.id, p.start == "1")
     local path = MEET_DIR .. "/" .. id .. ".pcm"
-    if meetDone[id] then return meet.delivery(id) end
+    if p.stop == "1" and not meet.validStop(p) then return reply({ code = "meet.damaged", message = "bad stop parameters" }, 422, true) end
+    if meetDone[id] then
+      local len, kept = tonumber(p.len), meet.len[id] -- no kept length: processed before T27, nothing to compare
+      if p.stop == "1" and len and kept and len ~= kept then -- processed with less (the 🎙 menu): the board keeps its audio
+        return reply({ code = "meet.partial", message = "Mac processed " .. kept .. " of " .. len .. " bytes" }, 422, true)
+      end
+      return meet.delivery(id)
+    end
     if p.start == "1" then
       local kind = (p.kind == "journal" or p.kind == "agent" or p.kind == "note") and "note" or "meet"
       local past = p.past == "1" and meetId ~= id -- began live, finished after a link drop: still live (its backup counts)
@@ -1915,7 +1965,7 @@ local function handle(method, path, headers, body)
       local close
       if body and body ~= "" then
         local okc, cc = pcall(hs.json.decode, body)
-        if not okc or not meet.validClose(cc) or (p.fmt == "pcm" and len and len % 2 == 1) then
+        if not okc or not meet.validClose(cc) then
           return reply({ code = "meet.damaged", message = "damaged capture" }, 422, true)
         end
         close = MEET_DIR .. "/" .. id .. ".close.json"
@@ -1925,7 +1975,7 @@ local function handle(method, path, headers, body)
       meta = ok and type(meta) == "table" and meta or {}
       if meta.target and meet.gone(meta.target) then return meet.sessionGone() end
       local x = { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target }
-      if not meetStop(id, tonumber(p.rate) or 16000, p.fmt, len, x) then return meet.full() end
+      if not meetStop(id, 16000, "ulaw", len, x) then return meet.full() end
       return meet.delivery(id)
     end
     return reply("ok", 200)

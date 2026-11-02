@@ -62,12 +62,18 @@ table.insert(package.searchers, 2, function(n) -- Lua 5.5 const loop-var shim (s
 end)
 local realprint = print
 print = function() end -- deck.lua's own prints are not replies
-local handle = require("modules.deck")._handle
+local deck = require("modules.deck")
+local handle = deck._handle
 
 for line in io.lines(arg[1]) do
   local method, path, inm, token, hex = line:match("^(%u+)\t([^\t]*)\t([^\t]*)\t([^\t]*)\t(%x*)$")
   local body = hex:gsub("%x%x", function(b) return string.char(tonumber(b, 16)) end)
   local h = { ["X-Deck-Token"] = token ~= "" and token or nil, ["If-None-Match"] = inm ~= "" and inm or nil }
+  if method == "WINDOWS" then -- "@5 @6!": tmux's list, ! = no longer Claude
+    local rows = {}
+    for w in body:gmatch("%S+") do rows[#rows + 1] = w:gsub("!", "") .. "\t0:1\tw\t\t" .. (w:find("!", 1, true) and "zsh" or "claude") .. string.rep("\t", 15) end
+    deck._parseSessions(table.concat(rows, "\n") .. "\n")
+  end
   local b, code, headers = handle(method, path, h, body)
   realprint(enc({ status = code, headers = headers or {}, body = b or "" }))
 end

@@ -58,13 +58,14 @@ package.preload["modules.sysmonitor"] = function() return setmetatable({ ramPct 
 package.preload["modules.todoist"] = function() return { tasks = {} } end
 
 local function w(p, s) local f = assert(io.open(p, "w")); f:write(s); f:close() end
--- 7 meetings, oldest first; #1 old format (no bid/kind/past/actions), #7 new format
+-- 7 meetings + a voice note last (AC-24: notes never take a meet.last place), oldest first; #1 old format, #7 new format
 for n = 1, 7 do
   local e = { id = "m" .. n, at = 1000 + n, title = "Test meeting " .. n, summary = "s" .. n, body = "b" .. n }
-  if n == 7 then e.bid = "1767261600-1"; e.kind = "note"; e.past = true; e.actions = { "ping Bob" } end
+  if n == 7 then e.bid = "1767261600-1"; e.kind = "meet"; e.past = true; e.actions = { "ping Bob" } end
   if n == 5 then e.actions = {}; for a = 1, 40 do e.actions[a] = string.rep("я", 400) end end -- 5 of these must not overflow the board's 48 KB
   local f = assert(io.open(MD .. "/index.jsonl", "a")); f:write(enc(e), "\n"); f:close()
 end
+do local f = assert(io.open(MD .. "/index.jsonl", "a")); f:write(enc({ id = "n1", title = "Нотатка", kind = "note", past = true, summary = "s" }), "\n"); f:close() end
 w(MD .. "/p1.stage", "spk"); w(MD .. "/p1.bid", "1767265200-2")
 w(MD .. "/d1.stage", "done"); w(MD .. "/d1.bid", "1767265300-3") -- finished: must not stay pending
 
@@ -104,7 +105,7 @@ local s = dec(b1)
 check("meet.last has at most 5", s.meet and #s.meet.last == 5)
 check("meet.last newest first", s.meet and s.meet.last[1] and s.meet.last[1].id == "m7" and s.meet.last[5].id == "m3")
 local n1 = s.meet.last[1]
-check("new-format entry keeps bid/kind/past/actions", n1.bid == "1767261600-1" and n1.kind == "note" and n1.past == true and n1.actions[1] == "ping Bob")
+check("new-format entry keeps bid/kind/past/actions", n1.bid == "1767261600-1" and n1.kind == "meet" and n1.past == true and n1.actions[1] == "ping Bob")
 local old = s.meet.last[2]
 check("old-format entry defaults actions [] kind meet past false", old and type(old.actions) == "table" and #old.actions == 0 and old.kind == "meet" and old.past == false)
 check("meet.pending lists <id>.stage with bid", s.meet.pending and #s.meet.pending == 1 and s.meet.pending[1].bid == "1767265200-2" and s.meet.pending[1].stage == "spk")

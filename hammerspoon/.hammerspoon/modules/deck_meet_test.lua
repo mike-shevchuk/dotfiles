@@ -46,7 +46,9 @@ end
 local nop = setmetatable({}, { __call = function(self) return self end, __index = function(self) return self end })
 spawned = {}
 local tasks = {} -- every hs.task: .cb (the exit callback), .interrupted
+local running = "" -- what pgrep answers
 hs = setmetatable({
+  execute = function() return running end,
   task = { new = function(path, cb, args) spawned[#spawned + 1] = path .. " " .. table.concat(args or {}, " ")
     local t = setmetatable({ cb = cb, setCallback = function(self, c) self.cb = c; return self end,
       interrupt = function(self) self.interrupted = true; return self end }, { __index = function() return function(self) return self end end })
@@ -237,7 +239,7 @@ print("→ AC-17/27 a note goes to the journal or the agent")
 local JF = home .. "/.local/share/esp-deck/journal.jsonl"
 local function journal() return rd(JF) or "" end
 local function finish(text, kind) tasks[#tasks].cb(0, enc({ title = "Нотатка", summary = "s", kind = kind or "note", text = text }) .. "\n", "") end
-local function windows(...) local o = {}; for i, x in ipairs({ ... }) do o[i] = x .. "\t0:1\tw" .. string.rep("\t", 17) end; deck._parseSessions(table.concat(o, "\n") .. "\n") end
+local function windows(...) local o = {}; for i, x in ipairs({ ... }) do o[i] = x:gsub("!", "") .. "\t0:1\tw\t\t" .. (x:find("!", 1, true) and "zsh" or "claude") .. string.rep("\t", 15) end; deck._parseSessions(table.concat(o, "\n") .. "\n") end
 local function typed() local n = 0; for _, s in ipairs(spawned) do if s:find("send-keys", 1, true) then n = n + 1 end end; return n end
 local notified; hs.notify = { new = function(t) notified = t; return { send = function() end } end }
 local R = AT + 5000
@@ -392,6 +394,135 @@ local j403 = dec(b403)
 check("403 is an Error", c403 == 403 and j403.code == "auth.forbidden" and type(j403.message) == "string")
 c, j = post("/meet/pcm?id=1793298707&off=0", "x")
 check("503 is an Error", c == 503 and j.code == "meet.busy")
+
+print("→ AC-19 a done capture shorter than what the board holds (M1)")
+local function seedDone(at, bytes)
+  local n = name(at); w(MD .. "/" .. n .. ".stage", "done"); w(MD .. "/" .. n .. ".bid", at .. "-1")
+  if bytes then w(MD .. "/" .. n .. ".len", bytes) end
+  return at .. "-1"
+end
+local M1 = seedDone(AT + 6000, "10"); local M1old = seedDone(AT + 6001, nil)
+reload(); nsp = noprocess()
+c, j = stop(M1, 15)
+check("stop with len > what was processed → 422, never delivered", c == 422 and j.code == "meet.partial" and j.delivered == nil and #j.message <= 47)
+c, j = stop(M1, 10)
+check("the real length → 200 delivered", c == 200 and j.delivered == true and j.have == 10)
+c, j = post("/meet?stop=1&id=" .. M1 .. "&rate=16000&fmt=ulaw")
+check("no len → 200 as before", c == 200 and j.delivered == true)
+c, j = stop(M1old, 15)
+check("captured before T27, no stored length → 200 as before", c == 200 and j.delivered == true and noprocess() == nsp)
+
+print("→ AC-20 stop refuses what crashes meeting.py (M6)")
+local M6 = AT + 6100; local M6ID = M6 .. "-1"
+start(M6ID, "&kind=meet&past=1"); chunk(M6ID, 0, "abcd"); nsp = noprocess()
+for _, q in ipairs({ "len=4294967296&rate=16000&fmt=ulaw", "len=abc&rate=16000&fmt=ulaw", "len=-4&rate=16000&fmt=ulaw", "len=4&rate=0&fmt=ulaw",
+  "len=4&rate=8000&fmt=ulaw", "len=4&rate=16000&fmt=pcm", "len=4&rate=16000&fmt=mp3" }) do
+  c, j = post("/meet?stop=1&id=" .. M6ID .. "&" .. q)
+  check("stop " .. q .. " → 422 meet.damaged", c == 422 and j.code == "meet.damaged" and noprocess() == nsp)
+end
+for _, b in ipairs({ '{"marks":[{"offset":4294967296,"at":1}]}', '{"marks":[{"offset":1,"at":4294967296}]}', '{"gaps":[{"offset":1,"gap_ms":4294967296,"cause":"card"}]}' }) do
+  c, j = stop(M6ID, 4, b)
+  check("close over the maximum " .. b .. " → 422", c == 422 and j.code == "meet.damaged" and noprocess() == nsp)
+end
+
+print("→ AC-17 the agent session must still be Claude (M2)")
+windows("@5", "@7!")
+c, j = start((AT + 6200) .. "-1", "&kind=agent&target=@7")
+check("start for a window that is no longer Claude → 422 session_gone", c == 422 and j.code == "meet.session_gone")
+local M2 = (AT + 6200) .. "-2"
+start(M2, "&kind=agent&target=@5"); stop(M2, 0)
+local m2run = tasks[#tasks]; windows("@5!")
+local typed0, told = typed(), {}
+hs.notify = { new = function(t) told[#told + 1] = t.informativeText or ""; return { send = function() end } end }
+m2run.cb(0, enc({ title = "Нотатка", summary = "s", kind = "note", text = "запізніле" }) .. "\n", "")
+check("gone during transcription → not typed, Mike is told", typed() == typed0 and table.concat(told):find("запізніле", 1, true) ~= nil)
+windows("@5")
+
+print("→ AC-24 notes stay out of meet.last (M4)")
+local function lastHas(id) for _, e in ipairs(meetState().last) do if e.id == id then return true end end end
+local M4 = name(AT + 6300)
+start((AT + 6300) .. "-1", "&kind=journal"); stop((AT + 6300) .. "-1", 0)
+tasks[#tasks].cb(0, enc({ id = M4, title = "Нотатка", summary = "s", kind = "note", text = "слова" }) .. "\n", "")
+check("a finished note does not enter meet.last", not lastHas(M4))
+local f4 = assert(io.open(MD .. "/index.jsonl", "a")); f4:write(enc({ id = "n-loaded", title = "Нотатка", kind = "note", len = 3 }), "\n"); f4:close()
+reload()
+check("nor after a reload", not lastHas("n-loaded"))
+c, j = post("/meet?stop=1&id=" .. DONE_AT .. "-1&len=15&rate=16000&fmt=ulaw", "")
+check("the index still knows what's done", c == 200 and j.delivered == true)
+
+print("→ AC-19 a reload right after the 200 (M3)")
+local function seedStt(at, stage_, pcm)
+  local n = name(at)
+  w(MD .. "/" .. n .. ".stage", stage_); w(MD .. "/" .. n .. ".bid", at .. "-1"); w(MD .. "/" .. n .. ".len", "4 16000 ulaw")
+  if pcm then w(MD .. "/" .. n .. ".pcm", "abcd") end
+  w(MD .. "/" .. n .. ".meta", enc({ kind = "meet", past = true, lang = "en", t0 = at }))
+  w(MD .. "/" .. n .. ".close.json", '{"marks":[]}')
+  return n
+end
+local M3 = seedStt(AT + 6400, "stt", true); local M3spk = seedStt(AT + 6401, "spk", true)
+local M3err = seedStt(AT + 6402, "err", true); local M3gone = seedStt(AT + 6403, "stt", false)
+local function ran(n) local k = 0; for _, x in ipairs(spawned) do if x:find("meeting.py", 1, true) and x:find(n .. ".pcm", 1, true) then k = k + 1 end end; return k end
+running = "4242\n"; reload()
+check("meeting.py still alive → left alone", ran(M3) == 0)
+running = ""; reload()
+check("stt + .pcm + no process → run again", ran(M3) == 1)
+local cmd = ""; for _, x in ipairs(spawned) do if x:find(M3 .. ".pcm", 1, true) then cmd = x end end
+check("with its rate, fmt, language, kind, past and close", cmd:find(" 16000 en " .. (AT + 6400) .. " ", 1, true) and cmd:find(" ulaw ", 1, true) and cmd:find(" meet 1 ", 1, true) and cmd:find(M3 .. ".close.json", 1, true))
+check("a later stage, err, or no .pcm → not rerun", ran(M3spk) == 0 and ran(M3err) == 0 and ran(M3gone) == 0)
+nsp = noprocess()
+c, j = stop((AT + 6400) .. "-1", 4)
+check("the repeated stop still answers, nothing doubled", c == 200 and j.delivered == true and j.have == 4 and noprocess() == nsp)
+w(MD .. "/" .. M3 .. ".stage", "err"); os.remove(MD .. "/" .. M3 .. ".pcm")
+
+print("→ AC-31 /log (M7, M8)")
+local seq1 = rd(SEQF)
+for _, line in ipairs({ "10 99999999999999999999 huge", "10 4294967296 over" }) do
+  c, j = post("/log?from=10&to=10", line)
+  check("at out of range → 422 " .. line, c == 422 and j.code == "log.bad_batch" and rd(SEQF) == seq1)
+end
+c, j = post("/log?from=10&to=10", "99999999999999999999 1 x")
+check("seq out of range → 422", c == 422)
+local closed, opened = 0, 0
+io.open = function(p, m) local f = realopen(p, m); if p == LOG then opened = opened + 1; local o = f
+  return setmetatable({ close = function() closed = closed + 1; return o:close() end }, { __index = function(_, k) return function(_, ...) return o[k](o, ...) end end }) end; return f end
+post("/log?from=10&to=11", "10 1767261600 fine\n11 4294967296 bad")
+io.open = realopen
+check("a refused batch closes the log", opened == 1 and closed == 1)
+io.open = function(p, m)
+  if p == SEQF .. ".tmp" or (p == SEQF and m == "w") then local f = realopen(p, m); return setmetatable({ write = function() return nil, "No space left" end,
+    close = function() f:close(); return true end }, {}) end
+  return realopen(p, m)
+end
+c, j = post("/log?from=10&to=10", "10 1767261600 ten")
+io.open = realopen
+check("disk full on the seq → 507, boardlog.seq intact", c == 507 and rd(SEQF) == seq1)
+c, j = post("/log?from=10&to=10", "10 1767261600 ten")
+check("the retry confirms, the line once", c == 200 and j.confirmed == 10 and select(2, (rd(LOG) or ""):gsub(" ten\n", "")) == 1)
+local wrote = 0
+io.open = function(p, m)
+  if p == LOG then local f = realopen(p, m); return setmetatable({ write = function(_, ...) wrote = wrote + 1; if wrote > 1 then return nil, "No space left" end; f:write(...); return true end,
+    flush = function() f:flush(); return true end, close = function() f:close(); return true end }, {}) end
+  return realopen(p, m)
+end
+c, j = post("/log?from=11&to=12", "11 1767261600 eleven\n12 1767261600 twelve")
+io.open = realopen
+check("disk full mid-batch → 507", c == 507 and j.confirmed == nil)
+c, j = post("/log?from=11&to=12", "11 1767261600 eleven\n12 1767261600 twelve")
+lg = rd(LOG) or ""
+check("the retry adds only what's missing", c == 200 and j.confirmed == 12 and select(2, lg:gsub(" eleven\n", "")) == 1 and select(2, lg:gsub(" twelve\n", "")) == 1)
+
+print("→ an unsynced id survives a reload (M9)")
+os.execute("sleep 1.1") -- not in the same second as id 57's capture: one name, two owners
+c, j = post("/meet?start=1&id=58&lang=uk"); local us = j.id
+post("/meet/pcm?id=58&off=0", "abcd")
+os.execute("sleep 1.1"); reload()
+c, j = post("/meet/pcm?id=58&off=4", "ef")
+check("next chunk after a reload → the same capture", c == 200 and j.id == us and j.have == 6)
+c, j = post("/meet?stop=1&id=58&len=6&rate=16000&fmt=ulaw")
+check("stop → delivered there", c == 200 and j.delivered == true and j.id == us)
+tasks[#tasks].cb(); os.execute("sleep 1.1"); reload()
+c, j = post("/meet?stop=1&id=58&len=6&rate=16000&fmt=ulaw")
+check("repeated stop after another reload → still that capture", c == 200 and j.id == us and j.have == 6)
 
 os.execute("rm -rf '" .. home .. "'")
 print(fails == 0 and "PASS" or ("FAIL " .. fails))
