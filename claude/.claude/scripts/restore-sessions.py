@@ -33,6 +33,18 @@ def window_name(title: str, cwd: str) -> str:
     return re.sub(r"[.:]", " ", title or os.path.basename(cwd)).strip()[:28]
 
 
+def saved_place(sid: str, cwd: str, title: str) -> tuple:
+    """(tmux session, window): what agent-state.sh saved for this session, else guessed from its directory and title."""
+    try:
+        with open(f"{HOME}/.claude/window-names/{sid}") as f:
+            t, _, w = f.read().strip().partition("|")
+        if t and w:
+            return t, w
+    except OSError:
+        pass
+    return tmux_session(cwd), window_name(title, cwd)
+
+
 def read_session(path: str) -> dict:
     cwd, title, lines = "", "", 0
     with open(path, errors="replace") as f:
@@ -81,12 +93,13 @@ def run(argv: list, **kw) -> subprocess.CompletedProcess:
 
 
 def restore(s: dict) -> None:
-    t = tmux_session(s["cwd"])
+    t, name = saved_place(s["id"], s["cwd"], s["title"])
     if run(["tmux", "has-session", "-t", f"={t}"]).returncode:
         run(["tmux", "new-session", "-d", "-s", t, "-c", s["cwd"]])
     cmd = f"claude --resume {s['id']}; exec zsh"
-    print(f"━━━ tmux ━━━  tmux new-window -d -t {t} -n '{window_name(s['title'], s['cwd'])}' -c {s['cwd']} '{cmd}'", flush=True)
-    run(["tmux", "new-window", "-d", "-t", f"{t}:", "-n", window_name(s["title"], s["cwd"]), "-c", s["cwd"], cmd])
+    print(f"━━━ tmux ━━━  tmux new-window -d -t {t} -n '{name}' -c {s['cwd']} '{cmd}'", flush=True)
+    run(["tmux", "new-window", "-d", "-t", f"{t}:", "-n", name, "-c", s["cwd"], cmd])
+    run(["tmux", "set-window-option", "-t", f"{t}:{name}", "automatic-rename", "off"])
 
 
 def selftest() -> None:
@@ -97,6 +110,7 @@ def selftest() -> None:
     ss = [dict(base, id="ok"), dict(base, id="live"), dict(base, id="old", at=1.0), dict(base, id="short", lines=3),
           dict(base, id="b2b", cwd=f"{HOME}/code/b2b"), dict(base, id="gone", cwd="/no/such/dir"), dict(base, id="fresh", at=4900.0)]
     assert [s["id"] for s in pick(ss, {"live"}, 500, 5000, False)] == ["ok"]
+    assert saved_place("no-such-session", f"{HOME}/code/asja", "Назва") == ("asja", "Назва")
     print("restore-sessions ok")
 
 
@@ -118,7 +132,7 @@ def main() -> None:
     if not found:
         print("→ nothing to restore")
         return
-    rows = [f"{tmux_session(s['cwd']):<10} {time.strftime('%H:%M', time.localtime(s['at']))}  {window_name(s['title'], s['cwd'])}  [{s['id'][:8]}]" for s in found]
+    rows = [f"{saved_place(s['id'], s['cwd'], s['title'])[0]:<10} {time.strftime('%H:%M', time.localtime(s['at']))}  {saved_place(s['id'], s['cwd'], s['title'])[1]}  [{s['id'][:8]}]" for s in found]
     if o.dry:
         print("\n".join(rows))
         return

@@ -77,6 +77,11 @@ in=$(cat)
 state=$1
 tr=$(jq -r '.transcript_path // ""' <<<"$in" 2>/dev/null)
 [ -n "$tr" ] && put @agent_transcript "$tr"
+# the window this session lives in, for restore-sessions.py after a reboot (tmux forgets it)
+if [ -n "$tr" ] && [ -n "${TMUX_PANE:-}" ]; then
+  mkdir -p ~/.claude/window-names
+  tmux display -p -t "$TMUX_PANE" '#S|#W' > ~/.claude/window-names/"$(basename "$tr" .jsonl)" 2>/dev/null
+fi
 # resting at the prompt (idle_prompt's default text, ~1 min after Stop) is no event: not waiting, asks nothing
 [ "$state" = waiting ] && [ "$(jq -r '.notification_type + "|" + .message' <<<"$in" 2>/dev/null)" = \
   "idle_prompt|Claude is waiting for your input" ] && exit 0
