@@ -96,6 +96,12 @@ local function readFile(path)
   f:close()
   return data
 end
+local function writeFile(path, data) -- false on any failure, the close that flushes included
+  local f = io.open(path, "w")
+  if not f then return false end
+  local ok = f:write(data)
+  return (f:close() and ok) and true or false
+end
 
 -- ── slow sources, refreshed in the background ──
 local limits, rem = {}, {}
@@ -1279,15 +1285,28 @@ end
 local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
 local meet = { state = "idle", last = {} }
 local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
+-- names sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op; their received length (the
+-- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
+local meetDone = {}
+meet.len, meet.bids, meet.unsynced = {}, {}, {} -- (fields of meet: deck.lua is at Lua's 200-locals limit)
 do
   local f = io.open(MEET_DIR .. "/index.jsonl")
   if f then
     for l in f:lines() do
       local ok, e = pcall(hs.json.decode, l)
-      if ok and e then table.insert(meet.last, 1, e); meet.last[6] = nil end
+      if ok and type(e) == "table" then
+        table.insert(meet.last, 1, e); meet.last[6] = nil
+        if e.id then meetDone[e.id], meet.len[e.id], meet.bids[e.id] = true, e.len, e.bid end
+      end
     end
     f:close()
   end
+end
+meet.STUCK = 3600 -- a .stage untouched this long: meeting.py died unseen (a reload, a reboot), no longer "processing"
+function meet.actions(a) -- the board's /state buffer is fixed (48 KB) and 5 meetings share it
+  local r = {}
+  for i = 1, math.min(#a, 8) do r[i] = safeClean(a[i], 120) end
+  return r
 end
 local function meetState()
   if meet.proc and (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") then
@@ -1298,7 +1317,7 @@ local function meetState()
   for i, e in ipairs(meet.last) do
     -- '#' is a colour code on the board's label: markdown headings become plain lines there
     last[i] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title, summary = e.summary,
-      actions = e.actions or {}, body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
+      actions = meet.actions(e.actions or {}), body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
   end
   local pending = {} -- <id>.stage files with a <id>.bid: captures the Mac is still processing
   local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
@@ -1308,22 +1327,30 @@ local function meetState()
     local bid = id and readFile(MEET_DIR .. "/" .. id .. ".bid")
     stage = stage and stage:match("%a+")
     -- meeting.py leaves 'done' behind: only the stages of the contract are still processing
-    if bid and (stage == "stt" or stage == "spk" or stage == "sum") then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
+    if bid and (stage == "stt" or stage == "spk" or stage == "sum")
+      and os.time() - (hs.fs.attributes(MEET_DIR .. "/" .. f, "modification") or 0) < meet.STUCK then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
   end
   table.sort(pending, function(a, b) return a.bid < b.bid end)
   return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd }
 end
 -- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
-local function meetName(bid)
+-- a board before SNTP sends a small id: named once by the Mac's clock, so its chunks land in one capture; the same id
+-- starting again after that capture is done is a new one
+local function meetName(bid, start)
   local t = tonumber(bid) or 0
-  return os.date("%Y-%m-%d_%H%M%S", t > 1700000000 and t or os.time()), t
+  if t > 1700000000 then return os.date("%Y-%m-%d_%H%M%S", t), t end
+  local u = meet.unsynced
+  if not u[bid] or (start and meetDone[u[bid]]) then u[bid] = os.date("%Y-%m-%d_%H%M%S") end
+  return u[bid], t
 end
-local meetDone = {} -- names already sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op
-do -- FM-6: after a Hammerspoon reload the finished captures are known from their .stage (never guess from the newest .pcm)
+do -- FM-6: after a Hammerspoon reload any .stage (index.jsonl above: the archived ones) means it went to meeting.py;
+  -- never guess from the newest .pcm. Empty = a disk-full stop that never was accepted
   local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
   for f in (ok and it or function() end), d do
     local id = f:match("^(.+)%.stage$")
-    if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("^%s*done") then meetDone[id] = true end
+    if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("%a") then
+      meetDone[id], meet.len[id] = true, tonumber(readFile(MEET_DIR .. "/" .. id .. ".len") or "")
+    end
   end
 end
 local function fsize(path)
@@ -1334,17 +1361,39 @@ local function fsize(path)
 end
 -- the board's capture id <at>-<seq> (or a legacy numeric <at>) → the file name from the real start; the first board id to
 -- take a name owns it (<name>.bid), a second one from the same second gets <name>-<seq>
-local function meetResolve(bid)
-  local name, t = meetName(bid:match("^%d+"))
+local function meetResolve(bid, start)
+  local name, t = meetName(bid:match("^%d+"), start)
   local seq = bid:match("%-(%d+)$")
-  local owner = readFile(MEET_DIR .. "/" .. name .. ".bid")
-  if owner and owner:match("%S+") ~= bid and seq then name = name .. "-" .. seq; owner = readFile(MEET_DIR .. "/" .. name .. ".bid") end
-  if not owner then
+  local function ownerOf(n) return readFile(MEET_DIR .. "/" .. n .. ".bid") or meet.bids[n] end
+  local owner = ownerOf(name)
+  if owner and owner:match("%S+") ~= bid and seq then name = name .. "-" .. seq; owner = ownerOf(name) end
+  if not owner and not meetDone[name] then
     hs.fs.mkdir(MEET_DIR)
     local f = io.open(MEET_DIR .. "/" .. name .. ".bid", "w")
     if f then f:write(bid); f:close() end
   end
   return name, t
+end
+function meet.validBid(id) -- CaptureId, plus the short <at> of a board before SNTP
+  local at = id:match("^(%d+)$") or id:match("^(%d+)%-%d+$")
+  return at and #at <= 10 and #id <= 21
+end
+function meet.delivery(id)
+  return reply({ id = id, have = meet.len[id] or fsize(MEET_DIR .. "/" .. id .. ".pcm"), delivered = meetDone[id] or false }, 200, true)
+end
+function meet.full() return reply({ code = "meet.disk_full", message = "Disk full on the Mac" }, 507, true) end
+-- CaptureClose: what meeting.py relies on; a bookmark or gap past the audio is fine (it clamps them)
+function meet.validClose(c)
+  local function list(v) return v == nil or (type(v) == "table" and (next(v) == nil or v[1] ~= nil)) end
+  local function num(v, min) return type(v) == "number" and v >= min end
+  if type(c) ~= "table" or c[1] ~= nil or not list(c.marks) or not list(c.gaps) then return false end
+  for _, e in ipairs(c.marks or {}) do
+    if type(e) ~= "table" or not (num(e.offset, 0) and num(e.at, 0)) then return false end
+  end
+  for _, e in ipairs(c.gaps or {}) do
+    if type(e) ~= "table" or not (num(e.offset, 0) and num(e.gap_ms, 1) and type(e.cause) == "string") then return false end
+  end
+  return true
 end
 -- 🛟 the backup: while the board records, the Mac records too (the device picked in the 🎙 menu) into <id>.mac.ulaw;
 -- meeting.py takes whichever is longer (the board's has gaps when Wi-Fi fails) and keeps the Mac's as <id>.mac.m4a
@@ -1358,23 +1407,28 @@ local function backupStart(id)
   meetBackup:start()
 end
 local meetStopNow
+-- false: the disk refused, nothing accepted. The stop is accepted here, before ffmpeg closes: .stage = "processing" and
+-- FM-6's mark (last, so a reload never trusts a half-done stop), .len = the length that outlives the .pcm
 local function meetStop(id, rate, fmt, len, x)
-  if not id or meetDone[id] then return end
-  if meetBackup and not (x and x.past) then -- let ffmpeg close the backup file first, then process both
+  if not id or meetDone[id] then return true end
+  local have = fsize(MEET_DIR .. "/" .. id .. ".pcm")
+  if not (writeFile(MEET_DIR .. "/" .. id .. ".len", tostring(have)) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
+  meetDone[id], meet.len[id] = true, have
+  if meetBackup and meetId == id then -- let ffmpeg close the backup file first, then process both
     local b = meetBackup
     b:setCallback(function() meetBackup = nil; meetStopNow(id, rate, fmt, len, x) end)
     b:interrupt()
-    return
+    return true
   end
   meetStopNow(id, rate, fmt, len, x)
+  return true
 end
 -- x (a capture from the outbox): {past, kind, t0, lang, close = path of the CaptureClose json (marks, gaps)}
 meetStopNow = function(id, rate, fmt, len, x)
-  if not id or meetDone[id] then return end
-  meetDone[id] = true
-  if meetId == id then meetId = nil end
+  local live = meetId == id
+  if live then meetId = nil end
   local t0, lang = x and x.t0 or meet.t0, x and x.lang or meet.lang
-  if not (x and x.past and meet.state == "rec") then meet.state, meet.note, meet.proc = "stt", nil, id end -- a past capture never hides a live meeting
+  if live or meet.state ~= "rec" then meet.state, meet.note, meet.proc = "stt", nil, id end -- another capture never hides a live meeting
   -- screenshots: from the start to now (start + the audio length is too early when the board dropped audio)
   local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (t0 or os.time()))
   local args = { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
@@ -1386,9 +1440,12 @@ meetStopNow = function(id, rate, fmt, len, x)
     local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if ok and type(e) == "table" and e.title then
       table.insert(meet.last, 1, e); meet.last[6] = nil
+      meet.bids[id] = e.bid
       if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
       hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
     else
+      -- out of meet.pending for good; meetDone stays, a repeated stop must not run it again. No .stage here = it was archived
+      if readFile(MEET_DIR .. "/" .. id .. ".stage") then writeFile(MEET_DIR .. "/" .. id .. ".stage", "err") end
       if meet.state ~= "rec" then meet.state, meet.note = "err", "не вдалося розшифрувати — аудіо збережено в " .. id end
     end
   end)
@@ -1580,7 +1637,7 @@ M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
-  if not token or headers["X-Deck-Token"] ~= token then return reply("forbidden", 403) end
+  if not token or headers["X-Deck-Token"] ~= token then return reply({ code = "auth.forbidden", message = "Wrong token" }, 403, true) end
 
   if headers["X-Deck-Ver"] then M.boardVer = headers["X-Deck-Ver"] end
   local route, qs = path:match("^([^?]*)%??(.*)$")
@@ -1738,7 +1795,7 @@ local function handle(method, path, headers, body)
     local last = tonumber((readFile(SEQ) or ""):match("%d+")) or 0
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
     if not f then return reply({ code = "log.write", message = "can't write the log" }, 507, true) end
-    local rows = {}
+    local rows, okw = {}, true
     for l in (body or ""):gmatch("[^\n]+") do -- validate every line before writing anything
       local sq, at, text = l:match("^(%d+) (%d+) ?(.*)$")
       local seq = tonumber(sq)
@@ -1749,12 +1806,13 @@ local function handle(method, path, headers, body)
       rows[#rows + 1] = { seq, tonumber(at), text }
     end
     for _, r in ipairs(rows) do
-      if r[1] > last then f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n"); last = r[1] end
+      if r[1] > last then okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and okw; last = r[1] end
     end
-    f:close()
+    okw = f:close() and okw
     hs.fs.mkdir(HOME .. "/.local/share/esp-deck")
-    local sf = io.open(SEQ, "w")
-    if sf then sf:write(tostring(last)); sf:close() end
+    if not (okw and writeFile(SEQ, tostring(last))) then -- the board frees what's confirmed: only what's really stored
+      return reply({ code = "log.write", message = "can't write the log" }, 507, true)
+    end
     return reply({ confirmed = last }, 200, true)
   end
   if method == "POST" and route == "/log" then
@@ -1800,56 +1858,51 @@ local function handle(method, path, headers, body)
   -- 1029-20xxxx firmware wrote NVS from a PSRAM-stack task after a 200 here → int-wdt reboot loop; answering 503
   -- to that one stuck meeting keeps its uploader retrying (no NVS write) so the fixed firmware can be flashed
   if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id == "1793298707" then
-    return reply("busy", 503)
+    return reply({ code = "meet.busy", message = "Busy, retry later" }, 503, true)
+  end
+  if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id and not meet.validBid(p.id) then
+    return reply({ code = "meet.damaged", message = "bad capture id" }, 422, true)
   end
   if method == "POST" and route == "/meet" and p.id then
-    if not p.id:match("^%d%d%d%d%d%d%d%d%d%d$") and not p.id:match("^%d%d%d%d%d%d%d%d%d%d%-%d+$") then
-      return reply({ code = "meet.damaged", message = "bad capture id" }, 422, true)
-    end
-    local id, t = meetResolve(p.id)
+    local id, t = meetResolve(p.id, p.start == "1")
     local path = MEET_DIR .. "/" .. id .. ".pcm"
-    local function delivery(code) return reply({ id = id, have = fsize(path), delivered = meetDone[id] or false }, code or 200, true) end
+    if meetDone[id] then return meet.delivery(id) end
     if p.start == "1" then
-      if meetDone[id] then return delivery() end
-      local past = p.past == "1"
+      local kind = (p.kind == "journal" or p.kind == "agent" or p.kind == "note") and "note" or "meet"
+      local past = p.past == "1" and meetId ~= id -- began live, finished after a link drop: still live (its backup counts)
       local lang = p.lang == "en" and "en" or "uk"
-      local mf = io.open(MEET_DIR .. "/" .. id .. ".meta", "w") -- kind/past/lang survive a reload until the stop
-      if mf then mf:write(hs.json.encode({ kind = (p.kind == "journal" or p.kind == "agent" or p.kind == "note") and "note" or "meet",
-        target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil, past = past, lang = lang, t0 = t })); mf:close() end
+      local t0 = t > 1700000000 and t or os.time()
       local pf = io.open(path, "ab"); if pf then pf:close() end
-      if not past and meetId ~= id then
+      if not pf or not writeFile(MEET_DIR .. "/" .. id .. ".meta", hs.json.encode({ kind = kind, -- kind/past/lang survive a reload until the stop
+        target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil, past = past, lang = lang, t0 = t0 })) then
+        return meet.full()
+      end
+      if not past and kind == "meet" and meetId ~= id then -- a voice note is never a live meeting
         meetId, meet.bid = id, p.id
-        meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, lang, t > 1700000000 and t or os.time(), os.time()
+        meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, lang, t0, os.time()
         backupStart(id)
       end
-      return delivery()
+      return meet.delivery(id)
     elseif p.stop == "1" then
       local len = tonumber(p.len)
       local have = fsize(path)
-      if len and len ~= have and not meetDone[id] then
+      if len and len ~= have then
         return reply({ code = "meet.length_mismatch", message = "Mac has " .. have .. " of " .. len .. " bytes", details = { have = have } }, 409, true)
       end
-      if not meetDone[id] and body and body ~= "" then -- CaptureClose must be valid and point inside the audio
+      local close
+      if body and body ~= "" then
         local okc, cc = pcall(hs.json.decode, body)
-        local bad = not okc or type(cc) ~= "table" or (p.fmt == "pcm" and len and len % 2 == 1)
-        for _, key in ipairs({ "marks", "gaps" }) do
-          for _, e in ipairs(not bad and type(cc[key]) == "table" and cc[key] or {}) do
-            if type(e) ~= "table" or type(e.offset) ~= "number" or (len and e.offset > len) then bad = true end
-          end
+        if not okc or not meet.validClose(cc) or (p.fmt == "pcm" and len and len % 2 == 1) then
+          return reply({ code = "meet.damaged", message = "damaged capture" }, 422, true)
         end
-        if bad then return reply({ code = "meet.damaged", message = "damaged capture" }, 422, true) end
+        close = MEET_DIR .. "/" .. id .. ".close.json"
+        if not writeFile(close, body) then return meet.full() end
       end
-      if not meetDone[id] then
-        local ok, meta = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "{}")
-        meta = ok and type(meta) == "table" and meta or {}
-        local close
-        if body and body ~= "" then
-          close = MEET_DIR .. "/" .. id .. ".close.json"
-          local cf = io.open(close, "w"); if cf then cf:write(body); cf:close() else close = nil end
-        end
-        meetStop(id, tonumber(p.rate) or 16000, p.fmt, len, { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target })
-      end
-      return delivery()
+      local ok, meta = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "{}")
+      meta = ok and type(meta) == "table" and meta or {}
+      local x = { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target }
+      if not meetStop(id, tonumber(p.rate) or 16000, p.fmt, len, x) then return meet.full() end
+      return meet.delivery(id)
     end
     return reply("ok", 200)
   end
@@ -1886,6 +1939,7 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/meet/pcm" and p.id and tonumber(p.off) then
     local id = meetResolve(p.id)
+    if meetDone[id] then return meet.delivery(id) end -- processed: nothing to write, whatever arrives late
     local path = MEET_DIR .. "/" .. id .. ".pcm"
     local off, have = tonumber(p.off), fsize(path)
     if off > have then
@@ -1894,9 +1948,9 @@ local function handle(method, path, headers, body)
     local f = io.open(path, "r+b") or io.open(path, "wb")
     local okw = f and f:seek("set", off) and f:write(body or "") and f:flush()
     if f then f:close() end
-    if not okw then return reply({ code = "meet.disk_full", message = "can't write the capture" }, 507, true) end
+    if not okw then return meet.full() end
     meet.lastPcm = os.time()
-    return reply({ id = id, have = fsize(path), delivered = meetDone[id] or false }, 200, true)
+    return meet.delivery(id)
   end
   if method == "POST" and route == "/mic/pcm" then
     local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")

@@ -47,7 +47,8 @@ end
 local nop = setmetatable({}, { __call = function(self) return self end, __index = function(self) return self end })
 hs = setmetatable({
   json = { encode = enc, decode = dec },
-  fs = { dir = function(p) local f = io.popen("ls '" .. p .. "' 2>/dev/null"); local names = {}
+  fs = { attributes = function(p) local f = io.popen("stat -f %m '" .. p .. "' 2>/dev/null"); local m = tonumber(f:read("a")); f:close(); return m end,
+    dir = function(p) local f = io.popen("ls '" .. p .. "' 2>/dev/null"); local names = {}
     for n in f:lines() do names[#names + 1] = n end; f:close(); local k = 0
     return function() k = k + 1; return names[k] end end },
   timer = { absoluteTime = function() return 0 end },
@@ -61,6 +62,7 @@ local function w(p, s) local f = assert(io.open(p, "w")); f:write(s); f:close() 
 for n = 1, 7 do
   local e = { id = "m" .. n, at = 1000 + n, title = "Test meeting " .. n, summary = "s" .. n, body = "b" .. n }
   if n == 7 then e.bid = "1767261600-1"; e.kind = "note"; e.past = true; e.actions = { "ping Bob" } end
+  if n == 5 then e.actions = {}; for a = 1, 40 do e.actions[a] = string.rep("я", 400) end end -- 5 of these must not overflow the board's 48 KB
   local f = assert(io.open(MD .. "/index.jsonl", "a")); f:write(enc(e), "\n"); f:close()
 end
 w(MD .. "/p1.stage", "spk"); w(MD .. "/p1.bid", "1767265200-2")
@@ -106,7 +108,19 @@ check("new-format entry keeps bid/kind/past/actions", n1.bid == "1767261600-1" a
 local old = s.meet.last[2]
 check("old-format entry defaults actions [] kind meet past false", old and type(old.actions) == "table" and #old.actions == 0 and old.kind == "meet" and old.past == false)
 check("meet.pending lists <id>.stage with bid", s.meet.pending and #s.meet.pending == 1 and s.meet.pending[1].bid == "1767265200-2" and s.meet.pending[1].stage == "spk")
-check("no build announced → fw_sig absent/null", s.fw_sig == nil or real_getenv("NONE") ~= nil)
+check("no build announced → fw_sig absent/null", s.fw_sig == nil)
+local big = s.meet.last[3]
+local bytes = 0; for _, a in ipairs(big.actions) do bytes = bytes + #a end
+check("actions capped in count and length", #big.actions == 8 and bytes <= 8 * 240 and utf8.len(big.actions[1]) == 120)
+local realopen = io.open
+io.open = function(p, m) -- an announced build: FW_SHA + the signature `just ota` leaves in /tmp
+  if p == "/tmp/deck-ota.sha" then return realopen(home .. "/fw.sha", m) elseif p == "/tmp/deck-ota.sig" then return realopen(home .. "/fw.sig", m) end
+  return realopen(p, m)
+end
+w(home .. "/fw.sha", "abc123"); w(home .. "/fw.sig", "MEUCIQ-test-signature")
+local announced = dec((get(nil)))
+io.open = realopen
+check("announced build → fw and fw_sig from /tmp/deck-ota.sig", announced.fw == "abc123" and announced.fw_sig == "MEUCIQ-test-signature")
 
 print("→ state changes → new ETag")
 w(MD .. "/p1.stage", "sum")
