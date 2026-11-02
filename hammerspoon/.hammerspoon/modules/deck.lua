@@ -1419,6 +1419,15 @@ local function macRecStart(dev, lang)
   meetMac:start()
 end
 
+-- a finished meeting lives in its "<date time title>/" folder (helper/meeting.py archive)
+local function meetMd(id)
+  local pre = id:sub(1, 10) .. " " .. id:sub(12, 13) .. "-" .. id:sub(14, 15) .. "-" .. id:sub(16, 17) .. " "
+  for f in hs.fs.dir(MEET_DIR) do
+    if f:sub(1, #pre) == pre and hs.fs.attributes(MEET_DIR .. "/" .. f .. "/" .. id .. ".md") then return MEET_DIR .. "/" .. f .. "/" .. id .. ".md" end
+  end
+  return MEET_DIR .. "/" .. id .. ".md"
+end
+
 local function meetMenu()
   local items = {}
   if meet.state == "rec" and meetMac then
@@ -1450,7 +1459,7 @@ local function meetMenu()
   table.insert(items, { title = "-" })
   for _, e in ipairs(meet.last) do
     table.insert(items, { title = (e.at or "") .. "  " .. (e.title or ""),
-      fn = function() task("/usr/bin/open", { MEET_DIR .. "/" .. e.id .. ".md" }) end })
+      fn = function() task("/usr/bin/open", { meetMd(e.id) }) end })
   end
   table.insert(items, { title = "Відкрити папку мітингів", fn = function() task("/usr/bin/open", { MEET_DIR }) end })
   return items
@@ -1692,7 +1701,7 @@ local function handle(method, path, headers, body)
     if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
     -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
     -- a meeting's summary (.md) in the default app; the id is ours (date_time), nothing else opens
-    if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { MEET_DIR .. "/" .. p.meet .. ".md" }) end
+    if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { meetMd(p.meet) }) end
     local hu = p.h and health and health.links and health.links[p.h]
     if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
