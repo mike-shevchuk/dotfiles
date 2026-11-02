@@ -969,3 +969,4 @@ fi
 # Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
 # PATH entry on the Orange Pi, which shares this file via stow)
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
+[[ -r ~/.lan.env ]] && source ~/.lan.env

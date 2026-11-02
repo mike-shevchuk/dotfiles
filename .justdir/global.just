@@ -698,42 +698,6 @@ ip:
     echo "━━━ xh -b --ignore-stdin GET https://ifconfig.me/ip ━━━" >&2
     xh -b --ignore-stdin GET https://ifconfig.me/ip && echo ""
 
-# LAN IP мака → MAC_IP у ~/dotfiles/.env і ~/.mac_ip.env на Pi (ssh manjaro).
-# IP плаває через ротацію приватної Wi-Fi MAC (macOS 15); споживачі читають MAC_IP.
-[group('system')]
-mac-ip:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    echo "[1/3] IP мака (en1, fallback en0)..." >&2
-    ip=$(ipconfig getifaddr en1 || ipconfig getifaddr en0 || true)
-    [ -n "$ip" ] || { echo "  FAIL — ні en1, ні en0 не мають IPv4" >&2; exit 1; }
-    echo "  OK ($ip)" >&2
-
-    env_file=~/dotfiles/.env
-    echo "[2/3] $env_file → MAC_IP=$ip..." >&2
-    touch "$env_file"
-    if grep -qx "MAC_IP=$ip" "$env_file"; then
-        echo "  OK (без змін)" >&2
-    elif grep -q '^MAC_IP=' "$env_file"; then
-        sed -i '' "s/^MAC_IP=.*/MAC_IP=$ip/" "$env_file"; echo "  OK (замінено)" >&2
-    else
-        echo "MAC_IP=$ip" >> "$env_file"; echo "  OK (додано)" >&2
-    fi
-
-    echo "[3/3] Pi ~/.mac_ip.env → MAC_IP=$ip..." >&2
-    cmd="printf 'MAC_IP=%s\n' $ip > ~/.mac_ip.env && cat ~/.mac_ip.env"
-    echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro \"$cmd\"" >&2
-    if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro "$cmd"); then
-        echo "  OK ($out)" >&2
-    else
-        echo "  FAIL — Pi недоступний; локальний .env оновлено" >&2; exit 1
-    fi
-
-    echo "" >&2
-    echo "  Mac: $env_file          MAC_IP=$ip" >&2
-    echo "  Pi:  manjaro:~/.mac_ip.env  MAC_IP=$ip" >&2
-    echo "  На Pi: source ~/.mac_ip.env  ·  systemd --user: EnvironmentFile=%h/.mac_ip.env" >&2
-
 # Local weather, optional CITY arg (multi-word OK: `weather "New York"`)
 [group('system')]
 weather city="":
