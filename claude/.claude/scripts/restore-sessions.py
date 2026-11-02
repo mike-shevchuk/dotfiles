@@ -46,7 +46,7 @@ def saved_place(sid: str, cwd: str, title: str) -> tuple:
 
 
 def read_session(path: str) -> dict:
-    cwd, title, lines = "", "", 0
+    cwd, title, lines, helper = "", "", 0, False
     with open(path, errors="replace") as f:
         for line in f:
             lines += 1
@@ -55,11 +55,12 @@ def read_session(path: str) -> dict:
             except ValueError:
                 continue
             cwd = d.get("cwd", cwd)
+            helper = helper or bool(d.get("agentName")) or d.get("entrypoint") == "sdk-cli"  # a run a session started, not a window
             if d.get("type") == "custom-title":
                 title = d.get("customTitle") or title
             elif d.get("type") == "ai-title" and not title:
                 title = d.get("aiTitle") or title
-    return {"id": os.path.basename(path)[:-6], "cwd": cwd, "title": title, "lines": lines, "at": os.path.getmtime(path)}
+    return {"id": os.path.basename(path)[:-6], "cwd": cwd, "title": title, "lines": lines, "at": os.path.getmtime(path), "helper": helper}
 
 
 def live_ids() -> set:
@@ -78,7 +79,7 @@ def live_ids() -> set:
 def pick(sessions: list, live: set, since: float, now: float, everything: bool) -> list:
     out = []
     for s in sessions:
-        if s["at"] < since or s["id"] in live or s["lines"] < 20 or not os.path.isdir(s["cwd"]):
+        if s["at"] < since or s["id"] in live or s["lines"] < 20 or s.get("helper") or not os.path.isdir(s["cwd"]):
             continue
         if now - s["at"] < 180:  # still being written: alive somewhere (a background job) even with no process found
             continue
@@ -108,7 +109,7 @@ def selftest() -> None:
     assert window_name("Бриф flexbar.md для ESP", "/x") == "Бриф flexbar md для ESP" and window_name("", "/a/b") == "b"
     base = {"cwd": HOME, "title": "", "lines": 50, "at": 1000.0}
     ss = [dict(base, id="ok"), dict(base, id="live"), dict(base, id="old", at=1.0), dict(base, id="short", lines=3),
-          dict(base, id="b2b", cwd=f"{HOME}/code/b2b"), dict(base, id="gone", cwd="/no/such/dir"), dict(base, id="fresh", at=4900.0)]
+          dict(base, id="b2b", cwd=f"{HOME}/code/b2b"), dict(base, id="gone", cwd="/no/such/dir"), dict(base, id="fresh", at=4900.0), dict(base, id="run", helper=True)]
     assert [s["id"] for s in pick(ss, {"live"}, 500, 5000, False)] == ["ok"]
     assert saved_place("no-such-session", f"{HOME}/code/asja", "Назва") == ("asja", "Назва")
     print("restore-sessions ok")
