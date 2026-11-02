@@ -1059,6 +1059,9 @@
         {
           "group": "Плеєр",
           "buttons": [
+          {"label": "Лайк", "icon": "ok", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"like-button-view-model button, #segmented-like-button button\\\")?.click()\"'"}},
+          {"label": "Дизлайк", "icon": "close", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"dislike-button-view-model button, #segmented-dislike-button button\\\")?.click()\"'"}},
+          {"label": "Завантажити", "icon": "download", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"ytd-download-button-renderer button, button[aria-label*=Download], button[aria-label*=авантаж]\\\")?.click()\"'"}},
             {
               "label": "Пауза",
               "icon": "pause",
