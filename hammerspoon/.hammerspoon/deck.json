@@ -1,5 +1,5 @@
 {
-  "_help": "esp-deck buttons. Edit and save: the board picks it up within seconds, no flashing. action = one of: app (open/focus), keys (\"cmd+shift+4\"), media (play|next|prev|volup|voldown|mute), term (shell command in a new tmux window, the board opens it), sh (shell command in the background), url, lua (Hammerspoon code), convert (jpg|png|heic|pdf|gif|mp4|mp3|m4a — the Finder selection). icon = play pause next prev stop home settings ok close refresh edit image audio video list file folder wifi bell keyboard upload download trash save copy cut paste power loop shuffle plus minus eye hide charge gps call mail warning bluetooth usb drive volup voldown mute eject left right up down mic sun moon cloud bolt bars. color = #rrggbb. flex = the board's context panel: flex.apps by app name (Browser = any browser), flex.sites by text in a browser window title, flex.all everywhere; each is a list of {group, buttons}, up to 24 shown per group. Extra actions there: tmux (a tmux command, {s} = the active session), tk (a key after the tmux prefix).",
+  "_help": "esp-deck buttons. Edit and save: the board picks it up within seconds, no flashing. action = one of: app (open/focus), keys (\"cmd+shift+4\"), media (play|next|prev|volup|voldown|mute), term (shell command in a new tmux window, the board opens it), sh (shell command in the background), url, lua (Hammerspoon code), convert (jpg|png|heic|pdf|gif|mp4|mp3|m4a — the Finder selection). icon = play pause next prev stop home settings ok close refresh edit image audio video list file folder wifi bell keyboard upload download trash save copy cut paste power loop shuffle plus minus eye hide charge gps call mail warning bluetooth usb drive volup voldown mute eject left right up down mic sun moon cloud bolt bars. color = #rrggbb. flex = the board's context panel: flex.apps by app name (Browser = any browser), flex.sites by text in a browser window title, flex.all everywhere; each is a list of {group, buttons}, up to 24 shown per group. Extra actions there: tmux (a tmux command, {s} = the active session), tk (a key after the tmux prefix). A long press on the board saves a button to Обране, per context, in deck-flexfav.json.",
 
   "deck": [
     {
@@ -100,6 +100,116 @@
   "flex": {
     "apps": {
       "Ghostty": [
+        {
+          "group": "Claude",
+          "buttons": [
+            {
+              "label": "Режим",
+              "icon": "loop",
+              "action": {
+                "tmux": "send-keys -t {s}: BTab"
+              }
+            },
+            {
+              "label": "Стоп",
+              "icon": "stop",
+              "action": {
+                "tmux": "send-keys -t {s}: Escape"
+              }
+            },
+            {
+              "label": "Так",
+              "icon": "ok",
+              "action": {
+                "tmux": "send-keys -t {s}: Enter"
+              }
+            },
+            {
+              "label": "План",
+              "icon": "eye",
+              "action": {
+                "tmux": "send-keys -t {s}: '/plan' Enter"
+              }
+            },
+            {
+              "label": "Модель",
+              "icon": "settings",
+              "action": {
+                "tmux": "send-keys -t {s}: '/model' Enter"
+              }
+            },
+            {
+              "label": "Fast",
+              "icon": "bolt",
+              "action": {
+                "tmux": "send-keys -t {s}: '/fast' Enter"
+              }
+            },
+            {
+              "label": "Effort",
+              "icon": "up",
+              "action": {
+                "tmux": "send-keys -t {s}: '/effort' Enter"
+              }
+            },
+            {
+              "label": "Compact",
+              "icon": "down",
+              "action": {
+                "tmux": "send-keys -t {s}: '/compact' Enter"
+              }
+            },
+            {
+              "label": "Контекст",
+              "icon": "list",
+              "action": {
+                "tmux": "send-keys -t {s}: '/context' Enter"
+              }
+            },
+            {
+              "label": "Ліміти",
+              "icon": "charge",
+              "action": {
+                "tmux": "send-keys -t {s}: '/usage' Enter"
+              }
+            },
+            {
+              "label": "Resume",
+              "icon": "play",
+              "action": {
+                "tmux": "send-keys -t {s}: '/resume' Enter"
+              }
+            },
+            {
+              "label": "Rewind",
+              "icon": "prev",
+              "action": {
+                "tmux": "send-keys -t {s}: '/rewind' Enter"
+              }
+            },
+            {
+              "label": "Review",
+              "icon": "eye",
+              "action": {
+                "tmux": "send-keys -t {s}: '/review' Enter"
+              }
+            },
+            {
+              "label": "MCP",
+              "icon": "usb",
+              "action": {
+                "tmux": "send-keys -t {s}: '/mcp' Enter"
+              }
+            },
+            {
+              "label": "Clear",
+              "icon": "trash",
+              "action": {
+                "tmux": "send-keys -t {s}: '/clear'"
+              }
+            }
+          ]
+        },
         {
           "group": "Вікна",
           "buttons": [
