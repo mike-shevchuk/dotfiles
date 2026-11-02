@@ -1107,11 +1107,13 @@ function fleetData.get(key, ttl, args)
     c.running = true
     task("/bin/sh", { "-c", 'PATH=$PATH:$HOME/.pyenv/shims exec python3 "$@"', "sh", fleetData.py, table.unpack(args) }, function(out)
       local ok, d = pcall(hs.json.decode, out)
-      c.running, c.at = false, os.time()
-      if ok and d then c.data = fleetClean(d) end
+      c.running, c.at, c.err = false, os.time(), nil
+      if ok and d then c.data = fleetClean(d)
+      else c.at, c.err = nil, "fleet_data.py не відповів, глянь його вивід на Mac" end -- the board's retry starts it again
     end)
   end
-  return c.data or { loading = true }
+  if c.data then return c.data end
+  return c.err and not c.running and { error = c.err } or { loading = true }
 end
 function fleetData.window(id)
   for _, w in ipairs(sessionCache) do if w.id == id then return w end end
