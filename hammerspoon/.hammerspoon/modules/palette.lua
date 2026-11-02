@@ -224,6 +224,8 @@ end
 -- wins, which keeps the installed global authoritative.
 M.justfiles = hs.settings.get("PaletteJustfiles")
   or { os.getenv("HOME") .. "/dotfiles/.justdir/global.just" }
+-- first, whatever the setting says: this is what `just -g` reads, global.just plus its imports (lan, mem, mirror…)
+table.insert(M.justfiles, 1, os.getenv("HOME") .. "/.config/just/justfile")
 
 -- data: the decoded dump, when the caller already has it (pal builds it in a
 -- background task: hs.json.decode of a big dump blocks for seconds); nil
@@ -297,7 +299,7 @@ end
 -- Display, Tools…) are skipped: Source 2 already finds those functions.
 local LAUNCHER_CATEGORY = {
   Daily = "Daily", System = "System", Shell = "Shell",
-  Screenshot = "Screenshot", Trackpad = "Trackpad",
+  Screenshot = "Screenshot", Trackpad = "Trackpad", Hammerspoon = "Hammerspoon",
 }
 
 M._actions = {}
