@@ -33,12 +33,12 @@ TURNS='select((.isSidechain // false | not) and (.isMeta // false | not))
 if [ "$1" = chat ]; then
   [ -r "${2:-}" ] || { echo '{"msgs":[],"err":"no transcript"}'; exit 0; }
   # ponytail: last 4000 lines only — a huge session's early turns never reach the board
-  tail -n 4000 "$2" | jq -nc --argjson n "${3:-15}" "[inputs | $TURNS | .x |= .[:500]] | {msgs: .[-\$n:]}" 2>/dev/null \
+  tail -n 4000 "$2" | jq -nc --argjson n "${3:-15}" "[inputs | $TURNS | .x |= .[:3000]] | {msgs: .[-\$n:]}" 2>/dev/null \
     || echo '{"msgs":[],"err":"bad transcript"}'
   exit 0
 fi
 
-if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing ≤60, sum ≤140, tok, model} on one line
+if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing ≤60, sum ≤140, tok, model, title ≤60} on one line
   shift
   for f; do
     [ -r "$f" ] || continue
@@ -51,7 +51,9 @@ if [ "$1" = info ]; then # info <transcript>... → per readable file {f, doing 
          doing: ($t | last // {r: "a", x: ""} | if .r == "t" then .x | sub("^(🔧|❓) "; "") else (.x | lines | .[0] // "") end | .[:60]),
          sum: ([$t[] | select(.r == "a")] | last | .x // "" | lines | .[:2] | join(" · ") | .[:140]),
          tok: ($m.usage // {} | (.input_tokens // 0) + (.cache_read_input_tokens // 0) + (.cache_creation_input_tokens // 0)),
-         model: ($m.model // "")}' 2>/dev/null
+         model: ($m.model // ""),
+         title: ([$l[] | select(.type == "custom-title") | .customTitle] | last
+                 // ([$l[] | select(.type == "ai-title") | .aiTitle] | last) // "" | .[:60])}' 2>/dev/null
   done
   exit 0
 fi
@@ -75,6 +77,11 @@ in=$(cat)
 state=$1
 tr=$(jq -r '.transcript_path // ""' <<<"$in" 2>/dev/null)
 [ -n "$tr" ] && put @agent_transcript "$tr"
+# the window this session lives in, for restore-sessions.py after a reboot (tmux forgets it)
+if [ -n "$tr" ] && [ -n "${TMUX_PANE:-}" ]; then
+  mkdir -p ~/.claude/window-names
+  tmux display -p -t "$TMUX_PANE" '#S|#W' > ~/.claude/window-names/"$(basename "$tr" .jsonl)" 2>/dev/null
+fi
 # resting at the prompt (idle_prompt's default text, ~1 min after Stop) is no event: not waiting, asks nothing
 [ "$state" = waiting ] && [ "$(jq -r '.notification_type + "|" + .message' <<<"$in" 2>/dev/null)" = \
   "idle_prompt|Claude is waiting for your input" ] && exit 0

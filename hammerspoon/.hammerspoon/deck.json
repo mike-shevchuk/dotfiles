@@ -1,5 +1,5 @@
 {
-  "_help": "esp-deck buttons. Edit and save: the board picks it up within seconds, no flashing. action = one of: app (open/focus), keys (\"cmd+shift+4\"), media (play|next|prev|volup|voldown|mute), term (shell command in a new tmux window, the board opens it), sh (shell command in the background), url, lua (Hammerspoon code), convert (jpg|png|heic|pdf|gif|mp4|mp3|m4a — the Finder selection). icon = play pause next prev stop home settings ok close refresh edit image audio video list file folder wifi bell keyboard upload download trash save copy cut paste power loop shuffle plus minus eye hide charge gps call mail warning bluetooth usb drive volup voldown mute eject left right up down mic sun moon cloud bolt bars. color = #rrggbb.",
+  "_help": "esp-deck buttons. Edit and save: the board picks it up within seconds, no flashing. action = one of: app (open/focus), keys (\"cmd+shift+4\"), media (play|next|prev|volup|voldown|mute), term (shell command in a new tmux window, the board opens it), sh (shell command in the background), url, lua (Hammerspoon code), convert (jpg|png|heic|pdf|gif|mp4|mp3|m4a — the Finder selection). icon = play pause next prev stop home settings ok close refresh edit image audio video list file folder wifi bell keyboard upload download trash save copy cut paste power loop shuffle plus minus eye hide charge gps call mail warning bluetooth usb drive volup voldown mute eject left right up down mic sun moon cloud bolt bars. color = #rrggbb. flex = the board's context panel: flex.apps by app name (Browser = any browser), flex.sites by text in a browser window title, flex.all everywhere; each is a list of {group, buttons}, up to 24 shown per group. Extra actions there: tmux (a tmux command, {s} = the active session), tk (a key after the tmux prefix). A long press on the board saves a button to Обране, per context, in deck-flexfav.json.",
 
   "deck": [
     {
@@ -95,6 +95,1205 @@
       { "label": "Forward",  "icon": "right",   "action": { "keys": "cmd+alt+right" } },
       { "label": "Graph",    "icon": "gps",     "action": { "keys": "cmd+g" } },
       { "label": "Close",    "icon": "close",   "action": { "keys": "cmd+w" } }
+    ]
+  },
+  "flex": {
+    "apps": {
+      "Ghostty": [
+        {
+          "group": "Claude",
+          "buttons": [
+            {
+              "label": "Режим",
+              "icon": "loop",
+              "action": {
+                "tmux": "send-keys -t {s}: BTab"
+              }
+            },
+            {
+              "label": "Стоп",
+              "icon": "stop",
+              "action": {
+                "tmux": "send-keys -t {s}: Escape"
+              }
+            },
+            {
+              "label": "Так",
+              "icon": "ok",
+              "action": {
+                "tmux": "send-keys -t {s}: Enter"
+              }
+            },
+            {
+              "label": "План",
+              "icon": "eye",
+              "action": {
+                "tmux": "send-keys -t {s}: '/plan' Enter"
+              }
+            },
+            {
+              "label": "Модель",
+              "icon": "settings",
+              "action": {
+                "tmux": "send-keys -t {s}: '/model' Enter"
+              }
+            },
+            {
+              "label": "Fast",
+              "icon": "bolt",
+              "action": {
+                "tmux": "send-keys -t {s}: '/fast' Enter"
+              }
+            },
+            {
+              "label": "Effort",
+              "icon": "up",
+              "action": {
+                "tmux": "send-keys -t {s}: '/effort' Enter"
+              }
+            },
+            {
+              "label": "Compact",
+              "icon": "down",
+              "action": {
+                "tmux": "send-keys -t {s}: '/compact' Enter"
+              }
+            },
+            {
+              "label": "Контекст",
+              "icon": "list",
+              "action": {
+                "tmux": "send-keys -t {s}: '/context' Enter"
+              }
+            },
+            {
+              "label": "Ліміти",
+              "icon": "charge",
+              "action": {
+                "tmux": "send-keys -t {s}: '/usage' Enter"
+              }
+            },
+            {
+              "label": "Resume",
+              "icon": "play",
+              "action": {
+                "tmux": "send-keys -t {s}: '/resume' Enter"
+              }
+            },
+            {
+              "label": "Rewind",
+              "icon": "prev",
+              "action": {
+                "tmux": "send-keys -t {s}: '/rewind' Enter"
+              }
+            },
+            {
+              "label": "Review",
+              "icon": "eye",
+              "action": {
+                "tmux": "send-keys -t {s}: '/review' Enter"
+              }
+            },
+            {
+              "label": "MCP",
+              "icon": "usb",
+              "action": {
+                "tmux": "send-keys -t {s}: '/mcp' Enter"
+              }
+            },
+            {
+              "label": "Clear",
+              "icon": "trash",
+              "action": {
+                "tmux": "send-keys -t {s}: '/clear'"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Вікна",
+          "buttons": [
+            {
+              "label": "Вікно назад",
+              "icon": "left",
+              "action": {
+                "tmux": "previous-window -t {s}:"
+              }
+            },
+            {
+              "label": "Вікно далі",
+              "icon": "right",
+              "action": {
+                "tmux": "next-window -t {s}:"
+              }
+            },
+            {
+              "label": "Останнє",
+              "icon": "loop",
+              "action": {
+                "tmux": "last-window -t {s}:"
+              }
+            },
+            {
+              "label": "Нове",
+              "icon": "plus",
+              "action": {
+                "tmux": "new-window -t {s}: -c '#{pane_current_path}'"
+              }
+            },
+            {
+              "label": "Назвати",
+              "icon": "edit",
+              "action": {
+                "tk": ","
+              }
+            },
+            {
+              "label": "Перемістити",
+              "icon": "right",
+              "action": {
+                "tk": "."
+              }
+            },
+            {
+              "label": "Дерево",
+              "icon": "list",
+              "action": {
+                "tk": "w"
+              }
+            },
+            {
+              "label": "Шукати",
+              "icon": "eye",
+              "action": {
+                "tk": "f"
+              }
+            },
+            {
+              "label": "Вікно 1",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:1"
+              }
+            },
+            {
+              "label": "Вікно 2",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:2"
+              }
+            },
+            {
+              "label": "Вікно 3",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:3"
+              }
+            },
+            {
+              "label": "Вікно 4",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:4"
+              }
+            },
+            {
+              "label": "Вікно 5",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:5"
+              }
+            },
+            {
+              "label": "Вікно 6",
+              "icon": "list",
+              "action": {
+                "tmux": "select-window -t {s}:6"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Панелі",
+          "buttons": [
+            {
+              "label": "Спліт верт",
+              "icon": "bars",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}'"
+              }
+            },
+            {
+              "label": "Спліт гориз",
+              "icon": "minus",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}'"
+              }
+            },
+            {
+              "label": "Zoom",
+              "icon": "eye",
+              "action": {
+                "tmux": "resize-pane -t {s}: -Z"
+              }
+            },
+            {
+              "label": "Панель ліво",
+              "icon": "left",
+              "action": {
+                "tmux": "select-pane -t {s}: -L"
+              }
+            },
+            {
+              "label": "Панель верх",
+              "icon": "up",
+              "action": {
+                "tmux": "select-pane -t {s}: -U"
+              }
+            },
+            {
+              "label": "Панель право",
+              "icon": "right",
+              "action": {
+                "tmux": "select-pane -t {s}: -R"
+              }
+            },
+            {
+              "label": "Панель низ",
+              "icon": "down",
+              "action": {
+                "tmux": "select-pane -t {s}: -D"
+              }
+            },
+            {
+              "label": "Наступна",
+              "icon": "next",
+              "action": {
+                "tmux": "select-pane -t {s}:.+"
+              }
+            },
+            {
+              "label": "Рівно",
+              "icon": "list",
+              "action": {
+                "tmux": "select-layout -t {s}: tiled"
+              }
+            },
+            {
+              "label": "Розкласти",
+              "icon": "loop",
+              "action": {
+                "tk": "Space"
+              }
+            },
+            {
+              "label": "У вікно",
+              "icon": "upload",
+              "action": {
+                "tk": "!"
+              }
+            },
+            {
+              "label": "Міняти верх",
+              "icon": "up",
+              "action": {
+                "tk": "{"
+              }
+            },
+            {
+              "label": "Міняти низ",
+              "icon": "down",
+              "action": {
+                "tk": "}"
+              }
+            },
+            {
+              "label": "Номери",
+              "icon": "eye",
+              "action": {
+                "tk": "q"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Сесії",
+          "buttons": [
+            {
+              "label": "Сесія далі",
+              "icon": "right",
+              "action": {
+                "tk": ")"
+              }
+            },
+            {
+              "label": "Сесія назад",
+              "icon": "left",
+              "action": {
+                "tk": "("
+              }
+            },
+            {
+              "label": "Перемикач",
+              "icon": "list",
+              "action": {
+                "tk": "j"
+              }
+            },
+            {
+              "label": "Проєкти",
+              "icon": "folder",
+              "action": {
+                "tk": "T"
+              }
+            },
+            {
+              "label": "Claude",
+              "icon": "bolt",
+              "action": {
+                "tk": "A"
+              }
+            },
+            {
+              "label": "Worktree",
+              "icon": "loop",
+              "action": {
+                "tk": "W"
+              }
+            },
+            {
+              "label": "Just",
+              "icon": "play",
+              "action": {
+                "tk": "R"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Тули",
+          "buttons": [
+            {
+              "label": "btop верт",
+              "icon": "eye",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' btop"
+              }
+            },
+            {
+              "label": "btop гориз",
+              "icon": "eye",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' btop"
+              }
+            },
+            {
+              "label": "btop вікно",
+              "icon": "eye",
+              "action": {
+                "tmux": "new-window -t {s}: -n btop -c '#{pane_current_path}' btop"
+              }
+            },
+            {
+              "label": "htop верт",
+              "icon": "list",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' htop"
+              }
+            },
+            {
+              "label": "htop гориз",
+              "icon": "list",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' htop"
+              }
+            },
+            {
+              "label": "htop вікно",
+              "icon": "list",
+              "action": {
+                "tmux": "new-window -t {s}: -n htop -c '#{pane_current_path}' htop"
+              }
+            },
+            {
+              "label": "lazygit верт",
+              "icon": "loop",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' lazygit"
+              }
+            },
+            {
+              "label": "lazygit гориз",
+              "icon": "loop",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' lazygit"
+              }
+            },
+            {
+              "label": "lazygit вікно",
+              "icon": "loop",
+              "action": {
+                "tmux": "new-window -t {s}: -n lazygit -c '#{pane_current_path}' lazygit"
+              }
+            },
+            {
+              "label": "yazi верт",
+              "icon": "folder",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' yazi"
+              }
+            },
+            {
+              "label": "yazi гориз",
+              "icon": "folder",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' yazi"
+              }
+            },
+            {
+              "label": "yazi вікно",
+              "icon": "folder",
+              "action": {
+                "tmux": "new-window -t {s}: -n yazi -c '#{pane_current_path}' yazi"
+              }
+            },
+            {
+              "label": "docker верт",
+              "icon": "drive",
+              "action": {
+                "tmux": "split-window -h -t {s}: -c '#{pane_current_path}' lazydocker"
+              }
+            },
+            {
+              "label": "docker гориз",
+              "icon": "drive",
+              "action": {
+                "tmux": "split-window -v -t {s}: -c '#{pane_current_path}' lazydocker"
+              }
+            },
+            {
+              "label": "docker вікно",
+              "icon": "drive",
+              "action": {
+                "tmux": "new-window -t {s}: -n lazydocker -c '#{pane_current_path}' lazydocker"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Текст",
+          "buttons": [
+            {
+              "label": "Скрол",
+              "icon": "up",
+              "action": {
+                "tmux": "copy-mode -t {s}:"
+              }
+            },
+            {
+              "label": "Вставити",
+              "icon": "paste",
+              "action": {
+                "tk": "]"
+              }
+            },
+            {
+              "label": "Ctrl-C",
+              "icon": "stop",
+              "action": {
+                "keys": "ctrl+c"
+              }
+            },
+            {
+              "label": "Esc",
+              "icon": "close",
+              "action": {
+                "keys": "escape"
+              }
+            },
+            {
+              "label": "Enter",
+              "icon": "ok",
+              "action": {
+                "keys": "return"
+              }
+            },
+            {
+              "label": "Tab",
+              "icon": "right",
+              "action": {
+                "keys": "tab"
+              }
+            },
+            {
+              "label": "Вгору",
+              "icon": "up",
+              "action": {
+                "keys": "up"
+              }
+            },
+            {
+              "label": "Вниз",
+              "icon": "down",
+              "action": {
+                "keys": "down"
+              }
+            }
+          ]
+        }
+      ],
+      "Code": [
+        {
+          "group": "Навігація",
+          "buttons": [
+            {
+              "label": "Палітра",
+              "icon": "bars",
+              "action": {
+                "keys": "cmd+shift+p"
+              }
+            },
+            {
+              "label": "Файл",
+              "icon": "file",
+              "action": {
+                "keys": "cmd+p"
+              }
+            },
+            {
+              "label": "Пошук",
+              "icon": "eye",
+              "action": {
+                "keys": "cmd+shift+f"
+              }
+            },
+            {
+              "label": "Sidebar",
+              "icon": "list",
+              "action": {
+                "keys": "cmd+b"
+              }
+            },
+            {
+              "label": "Термінал",
+              "icon": "keyboard",
+              "action": {
+                "keys": "ctrl+`"
+              }
+            },
+            {
+              "label": "Git",
+              "icon": "loop",
+              "action": {
+                "keys": "ctrl+shift+g"
+              }
+            },
+            {
+              "label": "Визначення",
+              "icon": "right",
+              "action": {
+                "keys": "f12"
+              }
+            },
+            {
+              "label": "Назад",
+              "icon": "left",
+              "action": {
+                "keys": "ctrl+-"
+              }
+            }
+          ]
+        },
+        {
+          "group": "Правки",
+          "buttons": [
+            {
+              "label": "Коментар",
+              "icon": "edit",
+              "action": {
+                "keys": "cmd+/"
+              }
+            },
+            {
+              "label": "Формат",
+              "icon": "ok",
+              "action": {
+                "keys": "shift+alt+f"
+              }
+            },
+            {
+              "label": "Спліт",
+              "icon": "plus",
+              "action": {
+                "keys": "cmd+\\"
+              }
+            },
+            {
+              "label": "Зберегти",
+              "icon": "save",
+              "action": {
+                "keys": "cmd+s"
+              }
+            }
+          ]
+        }
+      ],
+      "Claude": [
+        {
+          "group": "Чат",
+          "buttons": [
+            {
+              "label": "Новий чат",
+              "icon": "plus",
+              "action": {
+                "keys": "cmd+n"
+              }
+            },
+            {
+              "label": "Пошук",
+              "icon": "eye",
+              "action": {
+                "keys": "cmd+k"
+              }
+            },
+            {
+              "label": "Вставити",
+              "icon": "paste",
+              "action": {
+                "keys": "cmd+v"
+              }
+            },
+            {
+              "label": "Надіслати",
+              "icon": "ok",
+              "action": {
+                "keys": "return"
+              }
+            }
+          ]
+        }
+      ],
+      "Finder": [
+        {
+          "group": "Finder",
+          "buttons": [
+            {
+              "label": "Назад",
+              "icon": "left",
+              "action": {
+                "keys": "cmd+["
+              }
+            },
+            {
+              "label": "Вперед",
+              "icon": "right",
+              "action": {
+                "keys": "cmd+]"
+              }
+            },
+            {
+              "label": "Вгору",
+              "icon": "up",
+              "action": {
+                "keys": "cmd+up"
+              }
+            },
+            {
+              "label": "Перегляд",
+              "icon": "eye",
+              "action": {
+                "keys": "space"
+              }
+            },
+            {
+              "label": "Іконки",
+              "icon": "image",
+              "action": {
+                "keys": "cmd+1"
+              }
+            },
+            {
+              "label": "Список",
+              "icon": "list",
+              "action": {
+                "keys": "cmd+2"
+              }
+            },
+            {
+              "label": "Нова папка",
+              "icon": "folder",
+              "action": {
+                "keys": "cmd+shift+n"
+              }
+            },
+            {
+              "label": "Домівка",
+              "icon": "home",
+              "action": {
+                "keys": "cmd+shift+h"
+              }
+            },
+            {
+              "label": "Завантаж.",
+              "icon": "download",
+              "action": {
+                "keys": "cmd+alt+l"
+              }
+            },
+            {
+              "label": "Шлях",
+              "icon": "copy",
+              "action": {
+                "keys": "cmd+alt+c"
+              }
+            },
+            {
+              "label": "Інфо",
+              "icon": "file",
+              "action": {
+                "keys": "cmd+i"
+              }
+            },
+            {
+              "label": "Приховані",
+              "icon": "hide",
+              "action": {
+                "keys": "cmd+shift+."
+              }
+            }
+          ]
+        }
+      ],
+      "Obsidian": [
+        {
+          "group": "Нотатки",
+          "buttons": [
+            {
+              "label": "Палітра",
+              "icon": "bars",
+              "action": {
+                "keys": "cmd+p"
+              }
+            },
+            {
+              "label": "Файл",
+              "icon": "file",
+              "action": {
+                "keys": "cmd+o"
+              }
+            },
+            {
+              "label": "Пошук",
+              "icon": "eye",
+              "action": {
+                "keys": "cmd+shift+f"
+              }
+            },
+            {
+              "label": "Нова",
+              "icon": "plus",
+              "action": {
+                "keys": "cmd+n"
+              }
+            },
+            {
+              "label": "Назад",
+              "icon": "left",
+              "action": {
+                "keys": "cmd+alt+left"
+              }
+            },
+            {
+              "label": "Вперед",
+              "icon": "right",
+              "action": {
+                "keys": "cmd+alt+right"
+              }
+            },
+            {
+              "label": "Зберегти",
+              "icon": "save",
+              "action": {
+                "keys": "cmd+s"
+              }
+            },
+            {
+              "label": "Закрити",
+              "icon": "close",
+              "action": {
+                "keys": "cmd+w"
+              }
+            }
+          ]
+        }
+      ],
+      "Browser": [
+        {
+          "group": "Браузер",
+          "buttons": [
+            {
+              "label": "Назад",
+              "icon": "left",
+              "action": {
+                "keys": "cmd+["
+              }
+            },
+            {
+              "label": "Вперед",
+              "icon": "right",
+              "action": {
+                "keys": "cmd+]"
+              }
+            },
+            {
+              "label": "Оновити",
+              "icon": "refresh",
+              "action": {
+                "keys": "cmd+r"
+              }
+            },
+            {
+              "label": "Адреса",
+              "icon": "edit",
+              "action": {
+                "keys": "cmd+l"
+              }
+            },
+            {
+              "label": "Вкладка лів",
+              "icon": "left",
+              "action": {
+                "keys": "cmd+alt+left"
+              }
+            },
+            {
+              "label": "Вкладка прав",
+              "icon": "right",
+              "action": {
+                "keys": "cmd+alt+right"
+              }
+            },
+            {
+              "label": "Нова",
+              "icon": "plus",
+              "action": {
+                "keys": "cmd+t"
+              }
+            },
+            {
+              "label": "Закрити",
+              "icon": "close",
+              "action": {
+                "keys": "cmd+w"
+              }
+            },
+            {
+              "label": "Повернути",
+              "icon": "loop",
+              "action": {
+                "keys": "cmd+shift+t"
+              }
+            },
+            {
+              "label": "Знайти",
+              "icon": "eye",
+              "action": {
+                "keys": "cmd+f"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "sites": {
+      "Telegram": [
+        {
+          "group": "Telegram",
+          "buttons": [
+            {
+              "label": "Esc",
+              "icon": "close",
+              "action": {
+                "keys": "escape"
+              }
+            },
+            {
+              "label": "Стор вгору",
+              "icon": "up",
+              "action": {
+                "keys": "pageup"
+              }
+            },
+            {
+              "label": "Стор вниз",
+              "icon": "down",
+              "action": {
+                "keys": "pagedown"
+              }
+            },
+            {
+              "label": "У кінець",
+              "icon": "next",
+              "action": {
+                "keys": "end"
+              }
+            },
+            {
+              "label": "Вставити",
+              "icon": "paste",
+              "action": {
+                "keys": "cmd+v"
+              }
+            },
+            {
+              "label": "Надіслати",
+              "icon": "ok",
+              "action": {
+                "keys": "return"
+              }
+            }
+          ]
+        }
+      ],
+      "YouTube": [
+        {
+          "group": "Плеєр",
+          "buttons": [
+          {"label": "Лайк", "icon": "ok", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"like-button-view-model button, #segmented-like-button button\\\")?.click()\"'"}},
+          {"label": "Дизлайк", "icon": "close", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"dislike-button-view-model button, #segmented-dislike-button button\\\")?.click()\"'"}},
+          {"label": "Завантажити", "icon": "download", "action": {"sh": "osascript -e 'tell application \"Brave Browser\" to execute active tab of front window javascript \"document.querySelector(\\\"ytd-download-button-renderer button, button[aria-label*=Download], button[aria-label*=авантаж]\\\")?.click()\"'"}},
+            {
+              "label": "Пауза",
+              "icon": "pause",
+              "action": {
+                "keys": "k"
+              }
+            },
+            {
+              "label": "Назад 10с",
+              "icon": "left",
+              "action": {
+                "keys": "j"
+              }
+            },
+            {
+              "label": "Вперед 10с",
+              "icon": "right",
+              "action": {
+                "keys": "l"
+              }
+            },
+            {
+              "label": "Назад 5с",
+              "icon": "prev",
+              "action": {
+                "keys": "left"
+              }
+            },
+            {
+              "label": "Вперед 5с",
+              "icon": "next",
+              "action": {
+                "keys": "right"
+              }
+            },
+            {
+              "label": "Екран",
+              "icon": "eye",
+              "action": {
+                "keys": "f"
+              }
+            },
+            {
+              "label": "Повільніше",
+              "icon": "minus",
+              "action": {
+                "keys": "shift+,"
+              }
+            },
+            {
+              "label": "Швидше",
+              "icon": "plus",
+              "action": {
+                "keys": "shift+."
+              }
+            },
+            {
+              "label": "Звук",
+              "icon": "mute",
+              "action": {
+                "keys": "m"
+              }
+            },
+            {
+              "label": "Субтитри",
+              "icon": "list",
+              "action": {
+                "keys": "c"
+              }
+            },
+            {
+              "label": "Наступне",
+              "icon": "next",
+              "action": {
+                "keys": "shift+n"
+              }
+            },
+            {
+              "label": "Театр",
+              "icon": "video",
+              "action": {
+                "keys": "t"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "all": [
+      {
+        "group": "Тема",
+        "buttons": [
+          {
+            "label": "kanagawa",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply kanagawa"
+            }
+          },
+          {
+            "label": "gruvbox",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply gruvbox"
+            }
+          },
+          {
+            "label": "nord",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply nord"
+            }
+          },
+          {
+            "label": "tokyonight",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply tokyonight"
+            }
+          },
+          {
+            "label": "dracula",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply dracula"
+            }
+          },
+          {
+            "label": "rose-pine",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply rose-pine"
+            }
+          },
+          {
+            "label": "everforest",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply everforest"
+            }
+          },
+          {
+            "label": "catppuccin",
+            "icon": "image",
+            "action": {
+              "sh": "~/dotfiles/tmux/scripts/theme-picker.sh apply 'catppuccin (default)'"
+            }
+          },
+          {
+            "label": "Темна macOS",
+            "icon": "moon",
+            "action": {
+              "lua": "hs.osascript.applescript('tell application \"System Events\" to tell appearance preferences to set dark mode to not dark mode')"
+            }
+          }
+        ]
+      },
+      {
+        "group": "Mac",
+        "buttons": [
+          {
+            "label": "Mission",
+            "icon": "bars",
+            "action": {
+              "keys": "ctrl+up"
+            }
+          },
+          {
+            "label": "Spotlight",
+            "icon": "eye",
+            "action": {
+              "keys": "cmd+space"
+            }
+          },
+          {
+            "label": "Знімок",
+            "icon": "image",
+            "action": {
+              "keys": "cmd+shift+4"
+            }
+          },
+          {
+            "label": "Play",
+            "icon": "play",
+            "action": {
+              "media": "play"
+            }
+          },
+          {
+            "label": "Далі",
+            "icon": "next",
+            "action": {
+              "media": "next"
+            }
+          },
+          {
+            "label": "Назад",
+            "icon": "prev",
+            "action": {
+              "media": "prev"
+            }
+          },
+          {
+            "label": "Гучніше",
+            "icon": "volup",
+            "action": {
+              "media": "volup"
+            }
+          },
+          {
+            "label": "Тихіше",
+            "icon": "voldown",
+            "action": {
+              "media": "voldown"
+            }
+          },
+          {
+            "label": "Тиша",
+            "icon": "mute",
+            "action": {
+              "media": "mute"
+            }
+          },
+          {
+            "label": "Lock",
+            "icon": "power",
+            "action": {
+              "lua": "hs.caffeinate.lockScreen()"
+            }
+          }
+        ]
+      }
     ]
   }
 }

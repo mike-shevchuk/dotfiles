@@ -14,7 +14,17 @@ import subprocess
 import sys
 import time
 
-SESSION = os.environ.get("LEAD_SESSION") or "W" + str(max((int(m.group(1)) for d in os.listdir(os.path.expanduser("~/.claude/fleet-board")) if (m := re.fullmatch(r"w(\d+)", d))), default=41))  # newest sprint board (was hardcoded W41)
+def _tmux_session():
+    """the tmux session this command runs in ("esp", "W44"): /mine-grill in the esp lead sees esp, not the newest sprint"""
+    if not os.environ.get("TMUX"):
+        return ""
+    try:
+        return subprocess.run(["tmux", "display", "-p", "#S"], capture_output=True, text=True, timeout=5).stdout.strip()
+    except (subprocess.TimeoutExpired, FileNotFoundError):
+        return ""
+
+
+SESSION = os.environ.get("LEAD_SESSION") or _tmux_session() or "W" + str(max((int(m.group(1)) for d in os.listdir(os.path.expanduser("~/.claude/fleet-board")) if (m := re.fullmatch(r"w(\d+)", d))), default=41))  # newest sprint board (was hardcoded W41)
 FB = os.path.expanduser("~/.claude/fleet-board")
 WK = f"{FB}/{SESSION.lower()}"
 REPO = "back2back-team/rescue-serverless"
@@ -161,7 +171,7 @@ def window_prio(w, b, pm):
 
 def cmd_mine_full():
     """per window that waits on Mike: the problem/feature, where we are, what is done — then the questions."""
-    print(f"🖥 зручніше читати по фічах (доріжка етапів + «від тебе»): http://192.168.50.85:8890/rescue-serverless/fleet/{SESSION.lower()}-status.html#mine  · оновити: jb2b status-html")
+    print(f"🖥 зручніше читати по фічах (доріжка етапів + «від тебе»): {HUB}/rescue-serverless/fleet/{SESSION.lower()}-status.html#mine  · оновити: jb2b status-html")
     pm = prio_map()
     if pm:  # Mike 21.10: show the sprint priorities on top so a wrong order is visible at once
         by = {}
@@ -283,10 +293,16 @@ def cmd_devnow():
         rows.append(f"на dev зараз: {br}")
         if br.startswith("train"):
             sh("git", "fetch", "-q", "origin", br, timeout=40)
-            heads = re.findall(r"(?:from \S+/|branch '(?:origin/)?)([^' ]+)", sh("git", "log", "--merges", "--format=%s", f"origin/main..origin/{br}"))
+            subj = sh("git", "log", "--merges", "--format=%s", f"origin/main..origin/{br}")
+            heads = re.findall(r"(?:from \S+/|branch '(?:origin/)?|^train[^:\n]*: merge )([^' (\n#]+)", subj, re.M)
+            nums = re.findall(r"^train[^:\n]*: merge #(\d+)", subj, re.M)  # legacy «merge #N» subjects (train-w43-10)
             pulls = {p["headRefName"]: p for p in json.loads(sh("gh", "pr", "list", "-R", REPO, "--state", "all", "-L", "150",
                                                                    "--json", "number,headRefName,title,state") or "[]")}
-            for h in dict.fromkeys(heads):
+            by_num = {str(p["number"]): p for p in pulls.values()}
+            for n in nums:
+                p = by_num.get(n)
+                rows.append(f"  в {br}: " + (f"#{p['number']} {p['title'][:70]} [{p['state']}]" if p else f"#{n}"))
+            for h in (x for x in dict.fromkeys(heads) if x != "main"):  # «Merge origin/main into <pr>» inside a PR branch is not a train member
                 p = pulls.get(h)
                 rows.append(f"  в {br}: " + (f"#{p['number']} {p['title'][:70]} [{p['state']}]" if p else h))
     url = sh("aws", "lambda", "get-function-configuration", "--function-name", "dev-rescue-serverless-fast-api",
@@ -368,7 +384,8 @@ def bar(pct, n=10):
 
 
 ARCH = os.path.expanduser("~/zettelkasten/claude_code/rescue-serverless/architecture")
-HUB = "http://192.168.50.85:8890"
+# stable Bonjour name: the LAN IP changes between networks
+HUB = "http://mac.local:8890"
 
 
 def plan_doc(tid):

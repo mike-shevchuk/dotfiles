@@ -22,6 +22,7 @@
 -- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
+local K = {} -- constants: Lua allows 200 locals in a chunk and this file passed it
 local M = {}
 
 local env = require("modules.env")
@@ -33,17 +34,17 @@ local PORT = 7777
 local HOME = os.getenv("HOME")
 local TMUX = "/opt/homebrew/bin/tmux"
 local AGENT_STATE = HOME .. "/dotfiles/tmux/scripts/agent-state.sh" -- Claude hook; `chat` reads a session JSONL
-local STATUSLINE = HOME .. "/.claude/statusline.sh"
-local REMINDERS = HOME .. "/.claude/reminders.sh"
+K.STATUSLINE = HOME .. "/.claude/statusline.sh"
+K.REMINDERS = HOME .. "/.claude/reminders.sh"
 local HELPER_APP = HOME .. "/code/esp-deck/helper/DeckHelper.app" -- `just permissions` once
-local NET_DIR = HOME .. "/Library/Application Support/esp-deck" -- net-day|month|year.json (top 15), written by launchd: `just netscan` in esp-deck
+K.NET_DIR = HOME .. "/Library/Application Support/esp-deck" -- net-day|month|year.json (top 15), written by launchd: `just netscan` in esp-deck
 local VOICE_FILE = "/tmp/deck-voice.txt"
 local CAL_FILE = "/tmp/deck-cal.json"
-local FW_SHA = "/tmp/deck-ota.sha" -- written by `just ota`; the board updates when it differs from its own
+K.FW_SHA = "/tmp/deck-ota.sha" -- written by `just ota`; the board updates when it differs from its own
 local PATH = "/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:" .. HOME .. "/.local/bin"
 
 -- Typed into the open session (row on the session screen)
-local SLASH = { "/mine", "/fleet", "/stuck", "/trylog", "/devnow", "/brief" }
+K.SLASH = { "/mine", "/fleet", "/stuck", "/trylog", "/devnow", "/brief" }
 
 -- Recipes tab: { label, shell command } — each runs in a new tmux window the board then opens
 local RECIPES = {
@@ -56,18 +57,18 @@ local RECIPES = {
 }
 
 -- tmux key names the board may send: named keys, F1–F12, or one ASCII char, each optionally C-/M- prefixed
-local NAMED = { Enter = 1, Escape = 1, Tab = 1, BTab = 1, BSpace = 1, Space = 1, Up = 1, Down = 1, Left = 1, Right = 1,
+K.NAMED = { Enter = 1, Escape = 1, Tab = 1, BTab = 1, BSpace = 1, Space = 1, Up = 1, Down = 1, Left = 1, Right = 1,
   Home = 1, End = 1, PageUp = 1, PageDown = 1, DC = 1 }
 local function validKey(k)
   local base = (k or ""):gsub("^C%-", ""):gsub("^M%-", ""):gsub("^C%-", "")
-  return NAMED[base] or base:match("^F%d%d?$") or (base:match("^[%g]$") and base ~= ";") -- tmux: ; splits commands
+  return K.NAMED[base] or base:match("^F%d%d?$") or (base:match("^[%g]$") and base ~= ";") -- tmux: ; splits commands
 end
 
 -- ── text cleanup: board fonts carry ASCII + Cyrillic + a few symbols, drop the rest ──
-local KEEP = { [0x25CB] = true, [0x25CF] = true, [0x26A1] = true, [0x2192] = true, [0x2713] = true, [0xB7] = true }
+K.KEEP = { [0x25CB] = true, [0x25CF] = true, [0x26A1] = true, [0x2192] = true, [0x2713] = true, [0xB7] = true }
 local function keepCp(cp, mono)
   return (cp >= 0x20 and cp < 0x7F) or (cp >= 0x400 and cp < 0x500) or (cp >= 0x2010 and cp <= 0x2026)
-    or KEEP[cp] or (mono and cp >= 0x2500 and cp < 0x25A0)
+    or K.KEEP[cp] or (mono and cp >= 0x2500 and cp < 0x25A0)
 end
 
 local function clean(s, mono)
@@ -83,7 +84,7 @@ end
 local function cut(s, n) local o = utf8.offset(s, n + 1); return o and s:sub(1, o - 1) or s end -- never mid-UTF-8
 
 local function task(cmd, args, cb)
-  local t = hs.task.new(cmd, function(_, out) if cb then cb(out or "") end end, args)
+  local t = hs.task.new(cmd, function(code, out) if cb then cb(out or "", code) end end, args)
   t:setEnvironment({ PATH = PATH, HOME = HOME, LANG = "en_US.UTF-8" })
   t:start()
   return t
@@ -95,6 +96,12 @@ local function readFile(path)
   local data = f:read("a")
   f:close()
   return data
+end
+local function writeFile(path, data) -- false on any failure, the close that flushes included
+  local f = io.open(path, "w")
+  if not f then return false end
+  local ok = f:write(data)
+  return (f:close() and ok) and true or false
 end
 
 -- ── slow sources, refreshed in the background ──
@@ -123,6 +130,34 @@ local function refreshHub()
   end)
 end
 
+-- "+ task" targets beyond projctl: every tmux session (its active pane's dir) and every git repo under
+-- ~/code (depth 3, no worktrees), ~/dotfiles, ~/zettelkasten — refreshed async, looked up by /spawn
+local extraWhere, extraNames = {}, {}
+local function refreshTargets()
+  task(TMUX, { "list-sessions", "-F", "#{session_name}\t#{pane_current_path}" }, function(out)
+    local w, names = {}, {}
+    for name, dir in out:gmatch("([^\t\n]+)\t([^\n]+)") do
+      w[name] = { dir = dir, session = name }
+      names[#names + 1] = name
+    end
+    task("/usr/bin/find", { HOME .. "/code", "-maxdepth", "3", "-name", ".git", "-type", "d" }, function(found)
+      local repos = { HOME .. "/dotfiles", HOME .. "/zettelkasten" }
+      for g in found:gmatch("[^\n]+") do
+        if not g:find("/worktrees/") and not g:find("/%.claude/") then repos[#repos + 1] = g:gsub("/%.git$", "") end
+      end
+      table.sort(repos)
+      for _, dir in ipairs(repos) do
+        local name = dir:match("([^/]+)$"):gsub("[^%w_%-]", "_")
+        if not w[name] then
+          w[name] = { dir = dir, session = name }
+          names[#names + 1] = name
+        end
+      end
+      extraWhere, extraNames = w, names
+    end)
+  end)
+end
+
 local function refreshProjects()
   -- registry.conf: name|dir|session|port|extra|autostart → running = its tmux session exists
   -- (one async list-sessions: a sync has-session per project held up every request behind it)
@@ -141,6 +176,31 @@ local function refreshProjects()
     for _, pr in ipairs(list) do pr.on = up[pr.session] == true; pr.session = nil end
     projects = list
   end)
+  refreshTargets()
+end
+
+-- the board's ":80" tab: what listens on which TCP port of the Mac — [[port, "what"]], refreshed once a minute
+K.PORT_NAMES = { [7777] = "Hammerspoon · плата", [7778] = "прошивка для плати (just ota)", [8893] = "сайт здоров'я",
+  [8894] = "сайт мітингів", [8890] = "hub", [8069] = "stt-host (whisper)" }
+local ports = {}
+local function refreshPorts()
+  task("/usr/sbin/lsof", { "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn" }, function(out)
+    local seen, list, pid, cmd = {}, {}, nil, nil
+    for l in (out or ""):gmatch("[^\n]+") do
+      local k, v = l:sub(1, 1), l:sub(2)
+      if k == "p" then pid = v elseif k == "c" then cmd = v
+      elseif k == "n" then
+        local port = tonumber(v:match(":(%d+)$"))
+        if port and not seen[port] then
+          seen[port] = true
+          local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
+          table.insert(list, { port, (K.PORT_NAMES[port] or cmd or "?") .. loc })
+        end
+      end
+    end
+    table.sort(list, function(a, b) return a[1] < b[1] end)
+    ports = list
+  end)
 end
 
 local function refreshSlow()
@@ -150,7 +210,7 @@ local function refreshSlow()
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
   -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
-  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. STATUSLINE }, function(out)
+  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. K.STATUSLINE }, function(out)
     out = out:gsub("\27%[[%d;]*m", "")
     for line in out:gmatch("[^\n]+") do
       if line:find(" 5h ") then
@@ -162,7 +222,7 @@ local function refreshSlow()
       end
     end
   end)
-  task(REMINDERS, { "list" }, function(out)
+  task(K.REMINDERS, { "list" }, function(out)
     local r = {}
     for line in out:gmatch("[^\n]+") do
       local name, text = line:match("^(%S+)%s+%[active%]%s+(.*)$")
@@ -202,6 +262,68 @@ local function safeClean(s, n) -- utf8.codes throws on invalid UTF-8; one bad wi
   local ok, c = pcall(clean, s)
   return cut(ok and c or "", n)
 end
+-- windows Claude's hooks never tag: a `claude agents` client (its hook-reported file is never written; the agent it
+-- shows is a background job) and a claude whose hook never ran. Their state comes from the background jobs' own
+-- state.json (every ~10 s) or from how fresh their transcript is.
+-- window id → the transcript its chat shows (a job's, or the project's newest unclaimed); kept on disk across reloads
+local JOBPICK_FILE = HOME .. "/.hammerspoon/deck-jobpick.json"
+local jobPick = (function()
+  local f = io.open(JOBPICK_FILE)
+  local ok, t = pcall(hs.json.decode, f and f:read("a") or "")
+  if f then f:close() end
+  return ok and type(t) == "table" and t or {}
+end)()
+local function savePick(id, tr)
+  jobPick[id] = tr
+  local f = io.open(JOBPICK_FILE, "w")
+  if f then f:write(hs.json.encode(jobPick)); f:close() end
+end
+local jobs = { by = {}, active = {}, tr = {} } -- job transcript → state; active jobs for the picker; job id → transcript
+K.JQ = "/usr/bin/jq"
+local function jobStates()
+  local r = {}
+  for f in hs.fs.dir(HOME .. "/.claude/jobs") do
+    local p = HOME .. "/.claude/jobs/" .. f .. "/state.json"
+    if f:sub(1, 1) ~= "." and hs.fs.attributes(p) then r[#r + 1] = p end
+  end
+  return r
+end
+local function refreshJobs()
+  task(K.JQ, { "-r", 'select(.linkScanPath) | "\\(.updatedAt)\t\\(.state)\t\\(.daemonShort // .sessionId[:8])\t\\(.name // "?")\t\\(.linkScanPath)"',
+    table.unpack(jobStates()) }, function(o)
+    local by, active, tr = {}, {}, {}
+    local dayAgo = os.date("!%Y-%m-%dT%H:%M:%S", os.time() - 86400)
+    for at, st, jid, name, path in o:gmatch("([^\t\n]+)\t([^\t\n]+)\t([^\t\n]+)\t([^\t\n]*)\t([^\n]+)") do
+      by[path], tr[jid] = st, path
+      -- active = touched in the last 24 h; one blocked for weeks is not "waiting for you" any more
+      if st ~= "done" and st ~= "failed" and at >= dayAgo and hs.fs.attributes(path) then
+        active[#active + 1] = { id = jid, name = safeClean(name, 40), st = st, at = at }
+      end
+    end
+    table.sort(active, function(a, b) return a.at > b.at end)
+    jobs = { by = by, active = active, tr = tr }
+    -- a claude whose hook never ran (no @agent_transcript, e.g. a lead started before the hooks): the newest
+    -- transcript of its project that no window, pick or background job owns
+    local taken = {}
+    for _, j in ipairs(active) do taken[tr[j.id]] = true end -- live background jobs (a done one may be resumed in a window)
+    for _, t in pairs(jobPick) do taken[t] = true end
+    for _, w in ipairs(sessionCache) do if w.tr ~= "" then taken[w.tr] = true end end
+    for _, w in ipairs(sessionCache) do
+      if w.claude and w.state == "" and not jobPick[w.id] and (w.cwd or "") ~= "" then
+        local dir = HOME .. "/.claude/projects/" .. w.cwd:gsub("[/.]", "-")
+        if hs.fs.attributes(dir) then
+          local best, bestM
+          for f in hs.fs.dir(dir) do
+            local path = dir .. "/" .. f
+            local m = f:match("%.jsonl$") and not taken[path] and hs.fs.attributes(path, "modification")
+            if m and (not bestM or m > bestM) then best, bestM = path, m end
+          end
+          if best then taken[best] = true; savePick(w.id, best) end
+        end
+      end
+    end
+  end)
+end
 -- list-windows fields; @agent_ask* come from agent-state.sh, none of them holds a \t
 local FIELDS = { "window_id", "session_name}:#{window_index", "window_name", "@agent_state", "pane_current_command",
   "@agent_ask_kind", "@agent_ask_at", "@agent_ask_opts", "@agent_ask_multi", "@agent_ask_n", "@agent_ask_descs",
@@ -226,16 +348,17 @@ local function refreshInfo(list)
       local e = ok and type(d) == "table" and infoCache[d.f]
       if e then
         e.doing, e.sum, e.tok, e.model = safeClean(d.doing, 60), safeClean(d.sum, 140), tonumber(d.tok) or 0, d.model or ""
+        e.title = safeClean(d.title or "", 60) -- the Claude session's own name (/rename, else its ai-title)
       end
     end
   end)
 end
-local ST_RANK = { waiting = 1, done = 2, working = 3, idle = 4 }
-local IDLE_TEXT = "Claude is waiting for your input" -- idle_prompt's default: resting at the prompt, not a question
+K.ST_RANK = { waiting = 1, done = 2, working = 3, idle = 4 }
+K.IDLE_TEXT = "Claude is waiting for your input" -- idle_prompt's default: resting at the prompt, not a question
 -- which hook-kept asks reach the board: an open dialog; an "other" Notification ≤ 1 h; an idle one with real text ≤ 10 min
 local function isAsk(st, kind, text, age)
   if kind == "permission" or kind == "choice" then return st == "waiting" end
-  if kind == "idle" then return text ~= IDLE_TEXT and text ~= "" and age <= 600 end
+  if kind == "idle" then return text ~= K.IDLE_TEXT and text ~= "" and age <= 600 end
   return kind == "other" and age <= 3600
 end
 local function parseSessions(out)
@@ -255,7 +378,7 @@ local function parseSessions(out)
       if name == "" or name:match("^%d+%.%d+%.%d+$") or name:lower() == "claude" then
         name = clean(cwd:match("([^/]+)/*$") or name)
       end
-      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr,
+      list[#list + 1] = { id = id, idx = idx, name = name, state = st, kind = kind, claude = claude, tr = tr, cwd = cwd,
                           at = tonumber(aat), cmax = tonumber(cmax), n = #list }
       local askAt = tonumber(at) or os.time()
       if isAsk(st, kind, ask, os.time() - askAt) then
@@ -273,18 +396,43 @@ local function parseSessions(out)
     return a.at < b.at
   end)
   -- st: waiting only with an open dialog; at the prompt = done for 30 min after the last event, then idle
+  -- background sessions (claude --bg) have no tmux window: a row each in a "bg" block, unless a window shows it
+  local shown = {}
+  for _, w in ipairs(list) do if w.tr ~= "" then shown[w.tr] = true end end
+  for _, t in pairs(jobPick) do shown[t] = true end
+  for _, j in ipairs(jobs.active) do
+    local t = jobs.tr[j.id]
+    if t and not shown[t] then
+      list[#list + 1] = { id = "job:" .. j.id, idx = "bg:" .. j.id:sub(1, 4), name = j.name, state = "", kind = "",
+                          claude = true, tr = t, job = j.st, n = #list }
+    end
+  end
+  for _, w in ipairs(list) do -- untagged Claude windows: the transcript they most likely show
+    if w.claude and w.state == "" then
+      local live = w.tr ~= "" and hs.fs.attributes(w.tr)
+      if w.job then live = true end
+      if not live then w.tr = jobPick[w.id] or "" end -- a `claude agents` window: only once you picked its session
+      w.untagged = true
+    end
+  end
   refreshInfo(list)
   local now = os.time()
   for _, w in ipairs(list) do
     if w.claude then
       w.at = w.at or (infoCache[w.tr] or {}).mtime -- @agent_at comes with the next hook event; until then the transcript's
-      if w.state == "working" then w.st = "working"
+      local m = w.untagged and w.tr ~= "" and hs.fs.attributes(w.tr, "modification")
+      local js = w.untagged and jobs.by[w.tr]
+      -- a fresh transcript beats the job's own state, which lags (still "blocked" while it already works again)
+      if m and now - m <= 90 then w.st = "working"
+      elseif js == "blocked" and m and now - m <= 7200 then w.st = "waiting"
+      elseif js == "working" then w.st = "working"
+      elseif w.state == "working" then w.st = "working"
       elseif w.state == "waiting" and (w.kind == "permission" or w.kind == "choice") then w.st = "waiting"
       else w.st = w.at and now - w.at <= 1800 and "done" or "idle" end
     end
   end
   -- Claude agents waiting → done → working → idle, the latest event first; other windows after them in tmux order
-  local function rank(w) return w.claude and ST_RANK[w.st] or 5 end
+  local function rank(w) return w.claude and K.ST_RANK[w.st] or 5 end
   table.sort(list, function(a, b)
     local ra, rb = rank(a), rank(b)
     if ra ~= rb then return ra < rb end
@@ -298,7 +446,10 @@ local function parseSessions(out)
   end
   tailCache = tails
 end
+local jobTick = 0
 local function refreshSessions()
+  jobTick = jobTick + 1
+  if jobTick % 3 == 1 then refreshJobs() end -- every ~9 s
   task(TMUX, { "list-windows", "-a", "-F", "#{" .. table.concat(FIELDS, "}\t#{") .. "}" }, parseSessions)
 end
 local function asks()
@@ -319,6 +470,7 @@ local function sessions()
       s.st = w.st
       s.age = w.at and math.max(0, now - w.at) or nil
       s.doing = e.doing
+      if e.title and e.title ~= "" and e.title ~= w.name then s.title = e.title end
       if e.tok and e.tok > 0 then
         local max = w.cmax or ((e.model:find("[1m]", 1, true) or e.tok > 200000) and 1000000 or 200000)
         s.ctx = math.floor(e.tok * 100 / max + 0.5)
@@ -334,12 +486,40 @@ end
 -- (while recording it keeps the partial transcript in VOICE_FILE .. ".partial" → /state.voice.text)
 local voice = { state = "idle", text = "" }
 local voiceTimer
+local journalAdd -- the board's 📝 (hold the mic on the Garmin card): set below, next to Garmin's data
 
 local function micDown(lang)
   os.remove(VOICE_FILE)
   os.remove(VOICE_FILE .. ".partial")
   voice = { state = "rec", text = "" }
   task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "listen", lang == "en" and "en-US" or "uk-UA", VOICE_FILE })
+end
+
+-- the board's own mic: raw PCM arrives in /mic/pcm chunks, the close (/mic?down=0&board=1) runs whisper on it
+local PCM_FILE, WAV_FILE = "/tmp/deck-voice.pcm", "/tmp/deck-voice.wav"
+K.WHISPER = "/opt/homebrew/bin/whisper-cli"
+-- same model + tuning as the stt-host service (~/zettelkasten/claude_code/stt-service/host), run directly: no extra hop
+K.WHISPER_MODEL = HOME .. "/.local/share/stt-host/models/ggml-large-v3-turbo-q5_0.bin"
+K.WHISPER_PROMPT = { uk = "Розмова українською мовою. Говоримо чітко, правильними реченнями.",
+  en = "A conversation in English with clear speech and proper sentences." }
+
+local function micBoardUp(rate, lang)
+  voice.state = "busy"
+  local f = io.open(PCM_FILE, "rb")
+  local pcm = f and f:read("a") or ""
+  if f then f:close() end
+  if #pcm < rate then voice = { state = "done", text = "", journal = voice.journal }; return end -- under ½ s: nothing said
+  local w = io.open(WAV_FILE, "wb")
+  w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
+    "data", #pcm), pcm)
+  w:close()
+  lang = lang == "en" and "en" or "uk"
+  task(K.WHISPER, { "-m", K.WHISPER_MODEL, "-l", lang, "--prompt", K.WHISPER_PROMPT[lang], "--suppress-nst", "--beam-size", "8",
+    "--best-of", "8", "-nt", "-np", "-f", WAV_FILE }, function(out)
+    local j = voice.journal
+    voice = { state = "done", text = clean(((out or ""):gsub("%s+", " "):gsub("^ ", ""))), journal = j }
+    if j and voice.text ~= "" then journalAdd(voice.text, lang) end
+  end)
 end
 
 local function micUp()
@@ -359,8 +539,8 @@ local function micUp()
 end
 
 -- Claude windows as numbers for the board's gauges: used %, elapsed % of the window, pace, tokens, reset
-local USAGE_CACHE = "/tmp/claude/statusline-usage-cache.json" -- written by statusline.sh
-local TOKENS_CACHE = "/tmp/claude/tokens-usage.txt"           -- line 1 = 5h tokens, line 2 = 7d
+K.USAGE_CACHE = "/tmp/claude/statusline-usage-cache.json" -- written by statusline.sh
+K.TOKENS_CACHE = "/tmp/claude/tokens-usage.txt"           -- line 1 = 5h tokens, line 2 = 7d
 local function isoEpoch(iso) -- "2026-10-21T18:59:59.7+00:00" (UTC) → epoch
   local y, mo, d, h, mi, sec = (iso or ""):match("(%d+)-(%d+)-(%d+)T(%d+):(%d+):(%d+)")
   if not y then return nil end
@@ -369,10 +549,10 @@ local function isoEpoch(iso) -- "2026-10-21T18:59:59.7+00:00" (UTC) → epoch
 end
 
 local function limitGauges()
-  local ok, u = pcall(hs.json.decode, readFile(USAGE_CACHE) or "")
+  local ok, u = pcall(hs.json.decode, readFile(K.USAGE_CACHE) or "")
   if not ok or not u then return {} end
   local tok = {}
-  for line in (readFile(TOKENS_CACHE) or ""):gmatch("[^\n]+") do tok[#tok + 1] = line:gsub("%s", "") end
+  for line in (readFile(K.TOKENS_CACHE) or ""):gmatch("[^\n]+") do tok[#tok + 1] = line:gsub("%s", "") end
   local out, now = {}, os.time()
   for i, w in ipairs({ { "5h", u.five_hour, 5 * 3600, "%H:%M" }, { "7d", u.seven_day, 7 * 86400, "%a %H:%M" } }) do
     local reset = w[2] and isoEpoch(w[2].resets_at)
@@ -561,7 +741,7 @@ local function pane(id, colors, width, clean)
 end
 
 -- ── Mac quick actions (Opie-style): now playing + convert what's selected in Finder ──
-local NP = {
+K.NP = {
   Spotify = [[if application "Spotify" is running then tell application "Spotify" to return (player state as string) & "|" & name of current track & "|" & artist of current track & "|" & (player position as integer) & "|" & ((duration of current track) div 1000)]],
   Music = [[if application "Music" is running then tell application "Music" to return (player state as string) & "|" & name of current track & "|" & artist of current track & "|" & (player position as integer) & "|" & ((duration of current track) as integer)]],
 }
@@ -573,7 +753,7 @@ local function osa(script, cb) task("/usr/bin/osascript", { "-e", script }, cb) 
 local function refreshMac()
   local found = {}
   for _, app in ipairs({ "Spotify", "Music" }) do
-    osa(NP[app], function(out)
+    osa(K.NP[app], function(out)
       local st, title, artist, pos, dur = out:gsub("%s+$", ""):match("^(%w+)|(.-)|(.-)|(%d+)|(%d+)$")
       found[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
                             pos = tonumber(pos), dur = tonumber(dur) } or false
@@ -597,8 +777,8 @@ return out]], function(out)
   end)
 end
 
-local IMAGE = { jpg = 1, jpeg = 1, png = 1, heic = 1, tiff = 1, tif = 1, gif = 1, bmp = 1, webp = 1 }
-local MEDIA = { mov = 1, mp4 = 1, m4v = 1, avi = 1, mkv = 1, webm = 1, mp3 = 1, wav = 1, m4a = 1, aac = 1, flac = 1 }
+K.IMAGE = { jpg = 1, jpeg = 1, png = 1, heic = 1, tiff = 1, tif = 1, gif = 1, bmp = 1, webp = 1 }
+K.MEDIA = { mov = 1, mp4 = 1, m4v = 1, avi = 1, mkv = 1, webm = 1, mp3 = 1, wav = 1, m4a = 1, aac = 1, flac = 1 }
 local SIPS_FMT = { jpg = "jpeg", png = "png", heic = "heic", gif = "gif", pdf = "pdf", tiff = "tiff" }
 local FFMPEG_FMT = { mp4 = 1, mp3 = 1, m4a = 1, gif = 1, wav = 1 }
 local conversion = ""
@@ -615,11 +795,11 @@ local function convert(files, fmt)
     local base, ext = src:match("^(.*)%.([^./]+)$")
     ext = ext and ext:lower()
     local cmd, args
-    if ext and IMAGE[ext] and SIPS_FMT[fmt] then
+    if ext and K.IMAGE[ext] and SIPS_FMT[fmt] then
       local dst = freeName(base, fmt)
       cmd, args = "/usr/bin/sips", { "-s", "format", SIPS_FMT[fmt], src, "--out", dst }
       names[#names + 1] = dst:match("[^/]+$")
-    elseif ext and (MEDIA[ext] or ext == "gif") and FFMPEG_FMT[fmt] then
+    elseif ext and (K.MEDIA[ext] or ext == "gif") and FFMPEG_FMT[fmt] then
       local dst = freeName(base, fmt)
       args = { "-y", "-loglevel", "error", "-i", src }
       if fmt == "gif" then for _, a in ipairs({ "-vf", "fps=12,scale=480:-1" }) do args[#args + 1] = a end end
@@ -640,7 +820,7 @@ local function convert(files, fmt)
 end
 
 -- hub page → plain text: drop head/style/script, keep paragraphs / headings / list items as lines
-local ENT = { amp = "&", lt = "<", gt = ">", quot = '"', apos = "'", nbsp = " ", mdash = "—", ndash = "–", hellip = "…" }
+K.ENT = { amp = "&", lt = "<", gt = ">", quot = '"', apos = "'", nbsp = " ", mdash = "—", ndash = "–", hellip = "…" }
 local function htmlText(html, lang)
   -- bilingual hub pages: <x data-en>…</x><x data-ua>…</x> → keep one language; the ☰ menu lives in <details>
   local drop = lang == "en" and "ua" or "en"
@@ -650,7 +830,7 @@ local function htmlText(html, lang)
   html = html:gsub("<br%s*/?>", "\n"):gsub("</p>", "\n\n"):gsub("<h%d[^>]*>", "\n\n"):gsub("</h%d>", "\n")
   html = html:gsub("<li[^>]*>", "\n• "):gsub("</tr>", "\n"):gsub("</t[dh]>", "  "):gsub("</div>", "\n"):gsub("</pre>", "\n")
   html = html:gsub("<[^>]+>", "")
-  html = html:gsub("&(%a+);", function(e) return ENT[e] or "" end)
+  html = html:gsub("&(%a+);", function(e) return K.ENT[e] or "" end)
   html = html:gsub("&#(%d+);", function(n) return utf8.char(tonumber(n)) end)
   local lines, blank = {}, true
   for line in (html .. "\n"):gmatch("(.-)\n") do
@@ -768,27 +948,131 @@ end
 
 -- /chat, cached like sessions: answer from the cache at once, refresh async (≤1 per 2 s per window),
 -- forget a window nobody asked about for 60 s — two sync hs.execute here froze HS ~10% of the time
+-- RGB565 little-endian → PNG with the stdlib (zlib + struct): no Pillow needed
+K.SHOT_PY = [[
+import sys, zlib, struct
+raw, w, h, out = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4]
+d = open(raw, "rb").read()
+rows = bytearray()
+for y in range(h):
+    rows.append(0)
+    for x in range(w):
+        i = (y * w + x) * 2
+        if i + 1 >= len(d): rows += b"\0\0\0"; continue
+        p = d[i] | d[i + 1] << 8
+        rows += bytes(((p >> 11) << 3, ((p >> 5) & 63) << 2, (p & 31) << 3))
+chunk = lambda t, b: struct.pack(">I", len(b)) + t + b + struct.pack(">I", zlib.crc32(t + b))
+open(out, "wb").write(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+                       + chunk(b"IDAT", zlib.compress(bytes(rows))) + chunk(b"IEND", b""))
+]]
 local chatCache = {}
-local function chat(id, n)
+local SHOT_DIR = HOME .. "/Library/Logs/esp-deck-shots"
+local lastShot -- the board's last 📷, until 📎 pastes it
+local clipSeen = -1 -- pasteboard changeCount already pasted
+local function clipImage() -- an image on the clipboard not pasted yet (no read of the image itself: cheap)
+  if hs.pasteboard.changeCount() == clipSeen then return false end
+  local types = hs.pasteboard.contentTypes() or {}
+  for i = 1, rawlen(types) do -- rawlen: terminates on a stubbed hs too (deck_state_test.lua)
+    local t = types[i]
+    if t == "public.png" or t == "public.tiff" then return true end
+  end
+  return false
+end
+local function chat(id, n, force, job)
   local now = os.time()
   for k, e in pairs(chatCache) do if now - e.asked > 60 then chatCache[k] = nil end end
   local e = chatCache[id] or { fetched = 0 }
   chatCache[id], e.asked = e, now
+  if force then e.fetched = 0 end -- the board's ↻: read the transcript now, not within the 2 s throttle
   if not e.busy and now - e.fetched >= 2 then
     e.busy, e.fetched = true, now
     local function done(d) e.data, e.busy = d, false end
-    task(TMUX, { "show", "-wv", "-t", id, "@agent_transcript" }, function(out)
-      local path = out:gsub("%s+$", "")
+    local function withPath(path)
       if path == "" then return done({ msgs = {}, err = "no transcript" }) end
       -- the hook keeps the session JSONL per window; agent-state.sh chat turns it into u/a/t lines
-      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(30, n or 15))) }, function(raw)
+      task(AGENT_STATE, { "chat", path, tostring(math.max(1, math.min(60, n or 15))) }, function(raw)
         local ok, d = pcall(hs.json.decode, raw)
         if not ok or type(d) ~= "table" then return done({ msgs = {}, err = "no transcript" }) end
-        for _, m in ipairs(d.msgs or {}) do -- mono clean keeps the newlines of a chat bubble
-          local cok, c = pcall(clean, tostring(m.x), true)
-          m.x = cut((cok and c or ""):gsub("^%s+", ""), 500) -- the 🔧/❓ the board can't draw leave a space
+        -- newest first, whole messages up to 3000 chars, until ~36 KB: the board reads at most 48 KB per reply
+        -- 14 KB by default (36 KB scrolled at 9 fps on the board); scrolling up for history asks more, up to 40 KB
+        local msgs, kept, budget = d.msgs or {}, {}, math.min(40000, 14000 + math.max(0, (n or 15) - 15) * 900)
+        for i = #msgs, 1, -1 do
+          local m = msgs[i]
+          local cok, c = pcall(clean, tostring(m.x), true) -- mono clean keeps the newlines of a chat bubble
+          c = (cok and c or ""):gsub("^%s+", ""):gsub("%*%*", "") -- the 🔧/❓ the board can't draw leave a space; no bold
+          m.x = cut(c, 3000)
+          budget = budget - #m.x - 20
+          if budget < 0 and #kept > 0 then break end
+          table.insert(kept, 1, m)
         end
-        done(d)
+        d.msgs = kept
+        -- the terminal's foot for the chat's status bar: Claude's spinner line ("✻ Thinking… (12s · ↑ 3k tokens)")
+        -- and the status lines under the input box (model, tokens, limits, mode)
+        task(TMUX, { "capture-pane", "-p", "-t", id }, function(pane)
+          local lines = {}
+          for l in (pane or ""):gmatch("[^\n]*") do lines[#lines + 1] = l end
+          local rule, spin = nil, nil
+          for i = #lines, 1, -1 do
+            if not rule and lines[i]:match("^%s*─") then rule = i end
+            -- "✻ Thinking… (12s · ↑ 3k tokens · esc to interrupt)", also bare "Beaming… (19m 20s · 6.6k tokens)"
+            if not spin and (lines[i]:find("esc to interrupt", 1, true) or lines[i]:match("%S…%s*%(%d+[hms]")) then
+              spin = safeClean(lines[i], 120)
+            end
+          end
+          local foot = {}
+          for i = (rule or #lines) + 1, #lines do
+            local c = safeClean(lines[i], 160):gsub("^%s+", "")
+            if c ~= "" then foot[#foot + 1] = c end
+          end
+          d.spin, d.foot = spin, foot
+          done(d)
+        end)
+      end)
+    end
+    local jid = id:match("^job:(%w+)$") -- a background session's row: its own transcript, no window behind it
+    if jid then return withPath(jobs.tr[jid] or "") end
+    -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
+    -- window's own project folder. A dead one = a `claude agents` client: the background job it most likely
+    -- shows (the latest active one), kept for that window until ↻ — never a teammate's transcript.
+    -- ponytail: latest-active-job guess, read the attached job id if Claude Code ever exposes it
+    task(TMUX, { "display", "-p", "-t", id, "#{@agent_transcript}\t#{pane_current_path}" }, function(out)
+      local path, cwd = out:gsub("%s+$", ""):match("^([^\t]*)\t?(.*)$")
+      if path ~= "" and hs.fs.attributes(path) then return withPath(path) end
+      if path ~= "" then -- a client of background sessions: `claude attach <id>` says which; `claude agents` can't
+        if job and jobs.tr[job] then savePick(id, jobs.tr[job]) end
+        return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
+          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null; " .. TMUX .. " display -p -t " .. id ..
+          " '#{session_name} #{window_name}'" }, function(out)
+          local att = (out or ""):match("claude attach (%S+)")
+          if att then
+            for jid, t in pairs(jobs.tr) do
+              if jid:sub(1, #att) == att or att:sub(1, #jid) == jid then savePick(id, t) end
+            end
+          end
+          if not jobPick[id] then -- the window's name names one active session ("esp-deck" → "Прошивка ESP32-C5…")
+            local names, hit = (out or ""):match("([^\n]*)\n?$"):lower(), nil
+            for _, j in ipairs(jobs.active) do
+              local jn = j.name:lower()
+              for w in names:gmatch("[%w]+") do
+                if #w >= 3 and jn:find(w, 1, true) then hit = hit == nil and j.id or false; break end
+              end
+            end
+            if hit then savePick(id, jobs.tr[hit]) end
+          end
+          if jobPick[id] then return withPath(jobPick[id]) end
+          done({ msgs = {}, err = "pick", jobs = jobs.active }) -- the board asks which session this window shows
+        end)
+      end
+      local dir = cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or ""
+      if not hs.fs.attributes(dir) then return withPath("") end
+      task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. dir .. "/*.jsonl | head -20" }, function(o)
+        local claimed, past = {}, false
+        for l in o:gmatch("[^\n]+") do
+          if l == "--" then past = true
+          elseif not past then claimed[l] = true
+          elseif not claimed[l] then savePick(id, l); return withPath(l) end
+        end
+        withPath("")
       end)
     end)
   end
@@ -815,6 +1099,86 @@ local function reply(body, code, json)
   return json and hs.json.encode(body) or body, code, h
 end
 
+-- ── the board's traffic, for the radar page: the last requests with their bodies, and how often it should ask.
+-- deck-net.json is written by helper/wifi_test.py (it validates); /state carries it, the board applies it on the next poll.
+local netTrace = { log = {}, file = HOME .. "/.hammerspoon/deck-net.json" }
+local function traceText(s, n)
+  s = tostring(s or "")
+  if not utf8.len(s) then return "<" .. #s .. " байт, не текст>" end
+  if #s <= n then return s end
+  local cut = n -- step back off continuation bytes: utf8.offset throws when started inside a letter
+  while cut > 1 and (s:byte(cut) or 0) & 0xC0 == 0x80 do cut = cut - 1 end
+  return s:sub(1, cut - 1) .. "…"
+end
+M._traceText = traceText -- test hook
+function netTrace.add(method, path, body, res, code, ms)
+  table.insert(netTrace.log, 1, { t = os.time(), m = method, p = path, c = code, ms = math.floor(ms), rq = traceText(body, 1500),
+                                  rs = traceText(res, 3000), n = #tostring(res or "") })
+  netTrace.log[151] = nil
+end
+function netTrace.cfg()
+  local m = hs.fs.attributes(netTrace.file, "modification")
+  if m ~= netTrace.at then
+    local ok, d = pcall(hs.json.decode, readFile(netTrace.file) or "null")
+    netTrace.at, netTrace.data = m, ok and d or nil
+  end
+  return netTrace.data
+end
+
+-- ── Agents tab + Grill: helper/fleet_data.py gathers (gh, Linear, tasks.json, transcripts), never on HS's thread.
+-- A request answers from the cache and refreshes it behind the reply; the board asks only while that view is open.
+local fleetData = { cache = {}, py = HOME .. "/code/esp-deck/helper/fleet_data.py" }
+local function fleetClean(v) -- the board's font: the same filter as every other text
+  if type(v) == "string" then return safeClean(v, 600) end
+  if type(v) ~= "table" then return v end
+  local r = {}
+  for k, x in pairs(v) do r[k] = fleetClean(x) end
+  return r
+end
+function fleetData.get(key, ttl, args)
+  local c = fleetData.cache[key] or {}
+  fleetData.cache[key] = c
+  if not c.running and os.time() - (c.at or 0) >= ttl then
+    c.running = true
+    task("/bin/sh", { "-c", 'PATH=$PATH:$HOME/.pyenv/shims exec python3 "$@"', "sh", fleetData.py, table.unpack(args) }, function(out)
+      local ok, d = pcall(hs.json.decode, out)
+      c.running, c.at, c.err = false, os.time(), nil
+      if ok and d then c.data = fleetClean(d)
+      else c.at, c.err = nil, "fleet_data.py не відповів, глянь його вивід на Mac" end -- the board's retry starts it again
+    end)
+  end
+  if c.data then return c.data end
+  return c.err and not c.running and { error = c.err } or { loading = true }
+end
+function fleetData.window(id)
+  for _, w in ipairs(sessionCache) do if w.id == id then return w end end
+end
+-- Other in AskUserQuestion, tried live on 2.1.x: digit n+1 opens the field, text, Enter. Only into the dialog that is
+-- still open, else the text would land in the prompt as a new message.
+function fleetData.other(id, text)
+  for _, a in ipairs(askCache) do
+    if a.id == id and a.kind == "choice" and not a.multi and #a.opts > 0 then
+      task(TMUX, { "send-keys", "-t", id, tostring(#a.opts + 1) }, function()
+        hs.timer.doAfter(0.4, function()
+          task(TMUX, { "send-keys", "-t", id, "-l", "--", text }, function()
+            hs.timer.doAfter(0.3, function() task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+          end)
+        end)
+      end)
+      return true
+    end
+  end
+  return false
+end
+function fleetData.rename(id, name)
+  local f = HOME .. "/.hammerspoon/deck-prnames.json"
+  local ok, d = pcall(hs.json.decode, readFile(f) or "{}")
+  d = ok and d or {}
+  d[id] = name ~= "" and name or nil
+  hs.json.write(d, f, true, true)
+  fleetData.cache.prs = nil
+end
+
 -- ── deck.json: Stream Deck pages + per-app ring; reloaded when the file changes ──
 local DECK_FILE = HOME .. "/.hammerspoon/deck.json"
 local deckCfg, deckVer = { deck = {}, ring = {} }, ""
@@ -831,6 +1195,153 @@ end
 local function ringFor(app)
   local r = deckCfg.ring or {}
   return r[app] or r["*"] or {}, r[app] and app or "*"
+end
+
+-- the board's flex tab: the app in front or, in a browser, the site by its window title. A context = named groups of
+-- buttons, sent to the board one group at a time: deck.json `flex`, then live ones (tmux windows, tmux hotkeys, menus).
+local flex = {} -- one local: this file is at Lua's limit of 200 in the main chunk
+do
+K.BROWSERS = { ["Brave Browser"] = 1, ["Google Chrome"] = 1, Thorium = 1, DuckDuckGo = 1, Safari = 1 }
+local KEYS_HELP = os.getenv("HOME") .. "/dotfiles/tmux/scripts/keys-help.sh"
+local MENU_SKIP = { "^Quit", "^Hide", "^Log Out", "^Shut", "Trash", "^Delete", "^Force Quit" } -- no mis-tap on these
+local flexMenus, flexMenuApp = {}, nil
+local FLEX_COLORS = { "#1f6feb", "#8957e5", "#2da44e", "#bf3989", "#c2571a", "#0e7c7b", "#9a6700", "#b42318" } -- a group's key colour
+local FLEX_FAV = hs.configdir .. "/deck-flexfav.json"
+local flexFav = {} -- ctx → its buttons: per context, because `keys` go to whatever is in front
+do
+  local ok, t = pcall(hs.json.decode, readFile(FLEX_FAV) or "{}")
+  if ok and type(t) == "table" then flexFav = t end
+end
+
+local function flexCtx(app, title)
+  local f = deckCfg.flex or {}
+  if not K.BROWSERS[app] then return app end
+  for site in pairs(f.sites or {}) do
+    if title:find(site, 1, true) then return site end
+  end
+  return "Browser"
+end
+
+local function tmuxActive() -- the client Mike touched last: list-clients order says nothing about that
+  local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
+  local client, session = out:match("%S+%s+(%S+)%s+(%S+)")
+  return client, session
+end
+
+local function menuWalk(items, path, out) -- every enabled item with a shortcut, under its menu path
+  for _, it in ipairs(items or {}) do
+    local title, p, skip = it.AXTitle or "", { table.unpack(path) }, false
+    p[#p + 1] = title
+    for _, pat in ipairs(MENU_SKIP) do skip = skip or title:find(pat) ~= nil end
+    if it.AXChildren then menuWalk(it.AXChildren[1], p, out)
+    elseif not skip and it.AXEnabled and (it.AXMenuItemCmdChar or "") ~= "" then
+      out[#out + 1] = { label = title, icon = "keyboard", key = it.AXMenuItemCmdChar, action = { menu = p } }
+    end
+  end
+end
+
+local function flexReadMenus(fa) -- async: a big app takes seconds; the board refetches when `v` changes
+  local name = fa and fa:name()
+  if not name or name == flexMenuApp then return end
+  flexMenuApp, flexMenus = name, {}
+  fa:getMenuItems(function(tree)
+    if flexMenuApp ~= name then return end
+    local groups = {}
+    for _, top in ipairs(tree or {}) do
+      local out = {}
+      if top.AXTitle ~= "Apple" and top.AXTitle ~= name then menuWalk(top.AXChildren and top.AXChildren[1], { top.AXTitle }, out) end
+      if out[1] then groups[#groups + 1] = { group = top.AXTitle, buttons = out } end
+    end
+    flexMenus = groups
+  end)
+end
+
+local function tmuxHelpGroups() -- the `prefix X` rows of the cheat-sheet = what's really bound, custom keys included
+  local groups, cur = {}, nil
+  for line in (readFile(KEYS_HELP) or ""):gmatch("[^\n]+") do
+    local g = line:match('^%s*grp "([^"]+)"')
+    local key, text = line:match('^%s*row "prefix ([^"]+)"%s+"([^"]+)"')
+    if g then
+      cur = { group = g:gsub(" %(.*", ""), buttons = {} }
+      groups[#groups + 1] = cur
+    elseif key and cur and key ~= "?" and key ~= "PgUp" then
+      local b = cur.buttons
+      b[#b + 1] = { label = text:gsub(" [—(].*", ""), icon = "keyboard", key = key, action = { tk = key } }
+    end
+  end
+  local out = {}
+  for _, g in ipairs(groups) do if g.buttons[1] then out[#out + 1] = g end end
+  return out
+end
+
+local function flexGroups(ctx)
+  local f, out = deckCfg.flex or {}, {}
+  local function add(list) for _, g in ipairs(list or {}) do out[#out + 1] = g end end
+  local sites, apps = f.sites or {}, f.apps or {}
+  if ctx == "Ghostty" then
+    local _, session = tmuxActive()
+    local wins = {}
+    for _, w in ipairs(sessions()) do
+      if session and w.idx:find(session .. ":", 1, true) == 1 and #wins < 24 then
+        wins[#wins + 1] = { label = w.idx:match(":(%d+)$") .. " " .. w.name, icon = w.claude and "bolt" or "list",
+                            action = { tmux = "select-window -t " .. w.id } }
+      end
+    end
+    out[1] = { group = "Зараз", buttons = wins }
+  end
+  add(sites[ctx] or apps[ctx])
+  if sites[ctx] then add(apps.Browser) end
+  if ctx == "Ghostty" then add(tmuxHelpGroups()) end
+  add(f.all)
+  add(flexMenus)
+  for i, g in ipairs(out) do g.color = FLEX_COLORS[(i - 1) % #FLEX_COLORS + 1] end -- before Обране: colours stay put
+  if flexFav[ctx] and flexFav[ctx][1] then table.insert(out, 1, { group = "Обране", buttons = flexFav[ctx] }) end
+  return out
+end
+
+local function flexSame(a, b) return a.label == b.label and hs.json.encode(a.action) == hs.json.encode(b.action) end
+
+local function flexReply(ctx, g)
+  local groups, names, btns = flexGroups(ctx), {}, {}
+  for i, gr in ipairs(groups) do names[i] = clean(gr.group or "") end
+  if not groups[g + 1] then g = 0 end
+  local cur = groups[g + 1]
+  for i, b in ipairs(cur and cur.buttons or {}) do
+    if i > 24 then break end
+    local fav = false
+    for _, f in ipairs(flexFav[ctx] or {}) do fav = fav or flexSame(f, b) end
+    btns[i] = { label = clean(b.label or ""), icon = b.icon, key = b.key and clean(b.key) or nil, fav = fav or nil,
+                color = b.color or cur.color }
+  end
+  return { ctx = ctx, g = g, groups = names, buttons = btns }
+end
+
+local function flexToggleFav(ctx, g, f) -- returns the group to stay on: Обране appearing shifts every index by one
+  local groups = flexGroups(ctx)
+  local cur = groups[g + 1]
+  local b = cur and cur.buttons[f]
+  if not b then return g end
+  local favs, found = flexFav[ctx] or {}, nil
+  for i, x in ipairs(favs) do if flexSame(x, b) then found = i end end
+  if found then table.remove(favs, found)
+  elseif #favs < 24 then
+    favs[#favs + 1] = { label = b.label, icon = b.icon, key = b.key, color = b.color or cur.color, action = b.action }
+  end
+  flexFav[ctx] = favs[1] and favs or nil
+  local fh = io.open(FLEX_FAV, "w")
+  if fh then fh:write(hs.json.encode(flexFav)); fh:close() end
+  for i, gr in ipairs(flexGroups(ctx)) do
+    if gr.group == cur.group then return i - 1 end
+  end
+  return 0
+end
+
+flex.ctx, flex.tmuxActive, flex.readMenus = flexCtx, tmuxActive, flexReadMenus
+flex.reply, flex.toggleFav, flex.groups = flexReply, flexToggleFav, flexGroups
+function flex.state(app, title, ver) -- `v` changes whenever the board has to refetch
+  local ctx = flexCtx(app, title)
+  return { ctx = ctx, v = ver .. "." .. #flexMenus .. "." .. #(flexFav[ctx] or {}) }
+end
 end
 
 local function strip(buttons) -- what the board needs: no actions
@@ -863,6 +1374,12 @@ local function runAction(a, label)
     if fn then pcall(fn) else print("deck lua: " .. tostring(err)) end
   end
   if a.convert then convert(macFiles, a.convert) end
+  if a.menu then local fa = hs.application.frontmostApplication(); if fa then fa:selectMenuItem(a.menu) end end
+  if a.tmux or a.tk then -- the client in front, whatever keyboard layout is on (keyStroke needs Latin for a letter)
+    local client, session = flex.tmuxActive()
+    if a.tk and client then task(TMUX, { "send-keys", "-K", "-c", client, "C-b", a.tk }) end
+    if a.tmux and session then task("/bin/zsh", { "-lc", TMUX .. " " .. (a.tmux:gsub("{s}", session)) }) end
+  end
   if a.term then return runRecipe({ label or "deck", a.term }) end -- the board opens this tmux window
 end
 
@@ -929,10 +1446,423 @@ local function panelSet(key, v)
 end
 
 local frontName = ""
+-- ── Mac notifications → the board: only the app's name flashes there; the text waits in the board's ✉ panel ──
+-- helper/notes.py reads Notification Center's database (Hammerspoon needs Full Disk Access); it runs only when
+-- the database file changed (one stat every 3 s)
+local NOTES_PY = HOME .. "/code/esp-deck/helper/notes.py"
+local NOTES_DB = HOME .. "/Library/Group Containers/group.com.apple.usernoted/db2/db"
+local notes, notesLast, notesSeen, notesMtime, notesBusy = {}, nil, 0, -1, false
+local function appName(bundle)
+  return hs.application.nameForBundleID(bundle) or bundle:match("([^.]+)$") or bundle
+end
+local function refreshNotes()
+  local m = math.max(hs.fs.attributes(NOTES_DB, "modification") or 0, hs.fs.attributes(NOTES_DB .. "-wal", "modification") or 0)
+  if notesBusy or m == notesMtime then return end -- no Full Disk Access: stat says 0, one try, then quiet
+  notesBusy, notesMtime = true, m
+  task("/usr/bin/python3", { NOTES_PY, tostring(notesLast or 0) }, function(out)
+    notesBusy = false
+    for line in (out or ""):gmatch("[^\n]+") do
+      local ok, d = pcall(hs.json.decode, line)
+      if ok and type(d) == "table" then
+        if d.last then notesLast, notesSeen = d.last, d.last -- first run: start from now, no replay
+        elseif d.id then
+          table.insert(notes, 1, { id = d.id, app = safeClean(appName(d.bundle), 30), title = safeClean(d.title, 120),
+                                   subtitle = safeClean(d.subtitle, 120), body = safeClean(d.body, 400), at = d.at })
+          notes[21] = nil
+          notesLast = math.max(notesLast or 0, d.id)
+        end
+      end
+    end
+  end)
+end
+-- ── Garmin (helper/garmin.py, unofficial garminconnect): once logged in (`just garmin-login` in esp-deck),
+-- every 15 min → /state.garmin for the board's Здоров'я tab ──
+local GARMIN_PY, UV = HOME .. "/code/esp-deck/helper/garmin.py", HOME .. "/.local/bin/uv"
+local garmin
+local function refreshGarmin()
+  if not hs.fs.attributes(HOME .. "/.garminconnect") then return end -- not logged in yet
+  task(UV, { "run", "--quiet", "--with", "garminconnect", "python", GARMIN_PY, "fetch" }, function(out)
+    local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "") -- the last non-empty line
+    if ok and type(d) == "table" then d.at = os.time(); garmin = d end
+  end)
+end
+
+-- 📝 voice journal: "я зараз іду гуляти" → one JSON line with the time and what Garmin said at that moment,
+-- for the teammate's patterns/advice (helper/health_metrics.py reads it); the board shows the last 3
+local health -- (the composite metrics, filled below; the journal notes the question it answers)
+local JOURNAL = HOME .. "/.local/share/esp-deck/journal.jsonl"
+local journalTail = {}
+journalAdd = function(text, lang, at) -- at: said back then (a note from the outbox), so today's Garmin and question don't fit
+  local g = not at and garmin or {}
+  local f = io.open(JOURNAL, "a")
+  if not f then return end
+  f:write(hs.json.encode({ at = os.date("%Y-%m-%dT%H:%M:%S", at), text = text, lang = lang, steps = g.steps,
+    hr = g.hr_now, battery = g.battery, stress = g.stress, kcal_active = g.kcal_active,
+    q = not at and health and health.ask or nil }), "\n") -- q: the metrics' question this answers, when one was up
+  f:close()
+  table.insert(journalTail, 1, os.date("%H:%M", at) .. "  " .. text)
+  journalTail[4] = nil
+end
+do -- the last 3 after a reload
+  local f = io.open(JOURNAL)
+  if f then
+    for l in f:lines() do
+      local ok, e = pcall(hs.json.decode, l)
+      if ok and e then table.insert(journalTail, 1, (e.at or ""):sub(12, 16) .. "  " .. (e.text or "")); journalTail[4] = nil end
+    end
+    f:close()
+  end
+end
+
+-- 🎙 meetings (Plaud-style): the board streams the room's PCM (/meet/pcm), on stop helper/meeting.py runs whisper
+-- + a Claude summary → ~/.local/share/esp-deck/meetings/<id>.md; /state.meet = {state, note, last[3]}
+local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
+local meet = { state = "idle", last = {} }
+local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
+-- names sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op; their received length (the
+-- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
+local meetDone = {}
+meet.len, meet.bids, meet.unsynced, meet.indexed = {}, {}, {}, {} -- (fields of meet: deck.lua is at Lua's 200-locals limit)
+meet.MAX = 4294967295 -- the contract's uint32
+function meet.addLast(e) -- AC-24: the board's 5 are meetings; a voice note never takes a place
+  if e.kind == "note" then return end
+  table.insert(meet.last, 1, e); meet.last[6] = nil
+end
+function meet.noteBid(bid, name) -- the newest capture of an unsynced id, so a reload keeps its chunks together
+  local at = bid and bid:match("^%d+")
+  if at and tonumber(at) <= 1700000000 and (meet.unsynced[at] or "") < name then meet.unsynced[at] = name end
+end
+do
+  local f = io.open(MEET_DIR .. "/index.jsonl")
+  if f then
+    for l in f:lines() do
+      local ok, e = pcall(hs.json.decode, l)
+      if ok and type(e) == "table" then
+        meet.addLast(e)
+        if e.id then
+          meetDone[e.id], meet.len[e.id], meet.bids[e.id], meet.indexed[e.id] = true, e.len, e.bid, true
+          meet.noteBid(e.bid, e.id)
+        end
+      end
+    end
+    f:close()
+  end
+end
+meet.STUCK = 3600 -- a .stage untouched this long: meeting.py died unseen (a reload, a reboot), no longer "processing"
+function meet.actions(a) -- the board's /state buffer is fixed (48 KB) and 5 meetings share it
+  local r = {}
+  for i = 1, math.min(#a, 8) do r[i] = safeClean(a[i], 120) end
+  return r
+end
+local function meetState()
+  if meet.proc and (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") then
+    local st = readFile(MEET_DIR .. "/" .. meet.proc .. ".stage")
+    if st == "spk" or st == "sum" then meet.state = st end
+  end
+  local last = {} -- the full summary (body) only for the newest: /state stays small
+  for i, e in ipairs(meet.last) do
+    -- '#' is a colour code on the board's label: markdown headings become plain lines there
+    last[i] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title, summary = e.summary,
+      actions = meet.actions(e.actions or {}), body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
+  end
+  local pending = {} -- <id>.stage files with a <id>.bid: captures the Mac is still processing
+  local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
+  for f in (ok and it or function() end), d do
+    local id = f:match("^(.+)%.stage$")
+    local stage = id and readFile(MEET_DIR .. "/" .. f)
+    local bid = id and readFile(MEET_DIR .. "/" .. id .. ".bid")
+    stage = stage and stage:match("%a+")
+    -- meeting.py leaves 'done' behind: only the stages of the contract are still processing
+    if bid and (stage == "stt" or stage == "spk" or stage == "sum")
+      and os.time() - (hs.fs.attributes(MEET_DIR .. "/" .. f, "modification") or 0) < meet.STUCK then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
+  end
+  table.sort(pending, function(a, b) return a.bid < b.bid end)
+  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd }
+end
+-- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
+-- a board before SNTP sends a small id: named once by the Mac's clock, so its chunks land in one capture; the same id
+-- starting again after that capture is done is a new one
+local function meetName(bid, start)
+  local t = tonumber(bid) or 0
+  if t > 1700000000 then return os.date("%Y-%m-%d_%H%M%S", t), t end
+  local u = meet.unsynced
+  if not u[bid] or (start and meetDone[u[bid]]) then u[bid] = os.date("%Y-%m-%d_%H%M%S") end
+  return u[bid], t
+end
+do -- FM-6: after a Hammerspoon reload any .stage (index.jsonl above: the archived ones) means it went to meeting.py;
+  -- never guess from the newest .pcm. Empty = a disk-full stop that never was accepted
+  local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
+  for f in (ok and it or function() end), d do
+    local id = f:match("^(.+)%.stage$")
+    if id and (readFile(MEET_DIR .. "/" .. f) or ""):match("%a") then
+      meetDone[id], meet.len[id] = true, tonumber((readFile(MEET_DIR .. "/" .. id .. ".len") or ""):match("^%d+"))
+    end
+    local named = f:match("^(.+)%.bid$")
+    if named then meet.noteBid((readFile(MEET_DIR .. "/" .. f) or ""):match("%S+"), named) end
+  end
+end
+local function fsize(path)
+  local f = io.open(path, "rb")
+  if not f then return 0 end
+  local n = f:seek("end"); f:close()
+  return n
+end
+-- the board's capture id <at>-<seq> (or a legacy numeric <at>) → the file name from the real start; the first board id to
+-- take a name owns it (<name>.bid), a second one from the same second gets <name>-<seq>
+local function meetResolve(bid, start)
+  local name, t = meetName(bid:match("^%d+"), start)
+  local seq = bid:match("%-(%d+)$")
+  local function ownerOf(n) return readFile(MEET_DIR .. "/" .. n .. ".bid") or meet.bids[n] end
+  local owner = ownerOf(name)
+  if owner and owner:match("%S+") ~= bid and seq then name = name .. "-" .. seq; owner = ownerOf(name) end
+  if not owner and not meetDone[name] then
+    hs.fs.mkdir(MEET_DIR)
+    local f = io.open(MEET_DIR .. "/" .. name .. ".bid", "w")
+    if f then f:write(bid); f:close() end
+  end
+  return name, t
+end
+function meet.validBid(id) -- CaptureId, plus the short <at> of a board before SNTP
+  local at = id:match("^(%d+)$") or id:match("^(%d+)%-%d+$")
+  return at and #at <= 10 and #id <= 21
+end
+function meet.delivery(id)
+  return reply({ id = id, have = meet.len[id] or fsize(MEET_DIR .. "/" .. id .. ".pcm"), delivered = meetDone[id] or false }, 200, true)
+end
+function meet.full() return reply({ code = "meet.disk_full", message = "Disk full on the Mac" }, 507, true) end
+-- the query of a stop: rate and fmt are all meeting.py gets told about the audio, a bad len would skip the length check
+function meet.validStop(p)
+  local len = p.len and p.len:match("^%d+$") and tonumber(p.len)
+  return (not p.len or (len and len <= meet.MAX)) and (not p.rate or p.rate == "16000") and (not p.fmt or p.fmt == "ulaw")
+end
+-- CaptureClose: what meeting.py relies on; a bookmark or gap past the audio is fine (it clamps them)
+function meet.validClose(c)
+  local function list(v) return v == nil or (type(v) == "table" and (next(v) == nil or v[1] ~= nil)) end
+  local function num(v, min) return type(v) == "number" and v >= min and v <= meet.MAX end
+  if type(c) ~= "table" or c[1] ~= nil or not list(c.marks) or not list(c.gaps) then return false end
+  for _, e in ipairs(c.marks or {}) do
+    if type(e) ~= "table" or not (num(e.offset, 0) and num(e.at, 0)) then return false end
+  end
+  for _, e in ipairs(c.gaps or {}) do
+    if type(e) ~= "table" or not (num(e.offset, 0) and num(e.gap_ms, 1) and type(e.cause) == "string") then return false end
+  end
+  return true
+end
+-- 🛟 the backup: while the board records, the Mac records too (the device picked in the 🎙 menu) into <id>.mac.ulaw;
+-- meeting.py takes whichever is longer (the board's has gaps when Wi-Fi fails) and keeps the Mac's as <id>.mac.m4a
+local meetBackup -- the running ffmpeg of the backup
+local function backupStart(id)
+  local dev = hs.settings.get("deck.meetBackup")
+  if not dev or dev == "" or meetBackup then return end
+  meetBackup = hs.task.new("/opt/homebrew/bin/ffmpeg", function() meetBackup = nil end, { "-hide_banner", "-loglevel",
+    "error", "-f", "avfoundation", "-i", ":" .. dev, "-ac", "1", "-ar", "16000", "-f", "mulaw", "-y",
+    MEET_DIR .. "/" .. id .. ".mac.ulaw" })
+  meetBackup:start()
+end
+local meetStopNow
+-- false: the disk refused, nothing accepted. The stop is accepted here, before ffmpeg closes: .stage = "processing" and
+-- FM-6's mark (last, so a reload never trusts a half-done stop), .len = "<length> <rate> <fmt>": the length outlives the
+-- .pcm, and a reload can rerun what never reached meeting.py
+local function meetStop(id, rate, fmt, len, x)
+  if not id or meetDone[id] then return true end
+  local have = fsize(MEET_DIR .. "/" .. id .. ".pcm")
+  if not (writeFile(MEET_DIR .. "/" .. id .. ".len", have .. " " .. rate .. " " .. (fmt or "pcm")) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
+  meetDone[id], meet.len[id] = true, have
+  if meetBackup and meetId == id then -- let ffmpeg close the backup file first, then process both
+    local b = meetBackup
+    b:setCallback(function() meetBackup = nil; meetStopNow(id, rate, fmt, len, x) end)
+    b:interrupt()
+    return true
+  end
+  meetStopNow(id, rate, fmt, len, x)
+  return true
+end
+-- x (a capture from the outbox): {past, kind, t0, lang, target, close = path of the CaptureClose json (marks, gaps)}
+meetStopNow = function(id, rate, fmt, len, x)
+  local live = meetId == id
+  if live then meetId = nil end
+  local t0, lang = x and x.t0 or meet.t0, x and x.lang or meet.lang
+  if live or meet.state ~= "rec" then meet.state, meet.note, meet.proc = "stt", nil, id end -- another capture never hides a live meeting
+  -- screenshots: from the start to now (start + the audio length is too early when the board dropped audio)
+  local secs = len and math.floor(len / (fmt == "ulaw" and rate or rate * 2)) or (os.time() - (t0 or os.time()))
+  local args = { "run", "--quiet", "--with", "sherpa-onnx", "--with", "numpy", "python", MEET_PY,
+    MEET_DIR .. "/" .. id .. ".pcm", tostring(rate), lang or "uk", tostring(t0 or 0),
+    tostring(x and (x.t1 or x.past and (t0 or 0) + secs) or math.max((t0 or os.time()) + secs, os.time())), fmt or "pcm", MEET_DIR .. "/" .. id .. ".mac.ulaw" }
+  if x then args[#args + 1] = x.kind or "meet"; args[#args + 1] = x.past and "1" or "0"; args[#args + 1] = x.close or "" end
+  task(UV, args,
+    function(out, code)
+    local ok, e = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
+    if ok and type(e) == "table" and e.title then
+      meet.addLast(e)
+      meet.bids[id] = e.bid
+      if e.kind == "note" then meet.route(e.text or "", x) end
+      if meet.state ~= "rec" then meet.state = "done" end -- a newer meeting may be recording by now
+      hs.notify.new({ title = "Мітинг: " .. e.title, informativeText = e.summary or "" }):send()
+    else
+      -- out of meet.pending for good; meetDone stays, a repeated stop must not run it again. No .stage here = it was archived
+      if readFile(MEET_DIR .. "/" .. id .. ".stage") then writeFile(MEET_DIR .. "/" .. id .. ".stage", "err") end
+      if meet.state ~= "rec" then meet.state, meet.note = "err", "не вдалося розшифрувати — аудіо збережено в " .. id end
+    end
+  end)
+end
+do -- answered delivered, then a reload before meeting.py took the .pcm (meetStop's ffmpeg wait) or
+  -- during it (the task died with Hammerspoon): the board has freed its audio, so run it again. meeting.py keeps the
+  -- .pcm until its index line is written; err stays err
+  local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
+  for f in (ok and it or function() end), d do
+    local id = f:match("^([%d_%-]+)%.stage$")
+    local st = id and (readFile(MEET_DIR .. "/" .. f) or ""):match("%a+")
+    if (st == "stt" or st == "spk" or st == "sum") and not meet.indexed[id] and fsize(MEET_DIR .. "/" .. id .. ".pcm") > 0
+      and not (hs.execute("/usr/bin/pgrep -f 'meeting.py .*/" .. id .. "\\.pcm'") or ""):match("%d") then
+      local have, rate, fmt = (readFile(MEET_DIR .. "/" .. id .. ".len") or ""):match("^(%d+) (%d+) (%a+)")
+      local okm, x = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "null")
+      x = okm and type(x) == "table" and x or {}
+      local Y, M, D, h, m, sec = id:match("^(%d+)%-(%d+)%-(%d+)_(%d%d)(%d%d)(%d%d)")
+      x.t0 = x.t0 or (Y and os.time({ year = tonumber(Y), month = tonumber(M), day = tonumber(D), hour = tonumber(h), min = tonumber(m), sec = tonumber(sec) }))
+      x.t1 = hs.fs.attributes(MEET_DIR .. "/" .. id .. ".len", "modification") -- .len: written at the stop
+      if readFile(MEET_DIR .. "/" .. id .. ".close.json") then x.close = MEET_DIR .. "/" .. id .. ".close.json" end
+      writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt") -- pending counts from now
+      meetStopNow(id, tonumber(rate) or 16000, fmt or "ulaw", tonumber(have), x)
+    end
+  end
+end
+
+-- 🎙 in the menu bar: start / stop a meeting on the board from the Mac, see where it is, open the last summaries
+-- a meeting recorded by the Mac alone (no board): ffmpeg from any input device → the same 16 kHz μ-law .pcm, and
+-- on stop the same meeting.py (transcript, speakers, summary, screenshots). Needs the mic permission for Hammerspoon
+local FFMPEG = "/opt/homebrew/bin/ffmpeg"
+local meetMac -- the running ffmpeg task while the Mac records
+local function macRecStart(dev, lang)
+  local id = os.date("%Y-%m-%d_%H%M%S")
+  hs.fs.mkdir(MEET_DIR)
+  local path = MEET_DIR .. "/" .. id .. ".pcm"
+  meetId, meet.bid = id, nil
+  meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm, meet.src = "rec", nil, lang, os.time(), os.time(), "mac"
+  meetMac = hs.task.new(FFMPEG, function(code, _, err)
+    meetMac = nil
+    local size = hs.fs.attributes(path, "size") or 0
+    if size < 16000 then -- under a second: the device gave nothing (mic permission? a silent virtual device?)
+      meet.state, meet.note, meet.src = "err", "Mac нічого не записав: " .. ((err or ""):match("[^\n]+") or ("код " .. tostring(code))), nil
+      return
+    end
+    meet.src = nil
+    meetStop(id, 16000, "ulaw", size)
+  end, { "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-i", ":" .. dev, "-ac", "1", "-ar", "16000",
+    "-f", "mulaw", "-y", path })
+  meetMac:start()
+end
+
+-- a finished meeting lives in its "<date time title>/" folder (helper/meeting.py archive)
+local function meetMd(id)
+  local pre = id:sub(1, 10) .. " " .. id:sub(12, 13) .. "-" .. id:sub(14, 15) .. "-" .. id:sub(16, 17) .. " "
+  for f in hs.fs.dir(MEET_DIR) do
+    if f:sub(1, #pre) == pre and hs.fs.attributes(MEET_DIR .. "/" .. f .. "/" .. id .. ".md") then return MEET_DIR .. "/" .. f .. "/" .. id .. ".md" end
+  end
+  return MEET_DIR .. "/" .. id .. ".md"
+end
+
+local function meetMenu()
+  local items = {}
+  if meet.state == "rec" and meetMac then
+    table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
+  elseif meet.state == "rec" then
+    table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
+    if meet.note then -- the board is away: process what arrived so far (whatever it sends later is ignored)
+      table.insert(items, { title = "Обробити те, що вже прийшло", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    end
+  else
+    for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
+      table.insert(items, { title = "● Почати мітинг на платі (" .. l[2] .. ")",
+        fn = function() meetCmd = { n = meetCmd.n + 1, act = "start", lang = l[1] } end })
+    end
+    local devs = {} -- "● only the Mac": every input device, UA / EN
+    for _, d in ipairs(hs.audiodevice.allInputDevices()) do
+      for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
+        table.insert(devs, { title = d:name() .. " · " .. l[2], fn = function() macRecStart(d:name(), l[1]) end })
+      end
+    end
+    table.insert(items, { title = "● Записати лише Маком", menu = devs })
+    local cur, bk = hs.settings.get("deck.meetBackup") or "", { { title = "вимкнено", checked = (hs.settings.get("deck.meetBackup") or "") == "",
+      fn = function() hs.settings.set("deck.meetBackup", "") end } }
+    for _, d in ipairs(hs.audiodevice.allInputDevices()) do
+      table.insert(bk, { title = d:name(), checked = cur == d:name(), fn = function() hs.settings.set("deck.meetBackup", d:name()) end })
+    end
+    table.insert(items, { title = "🛟 Запасний запис Маком під час плати: " .. (cur ~= "" and cur or "вимк."), menu = bk })
+  end
+  table.insert(items, { title = "-" })
+  for _, e in ipairs(meet.last) do
+    table.insert(items, { title = (e.at or "") .. "  " .. (e.title or ""),
+      fn = function() task("/usr/bin/open", { meetMd(e.id) }) end })
+  end
+  table.insert(items, { title = "Відкрити папку мітингів", fn = function() task("/usr/bin/open", { MEET_DIR }) end })
+  return items
+end
+-- screenshots go to the clipboard here (screencapture target = clipboard): mid-meeting, every new image on the
+-- clipboard is saved to <id>_clips/<unix>.png; meeting.py attaches them at their moment
+local meetClipSeen
+local function meetClips()
+  local cc = hs.pasteboard.changeCount()
+  if meet.state ~= "rec" or not meetId then meetClipSeen = cc; return end
+  if cc == meetClipSeen then return end
+  meetClipSeen = cc
+  for _, t in ipairs(hs.pasteboard.contentTypes() or {}) do
+    if t == "public.png" or t == "public.tiff" then
+      local img = hs.pasteboard.readImage()
+      if img then
+        hs.fs.mkdir(MEET_DIR .. "/" .. meetId .. "_clips")
+        img:saveToFile(MEET_DIR .. "/" .. meetId .. "_clips/" .. os.time() .. ".png")
+      end
+      return
+    end
+  end
+end
+local function meetBar()
+  meetClips()
+  -- the board went quiet mid-meeting: it keeps recording into its flash and sends it all when it's back
+  if meetMac then meet.lastPcm = os.time() end -- the Mac records itself: never "the board went away"
+  meet.note = meet.state == "rec" and meet.lastPcm and os.time() - meet.lastPcm > 90
+    and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
+  if not M.meetBar then return end
+  local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
+  M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
+    or (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "🎙…" or "🎙")
+end
+
+-- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
+local HM_PY = HOME .. "/code/esp-deck/helper/health_metrics.py"
+local function refreshHealth()
+  if not hs.fs.attributes(HOME .. "/.garminconnect") then return end
+  task(UV, { "run", "--quiet", "--with", "garminconnect", "python", HM_PY }, function(out)
+    local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
+    if not ok or type(d) ~= "table" or type(d.board) ~= "table" then return end
+    local alerts = {}
+    for i, a in ipairs(d.alerts or {}) do if i <= 3 then alerts[i] = { a[1], a[3] } end end
+    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
+               alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
+               move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
+               steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask, bb = d.board.bb,
+               stress = d.board.stress, stress_now = d.stress and d.stress.now, score = d.board.score, sleep_q = d.board.sleep,
+               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
+               load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
+                                   focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
+                                   zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
+  end)
+end
+
+local function notesState() -- for /state: no text, only how many are new and whose the newest is
+  local n = 0
+  for _, x in ipairs(notes) do if x.id > notesSeen then n = n + 1 end end
+  return notes[1] and { n = n, last = notes[1].id, app = notes[1].app } or nil
+end
+
+local function safe(fn, dflt) local ok, v = pcall(fn); if ok then return v end; return dflt end -- one bad source must not kill /state
 local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
   local fa = hs.application.frontmostApplication()
-  frontName = fa and fa:name() or ""
+  local fn = fa and fa:name()
+  frontName = type(fn) == "string" and fn or ""
+  local fw = fa and fa:focusedWindow()
+  flex.readMenus(fa)
   local todo = {}
   for i, t in ipairs(todoist.tasks or {}) do
     if i > 6 then break end
@@ -943,39 +1873,97 @@ local function state()
   for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
-    limits = limits, lim = limitGauges(), cpu = cpuPct(), ram = sysmonitor.ramPct(),
-    rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
-    recipes = recipes, slash = SLASH, voice = voice, fw = readFile(FW_SHA),
-    front = frontName, ring = strip((ringFor(frontName))), deckv = deckVer, board = M.boardVer,
+    limits = limits, lim = safe(limitGauges, {}), cpu = safe(cpuPct, 0), ram = sysmonitor.ramPct(),
+    net = netTrace.cfg(), rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
+    recipes = recipes, slash = K.SLASH, voice = voice, fw = readFile(K.FW_SHA), fw_sig = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.sig"), fw_notes = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.notes"),
+    front = frontName, ring = strip((ringFor(frontName))), flex = flex.state(frontName, fw and fw:title() or "", deckVer), deckv = deckVer, board = M.boardVer,
+    clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
+    notes = notesState(),
+    garmin = garmin,
+    health = health,
+    journal = journalTail,
+    meet = meetState(),
+    ports = ports,
   }
 end
 
 local enterTimers = {} -- id → the pending Enter of a /send (kept so it is not collected before it fires)
+function meet.typeInto(id, text, enter, onFail)
+  task(TMUX, { "send-keys", "-t", id, "-l", "--", text }, function(_, code)
+    if code ~= 0 and onFail then return onFail() end
+    -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
+    if enter then
+      enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
+    end
+  end)
+end
+-- a finished voice note: its words go where the board tagged them. A session lost after the 200 can't refuse any more
+function meet.route(text, x)
+  if text == "" then return end
+  if not x.target then return journalAdd(text, x.lang, x.past and x.t0 or nil) end
+  local function lost() -- owner 2026-11-03: a note for a gone session lands in the journal, the board counts it delivered
+    journalAdd(text, x.lang, x.past and x.t0 or nil)
+    hs.notify.new({ title = "Сесії " .. x.target .. " нема: нотатка в журналі", informativeText = text }):send()
+  end
+  if meet.gone(x.target) then return lost() end -- it may be a shell by now: words must not run there
+  meet.typeInto(x.target, text, true, lost)
+end
+function meet.gone(target) -- an empty list = not read yet (just reloaded): not proof of anything
+  if not sessionCache[1] then return false end
+  for _, w in ipairs(sessionCache) do if w.id == target and w.claude then return false end end
+  return true
+end
+-- the ETag ignores what moves on every poll (cpu tick delta, ram, clock, the seconds-old ages of sessions/asks) so an
+-- idle Mac gets a 304; the minute bucket forces a fresh 200 once a minute to refresh them (ADR-0005 trade-off)
+local MOVING = { cpu = true, ram = true, time = true }
+local function noAge(list)
+  local r = {}
+  for i, e in ipairs(list or {}) do
+    local c = {}
+    for k, v in pairs(e) do if k ~= "age" then c[k] = v end end
+    r[i] = c
+  end
+  return r
+end
+local function stateEtag(st)
+  local k = {}
+  for f, v in pairs(st) do if not MOVING[f] then k[f] = v end end
+  k.sessions, k.asks = noAge(st.sessions), noAge(st.asks)
+  local key = hs.json.encode(k) .. os.time() // 60
+  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
+  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
+  return string.format('"%016x"', h64)
+end
+M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
+M._parseSessions = parseSessions -- test hook (deck_meet_test.lua)
+
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
   local token = env.get("DECK_TOKEN")
-  if not token or headers["X-Deck-Token"] ~= token then return reply("forbidden", 403) end
+  if not token or headers["X-Deck-Token"] ~= token then return reply({ code = "auth.forbidden", message = "Wrong token" }, 403, true) end
 
   if headers["X-Deck-Ver"] then M.boardVer = headers["X-Deck-Ver"] end
   local route, qs = path:match("^([^?]*)%??(.*)$")
   local p = query(qs)
   local id = p.t and p.t:match("^@%d+$")
 
-  if method == "GET" and route == "/state" then return reply(state(), 200, true) end
+  if method == "GET" and route == "/state" then
+    local st = state()
+    local out, code, h = reply(st, 200, true)
+    h.ETag = stateEtag(st)
+    if headers["If-None-Match"] == h.ETag then return "", 304, h end
+    return out, code, h
+  end
+  if method == "GET" and route == "/netlog" then return reply({ log = netTrace.log }, 200, true) end
   if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
   if method == "POST" and route == "/send" and id then
-    task(TMUX, { "send-keys", "-t", id, "-l", "--", body or "" }, function()
-      -- an Enter right behind the text lands before Claude's input has it: "/compact" would go out as a message
-      if p.enter == "1" then
-        enterTimers[id] = hs.timer.doAfter(0.3, function() enterTimers[id] = nil; task(TMUX, { "send-keys", "-t", id, "Enter" }) end)
-      end
-    end)
+    meet.typeInto(id, body or "", p.enter == "1")
     return reply("ok", 200)
   end
   if method == "POST" and route == "/net" then
     local r = p.r or "day"
     if r ~= "day" and r ~= "month" and r ~= "year" then return reply("r=day|month|year", 400) end
-    local ok, top = pcall(hs.json.decode, readFile(NET_DIR .. "/net-" .. r .. ".json") or "[]")
+    local ok, top = pcall(hs.json.decode, readFile(K.NET_DIR .. "/net-" .. r .. ".json") or "[]")
     top = ok and type(top) == "table" and top or {}
     for _, d in ipairs(top) do d.name = safeClean(tostring(d.name), 40) end
     return reply({ r = r, top = top }, 200, true)
@@ -1011,12 +1999,42 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/projlist" then
     refreshProjects()
-    return reply({ proj = projects }, 200, true)
+    local live, new, seen = {}, {}, {}
+    for _, w in ipairs(sessions()) do
+      if w.claude then live[#live + 1] = { id = w.id, n = w.idx .. "  " .. w.name, st = w.state } end
+    end
+    for _, pr in ipairs(projects) do if not seen[pr.n] then new[#new + 1] = pr.n; seen[pr.n] = true end end
+    for _, n in ipairs(extraNames) do if not seen[n] then new[#new + 1] = n; seen[n] = true end end
+    return reply({ proj = projects, live = live, new = new }, 200, true)
   end
   if method == "POST" and route == "/deck" then
     local pages = {}
     for i, pg in ipairs(deckCfg.deck or {}) do pages[i] = { page = clean(pg.page or ("Page " .. i)), buttons = strip(pg.buttons) } end
     return reply({ pages = pages, v = deckVer }, 200, true)
+  end
+  if method == "POST" and route == "/prs" then return reply(fleetData.get("prs", 120, { "prs" }), 200, true) end
+  if method == "POST" and route == "/prname" and p.id then
+    fleetData.rename(p.id, safeClean(body or "", 70))
+    return reply(fleetData.get("prs", 120, { "prs" }), 200, true)
+  end
+  if method == "POST" and route == "/project" then
+    return reply(fleetData.get("project:" .. (p.s or ""), 60, { "project", p.s or "" }), 200, true)
+  end
+  if method == "POST" and route == "/grill" and id then
+    local w = fleetData.window(id)
+    if not w or (w.tr or "") == "" then return reply({ blocks = {} }, 200, true) end
+    return reply(fleetData.get("grill:" .. id, 20, { "grill", w.tr, w.idx }), 200, true)
+  end
+  if method == "POST" and route == "/askother" and id then
+    local ok = (body or "") ~= "" and fleetData.other(id, body)
+    return reply({ ok = ok }, 200, true)
+  end
+  if method == "POST" and route == "/flex" then
+    return reply(flex.reply(p.ctx or "", tonumber(p.g) or 0), 200, true)
+  end
+  if method == "POST" and route == "/flexfav" then
+    local ctx = p.ctx or ""
+    return reply(flex.reply(ctx, flex.toggleFav(ctx, tonumber(p.g) or 0, tonumber(p.f) or 0)), 200, true)
   end
   if method == "POST" and route == "/act" then
     local b
@@ -1025,6 +2043,9 @@ local function handle(method, path, headers, body)
       b = pg and (pg.buttons or {})[tonumber(p.i) or 0]
     elseif p.r then
       b = (ringFor(p.app or ""))[tonumber(p.r) or 0]
+    elseif p.f then
+      local g = flex.groups(p.ctx or "")[(tonumber(p.g) or 0) + 1]
+      b = g and g.buttons[tonumber(p.f) or 0]
     end
     if not b then return reply("no such button", 404) end
     local t = runAction(b.action, b.label)
@@ -1059,6 +2080,15 @@ local function handle(method, path, headers, body)
   if method == "POST" and route == "/open" then
     local h = hub[tonumber(p.i or "")]
     if h then task("/usr/bin/open", { HUB_URL .. h.path }) end
+    -- a PR nobody works on in a window; only this org's PR pages
+    if p.pr and p.pr:match("^https://github%.com/back2back%-team/[%w%-]+/pull/%d+$") then task("/usr/bin/open", { p.pr }) end
+    -- a Hacker News discussion from the board's Dash; only https links to news.ycombinator.com
+    if p.u and p.u:match("^https://news%.ycombinator%.com/item%?id=%d+$") then task("/usr/bin/open", { p.u }) end
+    -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
+    -- a meeting's summary (.md) in the default app; the id is ours (date_time), nothing else opens
+    if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { meetMd(p.meet) }) end
+    local hu = p.h and health and health.links and health.links[p.h]
+    if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
   end
   if method == "POST" and route == "/fleet" then
@@ -1073,16 +2103,52 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n)), 200, true) end
+  local jobId = p.t and p.t:match("^job:%w+$")
+  if method == "POST" and route == "/chat" and jobId then return reply(chat(jobId, tonumber(p.n), p.f == "1"), 200, true) end
+  if method == "POST" and route == "/chat" and id then return reply(chat(id, tonumber(p.n), p.f == "1" or p.job ~= nil, p.job), 200, true) end
   if method == "POST" and route == "/spawn" then
     refreshProjects()
-    local w = projWhere[p.p or ""]
+    local w = projWhere[p.p or ""] or extraWhere[p.p or ""]
     if not w then return reply("unknown project", 400) end
     if not (body or ""):match("%S") then return reply("empty task", 400) end -- voice that wasn't recognised
     local id = spawnClaude(w, body)
     if not id then return reply("tmux failed", 500) end
     refreshSessions()
     return reply({ t = id }, 200, true)
+  end
+  if method == "POST" and route == "/log" and p.from then -- an away batch: "<seq> <at> <text>" lines, shipped in order
+    local from, to = tonumber(p.from), tonumber(p.to)
+    if not (from and to) or to < from then return reply({ code = "log.bad_batch", message = "bad batch range" }, 422, true) end
+    local SEQ = HOME .. "/.local/share/esp-deck/boardlog.seq"
+    -- meet.logLast: lines written but not yet confirmed (the seq file failed), so a retry doesn't double them
+    local last = math.max(tonumber((readFile(SEQ) or ""):match("%d+")) or 0, meet.logLast or 0)
+    local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
+    if not f then return reply({ code = "log.write", message = "can't write the log" }, 507, true) end
+    local rows, okw = {}, true
+    for l in (body or ""):gmatch("[^\n]+") do -- validate every line before writing anything
+      local sq, at, text = l:match("^(%d+) (%d+) ?(.*)$")
+      local seq, stamp = tonumber(sq), tonumber(at)
+      if not seq or seq < from or seq > to or seq > meet.MAX or stamp > meet.MAX then -- os.date throws on a huge at
+        f:close()
+        return reply({ code = "log.bad_batch", message = "Line " .. (#rows + 1) .. " has no sequence number" }, 422, true)
+      end
+      rows[#rows + 1] = { seq, stamp, text }
+    end
+    for _, r in ipairs(rows) do
+      if r[1] > last then
+        okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and f:flush()
+        if not okw then break end
+        last = r[1]
+      end
+    end
+    okw = f:close() and okw
+    meet.logLast = last
+    hs.fs.mkdir(HOME .. "/.local/share/esp-deck")
+    -- the board frees what's confirmed: only what's really stored; a temp file, so a full disk can't wipe the seq
+    if not (okw and writeFile(SEQ .. ".tmp", tostring(last)) and os.rename(SEQ .. ".tmp", SEQ)) then
+      return reply({ code = "log.write", message = "can't write the log" }, 507, true)
+    end
+    return reply({ confirmed = last }, 200, true)
   end
   if method == "POST" and route == "/log" then
     local f = io.open(HOME .. "/Library/Logs/esp-deck.log", "a")
@@ -1092,9 +2158,169 @@ local function handle(method, path, headers, body)
     end
     return reply("ok", 200)
   end
+  -- 📷 on the board: RGB565 chunks, then /shot?w=&h=&t= → a PNG; its path typed into window t (no Enter)
+  if method == "POST" and route == "/shot/part" then
+    local f = io.open("/tmp/deck-shot.raw", p.seq == "0" and "wb" or "ab")
+    if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/shot" then -- saved, not typed: 📎 on the board pastes it where you want
+    hs.fs.mkdir(SHOT_DIR)
+    local png = SHOT_DIR .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
+    local w, h = tonumber(p.w) or 320, tonumber(p.h) or 480
+    task("/usr/bin/python3", { "-c", K.SHOT_PY, "/tmp/deck-shot.raw", tostring(w), tostring(h), png }, function()
+      if hs.fs.attributes(png) then lastShot = png end
+    end)
+    return reply("ok", 200)
+  end
+  -- 📎: the image on the Mac's clipboard (a copied screenshot) first, else the board's last 📷 → its path typed
+  -- into window t, no Enter (words with 🎤, then ✓)
+  if method == "POST" and route == "/shot/paste" and id then
+    local png = lastShot
+    local img = clipImage() and hs.pasteboard.readImage()
+    if img then
+      hs.fs.mkdir(SHOT_DIR)
+      png = SHOT_DIR .. "/clip-" .. os.date("%Y%m%d-%H%M%S") .. ".png"
+      if not img:saveToFile(png) then png = nil end
+      clipSeen = hs.pasteboard.changeCount() -- pasted: the same clipboard no longer offers 📎
+    end
+    lastShot = nil
+    if png then task(TMUX, { "send-keys", "-t", id, "-l", png .. " " }) end
+    return reply(png and "ok" or "nothing", png and 200 or 404)
+  end
+  -- the board retries each of these until a 200, maybe minutes later (it kept the audio while the Mac was away):
+  -- start / pcm at a byte offset / stop are all idempotent
+  -- 1029-20xxxx firmware wrote NVS from a PSRAM-stack task after a 200 here → int-wdt reboot loop; answering 503
+  -- to that one stuck meeting keeps its uploader retrying (no NVS write) so the fixed firmware can be flashed
+  if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id == "1793298707" then
+    return reply({ code = "meet.busy", message = "Busy, retry later" }, 503, true)
+  end
+  if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id and not meet.validBid(p.id) then
+    return reply({ code = "meet.damaged", message = "bad capture id" }, 422, true)
+  end
+  if method == "POST" and route == "/meet" and p.id then
+    local id, t = meetResolve(p.id, p.start == "1")
+    local path = MEET_DIR .. "/" .. id .. ".pcm"
+    if p.stop == "1" and not meet.validStop(p) then return reply({ code = "meet.damaged", message = "bad stop parameters" }, 422, true) end
+    if meetDone[id] then
+      local len, kept = tonumber(p.len), meet.len[id] -- no kept length: processed before T27, nothing to compare
+      if p.stop == "1" and len and kept and len ~= kept then -- processed with less (the 🎙 menu): the board keeps its audio
+        return reply({ code = "meet.partial", message = "Mac processed " .. kept .. " of " .. len .. " bytes" }, 422, true)
+      end
+      return meet.delivery(id)
+    end
+    if p.start == "1" then
+      local kind = (p.kind == "journal" or p.kind == "agent" or p.kind == "note") and "note" or "meet"
+      local past = p.past == "1" and meetId ~= id -- began live, finished after a link drop: still live (its backup counts)
+      local lang = p.lang == "en" and "en" or "uk"
+      local t0 = t > 1700000000 and t or os.time()
+      local target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil
+      if p.kind == "agent" and not target then return reply({ code = "meet.damaged", message = "bad agent target" }, 422, true) end
+      local pf = io.open(path, "ab"); if pf then pf:close() end
+      if not pf or not writeFile(MEET_DIR .. "/" .. id .. ".meta", hs.json.encode({ kind = kind, -- kind/past/lang survive a reload until the stop
+        target = target, past = past, lang = lang, t0 = t0 })) then
+        return meet.full()
+      end
+      if not past and kind == "meet" and meetId ~= id then -- a voice note is never a live meeting
+        meetId, meet.bid = id, p.id
+        meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, lang, t0, os.time()
+        backupStart(id)
+      end
+      return meet.delivery(id)
+    elseif p.stop == "1" then
+      local len = tonumber(p.len)
+      local have = fsize(path)
+      if len and len ~= have then
+        return reply({ code = "meet.length_mismatch", message = "Mac has " .. have .. " of " .. len .. " bytes", details = { have = have } }, 409, true)
+      end
+      local close
+      if body and body ~= "" then
+        local okc, cc = pcall(hs.json.decode, body)
+        if not okc or not meet.validClose(cc) then
+          return reply({ code = "meet.damaged", message = "damaged capture" }, 422, true)
+        end
+        close = MEET_DIR .. "/" .. id .. ".close.json"
+        if not writeFile(close, body) then return meet.full() end
+      end
+      local ok, meta = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "{}")
+      meta = ok and type(meta) == "table" and meta or {}
+      local x = { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target }
+      if not meetStop(id, 16000, "ulaw", len, x) then return meet.full() end
+      return meet.delivery(id)
+    end
+    return reply("ok", 200)
+  end
+  -- the older firmware (no id: start / pcm?seq= appended / stop): kept until every board runs the flash-log one
+  if method == "POST" and route == "/meet" and not p.id then
+    if p.start == "1" then
+      hs.fs.mkdir(MEET_DIR)
+      meetId = os.date("%Y-%m-%d_%H%M%S")
+      meet.state, meet.note, meet.lang, meet.t0, meet.lastPcm = "rec", nil, p.lang == "en" and "en" or "uk", os.time(), os.time()
+    elseif p.stop == "1" and meetId then meetStop(meetId, tonumber(p.rate) or 22050, "pcm") end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/meet/pcm" and not p.id then
+    if not meetId then -- Hammerspoon reloaded mid-meeting: the newest unprocessed .pcm is the one being recorded
+      local best, bt
+      for f in hs.fs.dir(MEET_DIR) do
+        local a = f:match("^(%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d)%.pcm$")
+        local m = a and not meetDone[a] and hs.fs.attributes(MEET_DIR .. "/" .. f, "modification")
+        if m and (not bt or m > bt) then best, bt = a, m end
+      end
+      if best then
+        meetId = best
+        meet.state, meet.lang, meet.t0 = "rec", meet.lang or "uk", os.time({ year = tonumber(best:sub(1, 4)),
+          month = tonumber(best:sub(6, 7)), day = tonumber(best:sub(9, 10)), hour = tonumber(best:sub(12, 13)),
+          min = tonumber(best:sub(14, 15)), sec = tonumber(best:sub(16, 17)) })
+      end
+    end
+    if meetId then
+      local f = io.open(MEET_DIR .. "/" .. meetId .. ".pcm", p.seq == "0" and "wb" or "ab")
+      if f then f:write(body or ""); f:close() end
+      meet.lastPcm = os.time()
+    end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/meet/pcm" and p.id and tonumber(p.off) then
+    local id = meetResolve(p.id)
+    if meetDone[id] then return meet.delivery(id) end -- processed: nothing to write, whatever arrives late
+    local path = MEET_DIR .. "/" .. id .. ".pcm"
+    local off, have = tonumber(p.off), fsize(path)
+    if off > have then
+      return reply({ code = "meet.offset_gap", message = "hole: Mac has " .. have .. " bytes", details = { have = have } }, 409, true)
+    end
+    local f = io.open(path, "r+b") or io.open(path, "wb")
+    local okw = f and f:seek("set", off) and f:write(body or "") and f:flush()
+    if f then f:close() end
+    if not okw then return meet.full() end
+    meet.lastPcm = os.time()
+    return meet.delivery(id)
+  end
+  if method == "POST" and route == "/mic/pcm" then
+    local f = io.open(PCM_FILE, p.seq == "0" and "wb" or "ab")
+    if f then f:write(body or ""); f:close() end
+    return reply("ok", 200)
+  end
+  -- the board's pull-down on the Dash: everything the minute timers would bring, now
+  -- the board's ✉ panel: the last 20 with their text; opening it marks them seen
+  if method == "POST" and route == "/notes" then
+    local now = os.time()
+    local list = {}
+    for i, x in ipairs(notes) do
+      list[i] = { app = x.app, title = x.title, subtitle = x.subtitle, body = x.body, ago = math.max(0, now - (x.at or now)) }
+    end
+    if notes[1] then notesSeen = notes[1].id end
+    return reply({ notes = list }, 200, true)
+  end
+  if method == "POST" and route == "/refresh" then
+    refreshJobs(); refreshSessions(); refreshSlow(); refreshGarmin(); refreshHealth()
+    return reply("ok", 200)
+  end
   if method == "POST" and route == "/mic" then
     if p.clear == "1" then voice = { state = "idle", text = "" }
+    elseif p.down == "1" and p.board == "1" then os.remove(PCM_FILE); voice = { state = "rec", text = "", journal = p.j == "1" }
     elseif p.down == "1" then micDown(p.lang)
+    elseif p.board == "1" then micBoardUp(tonumber(p.rate) or 22050, p.lang)
     else micUp() end
     return reply("ok", 200)
   end
@@ -1104,6 +2330,7 @@ end
 -- a slow request (>300 ms in the handler) or an HS main-thread stall (the 0.25 s tick late by >1 s: some module's
 -- sync hs.execute) goes to ~/Library/Logs/deck-slow.log — the board's "perf state 4153ms" lines name neither
 local SLOW_LOG = HOME .. "/Library/Logs/deck-slow.log"
+M._handle = handle -- test hook (deck_state_test.lua)
 local function slowLog(line)
   print("deck slow: " .. line)
   local f = io.open(SLOW_LOG, "a")
@@ -1114,10 +2341,16 @@ local function timed(method, path, headers, body)
   local a, b, c = handle(method, path, headers, body)
   local ms = (hs.timer.absoluteTime() - t0) / 1e6
   if ms > 300 then slowLog(string.format("%s %s %.0f ms", method, path:match("^[^?]*"), ms)) end
+  if headers["X-Deck-Ver"] then netTrace.add(method, path, body, a, b, ms) end -- the board's own, not the radar asking
   return a, b, c
 end
 
 function M.start()
+  refreshPorts()
+  M.portsTimer = hs.timer.doEvery(60, refreshPorts)
+  M.meetBar = hs.menubar.new():setMenu(meetMenu)
+  M.meetTimer = hs.timer.doEvery(1, meetBar)
+  meetBar()
   loadDeck()
   refreshHub() -- warm the cache once; later only when the board opens Hub
   M.deckWatcher = hs.pathwatcher.new(DECK_FILE, loadDeck):start()
@@ -1127,7 +2360,9 @@ function M.start()
   refreshProjects() -- warm: /spawn and /projlist answer from it
   refreshFleet()
   memoryState()
-  M.sessionTimer = hs.timer.doEvery(3, refreshSessions)
+  M.sessionTimer = hs.timer.doEvery(3, function() refreshSessions(); refreshNotes() end)
+  refreshGarmin(); refreshHealth()
+  M.garminTimer = hs.timer.doEvery(15 * 60, function() refreshGarmin(); refreshHealth() end)
   local last = hs.timer.absoluteTime()
   M.stallTimer = hs.timer.doEvery(0.25, function()
     local t = hs.timer.absoluteTime()
