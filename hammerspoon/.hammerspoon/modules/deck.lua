@@ -1106,9 +1106,11 @@ local function traceText(s, n)
   s = tostring(s or "")
   if not utf8.len(s) then return "<" .. #s .. " байт, не текст>" end
   if #s <= n then return s end
-  local cut = utf8.offset(s, 1, n) or n -- the letter that holds byte n starts here
+  local cut = n -- step back off continuation bytes: utf8.offset throws when started inside a letter
+  while cut > 1 and (s:byte(cut) or 0) & 0xC0 == 0x80 do cut = cut - 1 end
   return s:sub(1, cut - 1) .. "…"
 end
+M._traceText = traceText -- test hook
 function netTrace.add(method, path, body, res, code, ms)
   table.insert(netTrace.log, 1, { t = os.time(), m = method, p = path, c = code, ms = math.floor(ms), rq = traceText(body, 1500),
                                   rs = traceText(res, 3000), n = #tostring(res or "") })
