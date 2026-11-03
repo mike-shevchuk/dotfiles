@@ -203,8 +203,9 @@ claudes-link:
     set -e
     base="$HOME/zettelkasten/claude_code/claudes"
     if [ ! -d "$base" ]; then
-        echo "FAIL — $base does not exist (clone zettelkasten first)" >&2
-        exit 1
+        # optional: machines without the private zettelkasten (the Pi) just skip it, so `just setup` goes on
+        echo "SKIP — $base does not exist (clone zettelkasten to get the CLAUDE.md links)" >&2
+        exit 0
     fi
     found=0
     for dir in "$base"/*/; do
