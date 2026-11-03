@@ -140,26 +140,26 @@ lan action="":
     for m, label in labels.items():
         ip, name = seen.get(m, (None, ""))
         rows.append((label, ip, m, name, key(label)))
-    table = [("LABEL", "IP", "MAC", "ІМʼЯ", "ЗМІНА")]
+    table = [("LABEL", "ENV ($VAR)", "IP", "MAC", "ІМʼЯ", "ЗМІНА")]
     for label, ip, m, name, k in rows:
         if k is None:
-            table.append((label, ip, m, name, "в мережі" if m != "—" else "не відповів"))
+            table.append((label, "MAC_IP", ip, m, name, "в мережі" if m != "—" else "не відповів"))
             continue
         old = prev.get(k)
         if ip is None:
-            table.append((label, old or "—", m, name, "offline"))
+            table.append((label, k if old else "—", old or "—", m, name, "offline"))
             envs += [f"export {k}={old}"] if old else []
             continue
         envs.append(f"export {k}={ip}")
-        table.append((label, ip, m, name, "новий" if not old else "=" if old == ip else f"було {old}"))
+        table.append((label, k, ip, m, name, "новий" if not old else "=" if old == ip else f"було {old}"))
     for m, (ip, name) in sorted(seen.items(), key=lambda s: int(s[1][0].rsplit(".", 1)[1])):
         if m not in labels:
             unknown.append(f"{ip} {m} {name or '?'}")
-            table.append(("?", ip, m, name or "?", ""))
+            table.append(("?", "—", ip, m, name or "?", ""))
 
     open(f"{tmp}/env", "w").write("".join(e + "\n" for e in envs))
     open(f"{tmp}/unknown", "w").write("".join(u + "\n" for u in unknown))
-    w = [max(len(r[i]) for r in table) for i in range(5)]
+    w = [max(len(r[i]) for r in table) for i in range(len(table[0]))]
     for r in table:
         print("  ".join(c.ljust(n) for c, n in zip(r, w)).rstrip())
     PY
