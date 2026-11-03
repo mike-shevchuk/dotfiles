@@ -45,5 +45,8 @@ projctl/code/projctl/projctl.log
 .playwright-mcp/
 hammerspoon/.hammerspoon/pal/icons/
 
+# Claude fleet runtime state + work notes (employer internals, prod details) — public repo
+claude/.claude/fleet-board/
+claude/.claude/reminders/
 # just -g lan: label ↔ MAC of home devices (public repo)
 /.lan-devices
