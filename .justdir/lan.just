@@ -1,4 +1,4 @@
-# --- LAN — who is on the home network, by MAC (macOS) ------------------------
+# --- LAN — who is on the home network, by MAC (macOS + Linux) ----------------
 #
 # WHY — IPs float (DHCP, macOS private Wi-Fi MAC rotation), so anything that
 # needs "the Pi" or "the projector" reads LAN_<LABEL>_IP from the shell env,
@@ -15,6 +15,9 @@
 # (an offline one keeps its last IP) + `export MAC_IP=`. Separate from ~/dotfiles/.env,
 # which holds secrets and must not be sourced. MAC_IP also goes to manjaro:~/.mac_ip.env.
 # Off the home LAN only the Mac's IP is refreshed: a café's devices are not ours.
+# On Linux (the Pi): own IP via `ip`, neighbours via `ip neigh`; this machine is its own
+# label from .lan-devices (else `self`); MAC_IP stays in ~/.mac_ip.env (the Mac pushes it,
+# .zshrc sources it), no ssh.
 
 alias mac-ip := lan
 
@@ -31,6 +34,7 @@ lan action="":
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
     rc=0
+    os=$(uname)
 
     case "$action" in
         ""|scan) ;;
@@ -39,12 +43,20 @@ lan action="":
     esac
 
     scan() {
-        echo "[1/4] IP мака (en1, fallback en0)..." >&2
-        iface=en1; ip=$(ipconfig getifaddr en1 || true)
-        [ -n "$ip" ] || { iface=en0; ip=$(ipconfig getifaddr en0 || true); }
-        [ -n "$ip" ] || { echo "  FAIL — ні en1, ні en0 не мають IPv4" >&2; exit 1; }
-        mac=$(ifconfig "$iface" | awk '/ether/{print $2}')
-        gw=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}')
+        if [ "$os" = Darwin ]; then
+            echo "[1/4] IP мака (en1, fallback en0)..." >&2
+            iface=en1; ip=$(ipconfig getifaddr en1 || true)
+            [ -n "$ip" ] || { iface=en0; ip=$(ipconfig getifaddr en0 || true); }
+            [ -n "$ip" ] || { echo "  FAIL — ні en1, ні en0 не мають IPv4" >&2; exit 1; }
+            mac=$(ifconfig "$iface" | awk '/ether/{print $2}')
+            gw=$(route -n get default 2>/dev/null | awk '/gateway:/{print $2}')
+        else
+            echo "[1/4] свій IP (ip route default)..." >&2
+            read -r gw iface ip < <(ip -4 route show default | awk '{for (i = 1; i < NF; i++) {if ($i == "via") g = $(i+1); if ($i == "dev") d = $(i+1); if ($i == "src") s = $(i+1)}; print g, d, s; exit}')
+            [ -n "${ip:-}" ] || ip=$(ip -4 -o addr show "${iface:-}" 2>/dev/null | awk '{sub(/\/.*/, "", $4); print $4; exit}')
+            [ -n "${ip:-}" ] || { echo "  FAIL — немає default route з IPv4" >&2; exit 1; }
+            mac=$(cat "/sys/class/net/$iface/address")
+        fi
         echo "  OK ($ip · $iface · $mac · шлюз ${gw:-?})" >&2
 
         if [ "$gw" = 192.168.50.1 ]; then
@@ -53,9 +65,14 @@ lan action="":
             # a sleeping iPhone ignores ping and ARP, but a UDP packet to its mDNS port wakes its Wi-Fi for a moment
             for i in $(seq 1 254); do (echo -n x > "/dev/udp/$net.$i/5353") >/dev/null 2>&1 & done
             wait
-            for i in $(seq 1 254); do ping -c1 -t1 -q "$net.$i" >/dev/null 2>&1 & done
+            [ "$os" = Darwin ] && wait1=(-t1) || wait1=(-W1)
+            for i in $(seq 1 254); do ping -c1 "${wait1[@]}" -q "$net.$i" >/dev/null 2>&1 & done
             wait
-            arp -an -i "$iface" > "$tmp/arp"
+            if [ "$os" = Darwin ]; then
+                arp -an -i "$iface" > "$tmp/arp"
+            else # same shape as macOS arp, so one parser reads both
+                ip neigh show dev "$iface" | awk '/lladdr/{print "? (" $1 ") at " $3 " on"}' > "$tmp/arp"
+            fi
             echo "  OK ($(grep -c ' at [0-9a-f]*:' "$tmp/arp") у ARP)" >&2
         else
             echo "[2/4] шлюз не 192.168.50.1 — не вдома, sweep пропущено" >&2
@@ -65,7 +82,7 @@ lan action="":
         echo "[3/4] імена (DNS роутера, mDNS) і мітки..." >&2
         touch "$lan_env" "$devices"
         python3 - "$tmp" "$ip" "$mac" "$devices" "$lan_env" <<'PY'
-    import re, subprocess, sys
+    import platform, re, shutil, subprocess, sys
     tmp, own_ip, own_mac, devices, lan_env = sys.argv[1:]
     GW = "192.168.50.1"
     # DHCP name "espressif" catches most boards; a few common Espressif OUIs for the ones that hide it
@@ -76,6 +93,8 @@ lan action="":
     def key(label): return "LAN_" + label.upper().replace("-", "_") + "_IP"
 
     def dig(ip, *server):
+        if not shutil.which("dig"):  # the Pi has no dig: no names, labels still work by MAC
+            return ""
         out = subprocess.run(["dig", "+short", "+time=1", "+tries=1", "-x", ip, *server],
                              capture_output=True, text=True).stdout.splitlines()
         return out[0].rstrip(".") if out and not out[0].startswith(";") else ""
@@ -107,7 +126,8 @@ lan action="":
             open(devices, "a").write(f"{auto} {m}\n")
             print(f"  нова мітка: {auto} = {m} ({name or 'OUI Espressif'})", file=sys.stderr)
 
-    rows, envs, unknown = [("mac", own_ip, own_mac, "mac", key("mac"))], [], []
+    me = "mac" if platform.system() == "Darwin" else labels.pop(own_mac, "self")
+    rows, envs, unknown = [(me, own_ip, own_mac, "цей комп'ютер", key(me))], [], []
     for m, label in labels.items():
         ip, name = seen.get(m, (None, ""))
         rows.append((label, ip, m, name, key(label)))
@@ -133,6 +153,12 @@ lan action="":
     PY
         [ $? -eq 0 ] || { echo "  FAIL — розбір скану" >&2; exit 1; }
 
+        if [ "$os" != Darwin ]; then
+            echo "[4/4] запис: $lan_env (MAC_IP — у ~/.mac_ip.env, його пише Mac, zsh читає напряму)..." >&2
+            cp "$tmp/env" "$lan_env"
+            echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
+            return
+        fi
         echo "[4/4] запис: $lan_env + Pi ~/.mac_ip.env..." >&2
         { echo "export MAC_IP=$ip"; cat "$tmp/env"; } > "$tmp/lan.env" && mv "$tmp/lan.env" "$lan_env"
         echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
