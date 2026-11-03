@@ -48,9 +48,14 @@ tmux:
         echo "  installing opensessions..."
         git clone "https://github.com/Ataraxy-Labs/opensessions.git" "$os_dir"
     fi
-    if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
-        BUN="${HOME}/.bun/bin/bun"
-        (cd "$os_dir" && "$BUN" install --frozen-lockfile 2>/dev/null || "$BUN" install 2>/dev/null) >/dev/null
+    # bun from PATH (mise, pacman…) first; ~/.bun is only the curl installer's spot
+    BUN=$(command -v bun || { [ -x "$HOME/.bun/bin/bun" ] && echo "$HOME/.bun/bin/bun"; } || true)
+    if [ -n "$BUN" ]; then
+        echo "  opensessions deps: (cd $os_dir && $BUN install)" >&2
+        (cd "$os_dir" && { "$BUN" install --frozen-lockfile >/dev/null || "$BUN" install >/dev/null; }) \
+            || echo "  WARN: bun install failed (opensessions sidebar may not work)" >&2
+    else
+        echo "  WARN: no bun — skipped opensessions deps" >&2
     fi
     chmod +x "$os_dir"/integrations/tmux-plugin/scripts/*.sh 2>/dev/null || true
     # Apply local patches
