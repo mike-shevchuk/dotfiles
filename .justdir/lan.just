@@ -13,11 +13,12 @@
 # The Mac itself is always `mac`, by its IP — its MAC rotates, so it is not listed.
 # ~/.lan.env is rewritten whole on every run: `export LAN_<LABEL>_IP=` per named device
 # (an offline one keeps its last IP) + `export MAC_IP=`. Separate from ~/dotfiles/.env,
-# which holds secrets and must not be sourced. MAC_IP also goes to manjaro:~/.mac_ip.env.
+# which holds secrets and must not be sourced. MAC_IP + labels also go to the Pi's shared
+# /opt/toolchains/lan (group toolchains: every Pi user reads and names there, no sudo).
 # Off the home LAN only the Mac's IP is refreshed: a café's devices are not ours.
 # On Linux (the Pi): own IP via `ip`, neighbours via `ip neigh`; this machine is its own
-# label from .lan-devices (else `self`); MAC_IP stays in ~/.mac_ip.env (the Mac pushes it,
-# .zshrc sources it), no ssh.
+# label (else `self`); labels = /opt/toolchains/lan/devices, MAC_IP = /opt/toolchains/lan/mac_ip.env
+# (the Mac pushes both, .zshrc sources it), no ssh.
 
 alias mac-ip := lan
 
@@ -30,6 +31,15 @@ lan action="":
     export PATH="$PATH:/usr/sbin:/sbin" # route, arp, ping, ifconfig
     action="{{ action }}"
     devices=~/dotfiles/.lan-devices
+    shared=/opt/toolchains/lan # the Pi: one copy for every user (setgid group toolchains)
+    if [ "$(uname)" != Darwin ] && [ -w "${shared%/*}" ]; then
+        umask 002; mkdir -p "$shared"; touch "$shared/devices"
+        if [ -s "$devices" ]; then # fold labels made before the shared copy existed into it
+            cat "$shared/devices" "$devices" | awk '!s[$2]++' > "$shared/devices.new" && mv "$shared/devices.new" "$shared/devices"
+        fi
+        devices=$shared/devices
+    fi
+    export LAN_MAC_IP_FILE=$shared/mac_ip.env
     lan_env=~/.lan.env
     tmp=$(mktemp -d)
     trap 'rm -rf "$tmp"' EXIT
@@ -130,12 +140,12 @@ lan action="":
     rows, envs, unknown = [(me, own_ip, own_mac, "цей комп'ютер", key(me))], [], []
     if me != "mac":  # the Mac's MAC rotates, so the Pi finds it by the IP the Mac pushed (MAC_IP lives there, not in .lan.env)
         try:
-            mac_ip = open(os.path.expanduser("~/.mac_ip.env")).read().strip().removeprefix("MAC_IP=")
+            mac_ip = open(os.environ["LAN_MAC_IP_FILE"]).read().strip().removeprefix("MAC_IP=")
         except OSError:
             mac_ip = ""
         if mac_ip:
             hit = next((m for m, (ip, _) in seen.items() if ip == mac_ip), None)
-            rows.append(("mac", mac_ip, hit or "—", "з ~/.mac_ip.env", None))
+            rows.append(("mac", mac_ip, hit or "—", "від Mac", None))
             seen.pop(hit, None)
     for m, label in labels.items():
         ip, name = seen.get(m, (None, ""))
@@ -166,17 +176,18 @@ lan action="":
         [ $? -eq 0 ] || { echo "  FAIL — розбір скану" >&2; exit 1; }
 
         if [ "$os" != Darwin ]; then
-            echo "[4/4] запис: $lan_env (MAC_IP — у ~/.mac_ip.env, його пише Mac, zsh читає напряму)..." >&2
+            echo "[4/4] запис: $lan_env (MAC_IP — у $LAN_MAC_IP_FILE, його пише Mac, zsh читає напряму)..." >&2
             cp "$tmp/env" "$lan_env"
             echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
             return
         fi
-        echo "[4/4] запис: $lan_env + Pi ~/.mac_ip.env..." >&2
+        echo "[4/4] запис: $lan_env + Pi $shared (MAC_IP і мітки для всіх користувачів)..." >&2
         { echo "export MAC_IP=$ip"; cat "$tmp/env"; } > "$tmp/lan.env" && mv "$tmp/lan.env" "$lan_env"
         echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
-        cmd="printf 'MAC_IP=%s\n' $ip > ~/.mac_ip.env && cat ~/.mac_ip.env"
-        echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro \"$cmd\"" >&2
-        if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro "$cmd"); then
+        # labels merge by MAC: the Mac's line wins, one named on the Pi stays
+        cmd="umask 002 && d=$shared && mkdir -p \$d && printf 'MAC_IP=%s\n' $ip > \$d/mac_ip.env && touch \$d/devices && cat - \$d/devices | awk '!s[\$2]++' > \$d/devices.new && mv \$d/devices.new \$d/devices && cat \$d/mac_ip.env"
+        echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro \"$cmd\" < $devices" >&2
+        if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro "$cmd" < "$devices"); then
             echo "  OK ($out)" >&2
         else
             echo "  FAIL — Pi недоступний; $lan_env оновлено" >&2; rc=1

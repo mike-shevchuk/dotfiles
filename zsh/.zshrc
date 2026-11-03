@@ -1024,5 +1024,6 @@ fi
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
 
 [[ -r ~/.lan.env ]] && source ~/.lan.env
-# the Pi: the Mac's current IP, pushed by `just -g lan` on the Mac on every run
-[[ ! -r ~/.mac_ip.env ]] || { source ~/.mac_ip.env && export MAC_IP; }
+# the Pi: the Mac's current IP, pushed by `just -g lan` on the Mac to a dir every user reads
+for f in ~/.mac_ip.env /opt/toolchains/lan/mac_ip.env; do [[ ! -r $f ]] || source $f; done; unset f
+[[ -z ${MAC_IP:-} ]] || export MAC_IP
