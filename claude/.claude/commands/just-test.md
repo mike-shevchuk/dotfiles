@@ -384,3 +384,9 @@ just --justfile justfile.v2 notify-fallback-smoke <notify_org_id> <valid_categor
 4. `notify-resolve-emergency`
 
 Verify alert state via Admin API GET endpoints between steps.
+
+## Language + layout (Mike 2026-10-01 — mandatory)
+- **English only** in the PR comment — no Ukrainian anywhere, including copied try/recipe output («Маєш побачити», «Що перевіряємо», verdicts).
+  The try is Ukrainian for Mike; the comment is not: translate or drop those lines. Check before posting: `grep -P '[\x{0400}-\x{04FF}]'` must find nothing.
+- **Split into sections** so it reads top-down: a short summary table first (step · what · result ✅/❌), then ONE collapsible
+  `<details><summary>Step N — title · ✅</summary>` per step holding the commands and raw output. Never one long unbroken log.

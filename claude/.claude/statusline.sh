@@ -122,6 +122,8 @@ model_name=$(echo "$input" | jq -r '.model.display_name // "Claude"')
 # Context window
 size=$(echo "$input" | jq -r '.context_window.context_window_size // 200000')
 [ "$size" -eq 0 ] 2>/dev/null && size=200000
+# the deck's ctx % needs the real window size (1m or 200k); the transcript doesn't say
+[ -n "${TMUX_PANE:-}" ] && tmux set -w -t "$TMUX_PANE" @agent_ctx_max "$size" 2>/dev/null
 
 # Token usage
 input_tokens=$(echo "$input" | jq -r '.context_window.current_usage.input_tokens // 0')
@@ -386,8 +388,16 @@ if $needs_pr_refresh && [ -n "$cwd" ]; then
       fi
     fi
     echo "${pr_number}|${pr_state}|${pr_isdraft}|${pr_mirror}|${pr_bugbot}|${pr_bugsha}|${pr_bugurl}|${pr_nwo}|${pr_mergeable}" > "$pr_cache_file"
+    # GitHub computes mergeability lazily: UNKNOWN on an OPEN PR → backdate the cache so the next render (~10s) asks again (no sleep in a render).
+    if [ "$pr_state" = OPEN ] && { [ "$pr_mergeable" = UNKNOWN ] || [ -z "$pr_mergeable" ]; }; then
+      touch -t "$(date -v-$((pr_cache_max_age - 10))S +%Y%m%d%H%M.%S 2>/dev/null)" "$pr_cache_file" 2>/dev/null || true
+    fi
   fi
 fi
+# Merged/closed PR: show nothing and blank the cache (the next lookup is the 120s TTL away).
+case "$pr_state" in
+  MERGED|CLOSED) pr_number=""; pr_state=""; : > "$pr_cache_file" ;;
+esac
 if [ -n "$pr_number" ] && [ "$pr_number" != "null" ]; then
   line2+="${sep}"
   # PR# and (+mirror) are OSC 8 hyperlinks to their GitHub PRs when owner/repo is
@@ -570,8 +580,11 @@ fi
 # Skipped in GSD mode (_gsd_mode=1) — the 🛠 GSD slot above takes the slot instead.
 if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
   # Durable state (survives reboot); /tmp is the legacy mirror.
-  _pl_file="$HOME/.claude/pipeline-state/pipeline-${local_branch//\//-}.json"
-  [ -f "$_pl_file" ] || _pl_file="/tmp/claude/pipeline-${local_branch//\//-}.json"
+  # Same key as pipeline-stamp.sh state_file: rescue-serverless = branch, other repos = "<repo>--<branch>"
+  _pl_repo=$(basename "$(dirname "$(git -C "${cwd}" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)")")
+  _pl_key="${local_branch//\//-}"; case "$_pl_repo" in ""|.|rescue-serverless) ;; *) _pl_key="${_pl_repo}--${_pl_key}" ;; esac
+  _pl_file="$HOME/.claude/pipeline-state/pipeline-${_pl_key}.json"
+  [ -f "$_pl_file" ] || _pl_file="/tmp/claude/pipeline-${_pl_key}.json"
   if [ -f "$_pl_file" ]; then
     # One line per badge step: "<done 1/0> <anchor-sha or ->"
     _pl_steps=$(jq -r '

@@ -1023,3 +1023,4 @@ fi
 # PATH entry on the Orange Pi, which shares this file via stow)
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
 
+[[ -r ~/.lan.env ]] && source ~/.lan.env
