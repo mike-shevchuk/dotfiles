@@ -82,7 +82,7 @@ lan action="":
         echo "[3/4] імена (DNS роутера, mDNS) і мітки..." >&2
         touch "$lan_env" "$devices"
         python3 - "$tmp" "$ip" "$mac" "$devices" "$lan_env" <<'PY'
-    import platform, re, shutil, subprocess, sys
+    import os, platform, re, shutil, subprocess, sys
     tmp, own_ip, own_mac, devices, lan_env = sys.argv[1:]
     GW = "192.168.50.1"
     # DHCP name "espressif" catches most boards; a few common Espressif OUIs for the ones that hide it
@@ -128,11 +128,23 @@ lan action="":
 
     me = "mac" if platform.system() == "Darwin" else labels.pop(own_mac, "self")
     rows, envs, unknown = [(me, own_ip, own_mac, "цей комп'ютер", key(me))], [], []
+    if me != "mac":  # the Mac's MAC rotates, so the Pi finds it by the IP the Mac pushed (MAC_IP lives there, not in .lan.env)
+        try:
+            mac_ip = open(os.path.expanduser("~/.mac_ip.env")).read().strip().removeprefix("MAC_IP=")
+        except OSError:
+            mac_ip = ""
+        if mac_ip:
+            hit = next((m for m, (ip, _) in seen.items() if ip == mac_ip), None)
+            rows.append(("mac", mac_ip, hit or "—", "з ~/.mac_ip.env", None))
+            seen.pop(hit, None)
     for m, label in labels.items():
         ip, name = seen.get(m, (None, ""))
         rows.append((label, ip, m, name, key(label)))
     table = [("LABEL", "IP", "MAC", "ІМʼЯ", "ЗМІНА")]
     for label, ip, m, name, k in rows:
+        if k is None:
+            table.append((label, ip, m, name, "в мережі" if m != "—" else "не відповів"))
+            continue
         old = prev.get(k)
         if ip is None:
             table.append((label, old or "—", m, name, "offline"))
