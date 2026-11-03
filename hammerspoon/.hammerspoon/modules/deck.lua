@@ -1899,7 +1899,10 @@ end
 function meet.route(text, x)
   if text == "" then return end
   if not x.target then return journalAdd(text, x.lang, x.past and x.t0 or nil) end
-  local function lost() hs.notify.new({ title = "Нотатку не доставлено: " .. x.target, informativeText = text }):send() end
+  local function lost() -- owner 2026-11-03: a note for a gone session lands in the journal, the board counts it delivered
+    journalAdd(text, x.lang, x.past and x.t0 or nil)
+    hs.notify.new({ title = "Сесії " .. x.target .. " нема: нотатка в журналі", informativeText = text }):send()
+  end
   if meet.gone(x.target) then return lost() end -- it may be a shell by now: words must not run there
   meet.typeInto(x.target, text, true, lost)
 end
@@ -1908,7 +1911,6 @@ function meet.gone(target) -- an empty list = not read yet (just reloaded): not 
   for _, w in ipairs(sessionCache) do if w.id == target and w.claude then return false end end
   return true
 end
-function meet.sessionGone() return reply({ code = "meet.session_gone", message = "Agent session is gone" }, 422, true) end
 -- the ETag ignores what moves on every poll (cpu tick delta, ram, clock, the seconds-old ages of sessions/asks) so an
 -- idle Mac gets a 304; the minute bucket forces a fresh 200 once a minute to refresh them (ADR-0005 trade-off)
 local MOVING = { cpu = true, ram = true, time = true }
@@ -2212,7 +2214,6 @@ local function handle(method, path, headers, body)
       local t0 = t > 1700000000 and t or os.time()
       local target = p.kind == "agent" and (p.target or ""):match("^@%d+$") or nil
       if p.kind == "agent" and not target then return reply({ code = "meet.damaged", message = "bad agent target" }, 422, true) end
-      if target and meet.gone(target) then return meet.sessionGone() end
       local pf = io.open(path, "ab"); if pf then pf:close() end
       if not pf or not writeFile(MEET_DIR .. "/" .. id .. ".meta", hs.json.encode({ kind = kind, -- kind/past/lang survive a reload until the stop
         target = target, past = past, lang = lang, t0 = t0 })) then
@@ -2241,7 +2242,6 @@ local function handle(method, path, headers, body)
       end
       local ok, meta = pcall(hs.json.decode, readFile(MEET_DIR .. "/" .. id .. ".meta") or "{}")
       meta = ok and type(meta) == "table" and meta or {}
-      if meta.target and meet.gone(meta.target) then return meet.sessionGone() end
       local x = { past = meta.past, kind = meta.kind, t0 = meta.t0 or t, lang = meta.lang, close = close, target = meta.target }
       if not meetStop(id, 16000, "ulaw", len, x) then return meet.full() end
       return meet.delivery(id)
