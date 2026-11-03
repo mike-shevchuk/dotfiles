@@ -13,7 +13,7 @@
 # The Mac itself is always `mac`, by its IP — its MAC rotates, so it is not listed.
 # ~/.lan.env is rewritten whole on every run: `export LAN_<LABEL>_IP=` per named device
 # (an offline one keeps its last IP) + `export MAC_IP=`. Separate from ~/dotfiles/.env,
-# which holds secrets and must not be sourced. MAC_IP also goes to manjaro:~/.mac_ip.env.
+# which holds secrets and must not be sourced. MAC_IP + .lan-devices also go to the Pi (syslord and gamer).
 # Off the home LAN only the Mac's IP is refreshed: a café's devices are not ours.
 # On Linux (the Pi): own IP via `ip`, neighbours via `ip neigh`; this machine is its own
 # label from .lan-devices (else `self`); MAC_IP stays in ~/.mac_ip.env (the Mac pushes it,
@@ -171,16 +171,19 @@ lan action="":
             echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
             return
         fi
-        echo "[4/4] запис: $lan_env + Pi ~/.mac_ip.env..." >&2
+        echo "[4/4] запис: $lan_env + Pi (~/.mac_ip.env і мітки .lan-devices для кожного користувача)..." >&2
         { echo "export MAC_IP=$ip"; cat "$tmp/env"; } > "$tmp/lan.env" && mv "$tmp/lan.env" "$lan_env"
         echo "  OK ($(wc -l < "$lan_env" | tr -d ' ') рядків)" >&2
-        cmd="printf 'MAC_IP=%s\n' $ip > ~/.mac_ip.env && cat ~/.mac_ip.env"
-        echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro \"$cmd\"" >&2
-        if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 manjaro "$cmd"); then
-            echo "  OK ($out)" >&2
-        else
-            echo "  FAIL — Pi недоступний; $lan_env оновлено" >&2; rc=1
-        fi
+        # every Pi user that reads MAC_IP; labels merge by MAC — the Mac's line wins, a label made on the Pi stays
+        cmd="printf 'MAC_IP=%s\n' $ip > ~/.mac_ip.env && f=~/dotfiles/.lan-devices && touch \$f && cat - \$f | awk '!s[\$2]++' > \$f.new && mv \$f.new \$f && cat ~/.mac_ip.env"
+        for to in manjaro gamer@manjaro; do
+            echo "━━━ ssh ━━━  ssh -o BatchMode=yes -o ConnectTimeout=5 $to \"$cmd\" < $devices" >&2
+            if out=$(ssh -o BatchMode=yes -o ConnectTimeout=5 "$to" "$cmd" < "$devices"); then
+                echo "  OK $to ($out)" >&2
+            else
+                echo "  FAIL $to — недоступний або немає ключа; $lan_env оновлено" >&2; rc=1
+            fi
+        done
     }
 
     name_device() {
