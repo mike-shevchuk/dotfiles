@@ -508,6 +508,7 @@ local function micBoardUp(rate, lang)
   local f = io.open(PCM_FILE, "rb")
   local pcm = f and f:read("a") or ""
   if f then f:close() end
+  os.remove(PCM_FILE) -- a take is heard once: a lost /mic?down=1 must not replay the previous take (sent 5 times on 3.11)
   if #pcm < rate then voice = { state = "done", text = "", journal = voice.journal }; return end -- under ½ s: nothing said
   local w = io.open(WAV_FILE, "wb")
   w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
