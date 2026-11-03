@@ -1792,3 +1792,8 @@ fleet w="" plain="":
       FLEET_ONCE=1 FLEET_W="$W" ~/.claude/fleet-board/fleet-live.sh
     fi
     echo "  OK" >&2
+
+# after a reboot: reopen the Claude sessions that were alive, one tmux window each (gum picks; hours=6, --all also b2b, --yes no picker, --dry only list)
+claude-restore *args="":
+    @echo "━━━ python ━━━  python3 ~/.claude/scripts/restore-sessions.py {{args}}" >&2
+    python3 ~/.claude/scripts/restore-sessions.py {{args}}
