@@ -21,18 +21,52 @@ output below also covers the rest of the 12-step pipeline.
 `/tmp` file that has no durable copy yet). "Commits ago" counts the branch's **own** commits
 (`--first-parent --no-merges`), so merging main does not make a check stale.
 
+**HARD RULE — every open PR is on the latest main (Mike 2026-10-20: «я хочу щоб всі мали останній main»).**
+`behind` must be **0** for every open, non-paused PR in rescue-serverless and workflow-engine. No threshold, no "GitHub says CLEAN".
+- no-arg mode: `behind > 0` → the merge-readiness line is ❌ «не на останньому main» and the FIRST "What's left" bullet is
+  `jb2b pull-main` in the PR worktree, then `git push origin HEAD:<pr-branch>` (merge, never rebase).
+- `all` mode: print a block «🌿 не на останньому main» BEFORE the table: one line per PR with `behind > 0` → owner window + fix.
+  A PR with no live owner window: the lead merges `origin/main` into its worktree (clean tree, no local-only commits), checks
+  ruff on the changed .py files, pushes; conflicts are reported, never force-resolved. Paused PRs (state.json) are listed, not touched.
+- Merging main adds only a merge commit: CR/SMP/JT/DEMO stamps stay valid (they count own non-merge commits).
+
 ## Argument modes
 
 - **no args** → full reconstruction + print + statusline refresh (the default). Works on a
   branch **without a PR** too: print `PR —`, skip the GitHub-only checks, still show git
   activity, stamps and heuristics. Never error out for "no PR".
-- **`all`** → the fleet view: run `~/.claude/pipeline-stamp.sh fleet` and print its table
-  verbatim (one row per open PR of mine in rescue-serverless **and** workflow-engine, plus
-  local-only worktree branches touched in the last 3 days: PR#, Linear id, CR/SMP/JT/FE with
-  commits-ago, behind main, CI, DEMO preflight/Mike, mergeable, `deploy` label, in a train,
-  local commits not on origin). Then 3–5 bullets: which rows need action first — a row whose DEMO
-  column says `✓/✓ merge` (Mike approved, still open) goes first with its exact
-  `gh pr merge <N> -R back2back-team/rescue-serverless --merge --delete-branch=false`. Read-only.
+- **`all`** → the verdict table (Mike 2026-10-20 «в табличці для кращої читабельності»): run
+  `~/.claude/pipeline-stamp.sh gates` and print its box table **verbatim** in a code block (one row per open PR of mine in
+  rescue-serverless + workflow-engine; Bugbot mirrors are skipped; paused PRs from the two newest `w*/state.json` go to the
+  ⏸ line). Under the table it ALSO prints (Mike 2026-10-21) three blocks: ✅ ЗРОБЛЕНО (my PRs merged since Monday, both
+  repos, mirrors skipped) · 🗓 ПЛАНУЄТЬСЯ / В РОБОТІ (newest board's `tracks.tsv`, last row per track not done, ⛔ = block;
+  plus branches without PR) · ⏸ НА ПАУЗІ (paused PRs + `state.json` `paused_branches` prefixes). Print them verbatim too —
+  so the lead must keep `tracks.tsv` true (close a track with `track.sh … done 100` when it ends). Then at most 3 lines: which row to act on first. Never re-gather per PR, never add columns by hand — a missing
+  fact belongs in `scripts/pr-gates.py`. Read-only.
+- **`all wide`** → the old 14-column table: `~/.claude/pipeline-stamp.sh fleet` (debugging only).
+
+**VERDICT RULES (Mike 2026-10-20, enforced by `scripts/pr-gates.py`):**
+1. Exactly one verdict per PR: ✅ МЕРДЖ (+ exact `gh pr merge` command) · 🙋 ТИ (only Mike's try/approval is missing, or an
+   engine PR waiting for the rescue PR of the same ticket) · 🔴 СТОП (the FIRST failing gate + one action) · ⏸ пауза.
+2. Eleven gates in this fixed order; ✅ only when all pass:
+   `0 PLAN` Mike was GRILLED on the plan (`/pr-state grill`, 2026-10-22) and approved it BEFORE implementation (Mike 2026-10-21; `~/.claude/fleet-board/plan-approvals.tsv`,
+   written only by `~/.claude/fleet-board/bin/plan-approve.sh PUN-x <plan-path>` after Mike says «план так»; PRs opened
+   before the rule — rescue ≤ #2379, engine ≤ WE#77 — show ·) · `1 CI` no ✗/⏳ · `2 MRG` MERGEABLE · `3 MAIN` behind 0 · `4 CR` ✓ with 0 own commits after · `5 SMP` same ·
+   `6 🐛` 0 unresolved Bugbot threads on the mirror (`<branch>-review`) · `7 TRY` try in preflight-map · `8 PRE` agent preflight ✓ ·
+   `9 JT` JT comment/stamp fresh · `10 MIKE` Mike's DEMO approval ✓. Gates 7–10 are rescue-serverless only (· in engine rows).
+3. A gate that cannot be checked is ✗. Never call a PR «закритий/готовий» unless its row is ✅.
+4. no-arg mode starts with this PR's row: `~/.claude/pipeline-stamp.sh gates only=<PR>`, then the detail sections below.
+- **`grill [PUN-x]`** (Mike 2026-10-22: «добавити grill-me, щоб ти запитував мене відносно плану — бачу різнобіжжя») → before «план так»
+  the lead DRILLS Mike on the plan. Read the plan (`~/.claude/fleet-board/plan-approvals.tsv` / `lead.py plan_doc`) + the Linear ticket + the code it touches,
+  then ask 5–8 questions, each a 5-part block (що · факт з file:line/URL · чому важливо · варіанти A/B/C · рекомендація + відповідь одним рядком). Cover:
+  1. **Parity** — does the new path behave exactly like the existing one Mike will compare it to (chat, push/SMS/email, workflows, 911, fan-out, map, AI report…)? Name each.
+  2. **What the user sees end-to-end** — screen by screen, incl. FE that reads the new data (null fields, new states).
+  3. **Reuse** — which existing mechanism it rides on, and what that drags in (names like `QRSUBMIT#`, limits like 4 KB env).
+  4. **Edge cases** — double tap, retry, resolve-then-new, wrong org header, missing optional field.
+  5. **Out of scope** — what this PR will NOT do, said out loud.
+  6. **Prod / infra impact** — env vars, new resources, migrations, data writes.
+  Write Mike's answers into the plan as `## Grill (Mike, <date>)` — one line each `Q… → Mike: <answer>`. `plan-approve.sh` refuses without ≥3 of them.
+  Also run it on an OPEN PR whose plan predates the rule when Mike says the behaviour diverges (#2379 chat, 22.10).
 - **`detect`** → `~/.claude/pipeline-stamp.sh detect`: stamps code-review / simplify from
   commit subjects (`src=heuristic:commit:<sha>`), never over a newer stamp.
 - **`stamp <step>`** → mark a step done manually, e.g. `/pr-state stamp code-review`.
@@ -281,6 +315,15 @@ Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps don
    `🧭  CR ✓   SMP ✓-2   RPR ·   JT ✓   DEMO ✓`
    (`✓-N` = done but N commits behind, rendered yellow on the statusline).
 4. **CI / merge readiness** line: checks summary + `mergeable`/`mergeStateStatus` + DEMO gate (`demo-result.sh check`) — no DEMO ✓ ⇒ not merge-ready.
+   **Try (Mike 2026-10-16, always print for rescue-serverless):** the PR's justfile try + who ran it —
+   recipe = `pipeline-stamp.sh` `try_of <PR>` (newest `~/.claude/fleet-board/w*/preflight-map.tsv`, else last
+   `demo-results/pr-<N>.json`) → `🎯 try: jb2b <recipe> · pre ✓/✗ (<passed>, dev <sha>) · Mike ✓ апрувнув / ✗ не запускав`.
+   `no-try` ⚠ → the PR has no try: name it as the first gap (add a try + a preflight-map row).
+   **Behind main (Mike 2026-10-15, always print):** `git fetch -q origin main` then
+   `git rev-list --count HEAD..origin/main` (behind) and `origin/main..HEAD` (ahead) →
+   `🌿 main: behind <N> · ahead <M>` — `behind 0` ✅ up to date; `behind >0` ⚠ → name the fix:
+   `jb2b pull-main` in the PR worktree, then push `HEAD:<pr-branch>`. A PR behind main is NOT merge-ready
+   (its CR/JT/DEMO ran on code that is not what lands). In `all` mode the BEHIND column is the same number.
    **Mike-approved, not merged** (Mike 2026-10-06): if `demo-result.sh check` exits 0 (pr-N.mike.json `approved:true`) AND the PR is still OPEN,
    print a separate bold line FIRST in this section: `✅ Mike апрувнув (DEMO <passed>/0, <local Kyiv time>), НЕ змерджено → gh pr merge <N> -R <repo> --merge --delete-branch=false`.
    Note: his «так» lives in the DEMO gate, not as a GitHub review — `reviewDecision` stays empty; never report it as "not approved".
