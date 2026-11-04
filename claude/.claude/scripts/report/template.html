@@ -171,6 +171,15 @@ h2.collapsed{opacity:.82;border-bottom-style:dashed}
 .pfit:not(.pcol){flex-basis:100%!important;width:100%!important;max-width:100%!important;height:720px!important}
 .psized{flex:0 0 auto!important;align-self:flex-start!important}   /* once resized, stop flex-grow from overriding the size */
 .pclosed{display:none!important}
+/* --- print / PDF: every section open, no chrome, colours kept, figures not split --- */
+@media print{
+ *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+ .cog,.pbar,a[title="hub"]{display:none!important} /* hub's floating link is injected by the server */
+ .blk,.blk[hidden]{display:block!important;height:auto!important;overflow:visible!important;resize:none!important}
+ .pcol>*:not(.pbar):not(:first-child){display:revert!important}
+ figure,img,svg,.svgbox,pre,table{break-inside:avoid}
+ img{max-width:100%!important}
+}
 .pmax{position:fixed!important;inset:20px!important;z-index:1000!important;margin:0!important;max-width:none!important;width:auto!important;height:auto!important;overflow:auto!important;box-shadow:0 24px 70px rgba(0,0,0,.6)}
 #pmask{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:999}
 /* --- burger: sliders + block controls --- */
@@ -224,7 +233,8 @@ h2.collapsed{opacity:.82;border-bottom-style:dashed}
     <button id="rstlt"><span data-en>↺ Reset layout &amp; sizes</span><span data-ua>↺ Скинути розкладку та розміри</span></button>
    </div>
    <div class="grp" id="dlgrp">
-    <div class="lbl"><span data-en>Download HTML</span><span data-ua>Завантажити HTML</span></div>
+    <div class="lbl"><span data-en>Download</span><span data-ua>Завантажити</span></div>
+    <button id="dlpdf"><span data-en>⬇︎ PDF with images (this language)</span><span data-ua>⬇︎ PDF з картинками (ця мова)</span></button>
     <button data-dl="both"><span data-en>⬇︎ Both languages</span><span data-ua>⬇︎ Обидві мови</span></button>
     <button data-dl="ua"><span data-en>⬇︎ Ukrainian only</span><span data-ua>⬇︎ Лише українська</span></button>
     <button data-dl="en"><span data-en>⬇︎ English only</span><span data-ua>⬇︎ Лише англійська</span></button>
@@ -360,13 +370,33 @@ h2.collapsed{opacity:.82;border-bottom-style:dashed}
    root.setAttribute('lang',mode==='ua'?'uk':'en');
   }
   var base=(location.pathname.split('/').pop()||'report.html').replace(/\.html?$/,'')||'report';
-  var blob=new Blob(['<!DOCTYPE html>\n'+root.outerHTML],{type:'text/html;charset=utf-8'});
-  var url=URL.createObjectURL(blob), a=document.createElement('a');
-  a.href=url; a.download=base+(mode==='both'?'':'-'+mode)+'.html';
-  document.body.appendChild(a); a.click();
-  setTimeout(function(){URL.revokeObjectURL(url);if(a.parentNode)a.parentNode.removeChild(a);},0);
   if(C)C.open=false;
+  // images are files next to the page: embed each as a data: URI, or the saved .html opens without photos
+  var imgs=[].slice.call(root.querySelectorAll('img[src]:not([src^="data:"])'));
+  Promise.all(imgs.map(function(im){
+   return fetch(new URL(im.getAttribute('src'),location.href)).then(function(r){return r.blob();}).then(function(b){
+    return new Promise(function(ok){var fr=new FileReader();fr.onload=function(){
+     im.src=fr.result; im.removeAttribute('loading'); ok();};fr.onerror=ok;fr.readAsDataURL(b);});
+   }).catch(function(){});
+  })).then(function(){
+   // a link around a photo pointed at the same file: drop it, the photo itself is now in the page
+   [].slice.call(root.querySelectorAll('a[href]')).forEach(function(ln){var h=ln.getAttribute('href');if(ln.querySelector('img[src^="data:"]')&&!/^(https?:|#|mailto:)/.test(h))ln.removeAttribute('href');});
+   var blob=new Blob(['<!DOCTYPE html>\n'+root.outerHTML],{type:'text/html;charset=utf-8'});
+   var url=URL.createObjectURL(blob), a=document.createElement('a');
+   a.href=url; a.download=base+(mode==='both'?'':'-'+mode)+'.html';
+   document.body.appendChild(a); a.click();
+   setTimeout(function(){URL.revokeObjectURL(url);if(a.parentNode)a.parentNode.removeChild(a);},0);
+  });
  }
+ // --- PDF: the browser's print → "Save as PDF"; lazy images are loaded first or they print blank ---
+ var PB=document.getElementById('dlpdf');
+ if(PB)PB.onclick=function(){
+  if(C)C.open=false;
+  var im=[].slice.call(document.images);
+  im.forEach(function(i){i.loading='eager';});
+  Promise.all(im.map(function(i){return i.complete?0:new Promise(function(ok){i.onload=i.onerror=ok;});}))
+   .then(function(){setTimeout(function(){window.print();},100);});
+ };
  if(DL){
   var db=DL.querySelectorAll('[data-dl]');
   for(var m=0;m<db.length;m++)(function(b){b.onclick=function(){exportDoc(b.getAttribute('data-dl'))};})(db[m]);
