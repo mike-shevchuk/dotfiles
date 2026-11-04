@@ -107,7 +107,7 @@ set -g status-style 'bg=#1e1e2e fg=#cdd6f4' #!important
 # Left (row 0): mode badge (recolors by prefix/copy/zoom) + session name + count.
 # The trailing #() runs refresh-global once per interval (empty output).
 set -g status-left-length 50 #!important
-set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)#(~/dotfiles/tmux/scripts/fleet-sync.sh)' #!important
+set -g status-left '#{?client_prefix,#[bg=#{@mode_color_prefix}],#{?pane_in_mode,#[bg=#{@mode_color_copy}],#{?window_zoomed_flag,#[bg=#{@mode_color_zoom}],#[bg=#{@mode_color_rest}]}}}#[fg=#1e1e2e,bold] #S #[bg=#1e1e2e] #[fg=#6c7086] #{@sessions} #(~/.tmux-status.sh refresh-global)' #!important
 
 # Right (row 2): python | claude | cpu | ram | AWS | kubectl | time | date.
 # All segments read cached user-options (no subprocess).
@@ -132,8 +132,8 @@ set -g status-format[1] '#[list=on align=#{status-justify}]#[list=left-marker]<#
 # refresh-pane hooks, not every redraw.
 set -g status-format[2] '#[bg=#1e1e2e]#[fg=#a6e3a1]#{?#{@pane_git}, 🌿 #{@pane_git} ,}#[fg=#fab387]#{?#{@pane_pr},#{@pane_pr} ,}#[fg=#89b4fa] #{@pane_path} #[nolist align=right range=right #{E:status-right-style}]#[push-default]#{T;=/#{status-right-length}:status-right}#[pop-default]#[norange default]' #!important
 
-# Badges: 🙋 (red) = fleet.json need_mike (scripts/fleet-sync.sh sets
-# @need_mike); ⏳ working / 💤 waiting for the lead / ✅ done = @agent_state from Claude hooks (scripts/agent-state.sh).
+# Badges: 🙋 (red) = @need_mike from fleet.json, set on demand by `just -g fleet-icons`
+# (no longer every status tick — fleet.json went stale after the move to tiki); ⏳ working / 💤 waiting for the lead / ✅ done = @agent_state from Claude hooks (scripts/agent-state.sh).
 # Window tabs — active tab is a filled block in the window's OWN colour
 # (window-status-style fg + reverse) with ▶ ◀ markers; no fg switch inside
 # the current format, or the block would change colour mid-tab.
