@@ -188,8 +188,11 @@ mem action="" plugin="":
     }
     keep_reason() {  # $1 pane id, $2 window name, $3 target → why the window must stay ("" = safe to close)
         local screen draft
-        [[ $3 == "$(tmux display -p -t "${TMUX_PANE:-}" '#S:#I' 2>/dev/null)" ]] && { echo "це вікно (звідки запущено)"; return; }
-        [[ $2 == 👑* ]] && { echo "лід"; return; }
+        # no TMUX_PANE (run outside tmux) → `display` would name some other client's window
+        [ -n "${TMUX_PANE:-}" ] && [[ $3 == "$(tmux display -p -t "$TMUX_PANE" '#S:#I' 2>/dev/null)" ]] \
+            && { echo "це вікно (звідки запущено)"; return; }
+        # lead = 👑 name or window :1 (after a restore the name can become the claude version)
+        [[ $2 == 👑* || $3 == *:1 ]] && { echo "лід"; return; }
         screen=$(tmux capture-pane -p -t "$1")
         grep -q 'esc to interrupt' <<<"$screen" && { echo "працює"; return; }
         draft=$(grep '^❯' <<<"$screen" | tail -1 | sed 's/^❯[[:space:]]*//')
