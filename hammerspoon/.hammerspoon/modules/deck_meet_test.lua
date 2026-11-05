@@ -155,6 +155,11 @@ c, j = post("/log?from=5&to=4", "x")
 check("to < from → 422", c == 422)
 c = post("/log", "live line")
 check("live /log without from/to still 200", c == 200 and (rd(LOG) or ""):find("live line", 1, true) ~= nil)
+-- T20 review: at 0 (the board's clock unset) is unknown, not a made-up 03:00; an away line can be days old → its date
+c = post("/log?from=5&to=6", "5 0 clock unknown\n6 1767261600 dated")
+lg = rd(LOG) or ""
+check("at 0 → ??:??:??", c == 200 and lg:find("\n??:??:?? clock unknown\n", 1, true) ~= nil)
+check("an away line carries its date", lg:find(os.date("%H:%M:%S dated [%Y-%m-%d]\n", 1767261600), 1, true) ~= nil)
 
 local function start(id, q) return post("/meet?start=1&id=" .. id .. (q or "")) end
 local function stop(id, n, body) return post("/meet?stop=1&id=" .. id .. "&len=" .. n .. "&rate=16000&fmt=ulaw", body or "") end
@@ -519,7 +524,7 @@ c, j = post("/log?from=10&to=10", "10 1767261600 ten")
 io.open = realopen
 check("disk full on the seq → 507, boardlog.seq intact", c == 507 and rd(SEQF) == seq1)
 c, j = post("/log?from=10&to=10", "10 1767261600 ten")
-check("the retry confirms, the line once", c == 200 and j.confirmed == 10 and select(2, (rd(LOG) or ""):gsub(" ten\n", "")) == 1)
+check("the retry confirms, the line once", c == 200 and j.confirmed == 10 and select(2, (rd(LOG) or ""):gsub(" ten %[", "")) == 1)
 local wrote = 0
 io.open = function(p, m)
   if p == LOG then local f = realopen(p, m); return setmetatable({ write = function(_, ...) wrote = wrote + 1; if wrote > 1 then return nil, "No space left" end; f:write(...); return true end,
@@ -531,7 +536,7 @@ io.open = realopen
 check("disk full mid-batch → 507", c == 507 and j.confirmed == nil)
 c, j = post("/log?from=11&to=12", "11 1767261600 eleven\n12 1767261600 twelve")
 lg = rd(LOG) or ""
-check("the retry adds only what's missing", c == 200 and j.confirmed == 12 and select(2, lg:gsub(" eleven\n", "")) == 1 and select(2, lg:gsub(" twelve\n", "")) == 1)
+check("the retry adds only what's missing", c == 200 and j.confirmed == 12 and select(2, lg:gsub(" eleven %[", "")) == 1 and select(2, lg:gsub(" twelve %[", "")) == 1)
 
 print("→ an unsynced id survives a reload (M9)")
 os.execute("sleep 1.1") -- not in the same second as id 57's capture: one name, two owners

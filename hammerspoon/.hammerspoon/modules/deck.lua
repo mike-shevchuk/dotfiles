@@ -2138,7 +2138,8 @@ local function handle(method, path, headers, body)
     end
     for _, r in ipairs(rows) do
       if r[1] > last then
-        okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and f:flush()
+        -- at 0 = the board's clock was unset: unknown; else the time first (just wifi parses it) and the date last
+        okw = f:write(r[2] > 0 and os.date("%H:%M:%S ", r[2]) or "??:??:?? ", r[3], r[2] > 0 and os.date(" [%Y-%m-%d]", r[2]) or "", "\n") and f:flush()
         if not okw then break end
         last = r[1]
       end
