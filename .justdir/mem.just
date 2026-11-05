@@ -10,6 +10,10 @@
 #   just -g mem slim      disable heavy MCP plugins globally (scope user) — new sessions only
 #   just -g mem on [p]    enable plugin p only in the current dir (scope local, not committed)
 #   just -g mem fat       undo slim — enable the heavy plugins globally again
+#   just -g mem prune [s] Claude windows of tmux session s (default: this one) — which are
+#                         safe to close (not busy, empty input, not 👑lead); TTY: pick + close
+#   just -g mem kill "s:i s:j"  close those windows (re-checks busy/draft first);
+#                         transcripts stay — `claude --resume` brings a session back
 #
 # Memory = footprint (top MEM: counts compressed + swapped pages). Under heavy
 # pressure `top` can fail ("sysmond service not found") → fallback to ps RSS,
@@ -174,9 +178,77 @@ mem action="" plugin="":
         done
         return $fail
     }
+    claude_pid() {  # pane pid → the claude process in it (the pane itself or a child)
+        local c comm
+        for c in $1 $(pgrep -P "$1"); do
+            comm=$(ps -o comm= -p "$c" 2>/dev/null)
+            [[ $comm == 2.1.* || $comm == *claude ]] && { echo "$c"; return; }
+        done
+        return 1
+    }
+    keep_reason() {  # $1 pane id, $2 window name, $3 target → why the window must stay ("" = safe to close)
+        local screen draft
+        # no TMUX_PANE (run outside tmux) → `display` would name some other client's window
+        [ -n "${TMUX_PANE:-}" ] && [[ $3 == "$(tmux display -p -t "$TMUX_PANE" '#S:#I' 2>/dev/null)" ]] \
+            && { echo "це вікно (звідки запущено)"; return; }
+        # lead = 👑 name or window :1 (after a restore the name can become the claude version)
+        [[ $2 == 👑* || $3 == *:1 ]] && { echo "лід"; return; }
+        screen=$(tmux capture-pane -p -t "$1")
+        grep -q 'esc to interrupt' <<<"$screen" && { echo "працює"; return; }
+        draft=$(grep '^❯' <<<"$screen" | tail -1 | sed 's/^❯[[:space:]]*//')
+        [ -n "$draft" ] && echo "чернетка: ${draft:0:30}"
+    }
+    prune() {  # $1 = tmux session (default: the current one)
+        local sess=${1:-$(tmux display -p '#S' 2>/dev/null)} now top_out cands
+        [ -n "$sess" ] || { echo "FAIL: не в tmux — дай сесію: just -g mem prune <session>" >&2; return 2; }
+        echo "→ tmux list-panes -s -t $sess + top -l 1 -stats pid,mem   (Claude-вікна: стан, памʼять, чи можна закрити)" >&2
+        now=$(date +%s); top_out=$(top -l 1 -stats pid,mem 2>/dev/null); cands=$(mktemp)
+        printf '%-9s %-24s %-5s %8s %6s  %s\n' WINDOW NAME STATE IDLE,min MEM VERDICT
+        while IFS='|' read -r pp win name st tr act pane; do
+            cpid=$(claude_pid "$pp") || continue
+            m=$(awk -v p="$cpid" '$1==p{print $2}' <<<"$top_out")
+            [ -n "$m" ] || m="$(( $(ps -o rss= -p "$cpid") / 1024 ))M"
+            idle=$(( (now - act) / 60 ))
+            [ -n "$tr" ] && [ -f "$tr" ] && idle=$(( (now - $(stat -f %m "$tr" 2>/dev/null || stat -c %Y "$tr")) / 60 ))
+            why=$(keep_reason "$pane" "$name" "$win")
+            [ -z "$why" ] && echo "$win $name $m" >>"$cands"
+            printf '%-9s %-24.24s %-5s %8s %6s  %s\n' "$win" "$name" "${st:--}" "$idle" "$m" "${why:-✅ можна закрити}"
+        done < <(tmux list-panes -s -t "$sess" -F '#{pane_pid}|#S:#I|#W|#{@agent_state}|#{@agent_transcript}|#{window_activity}|#{pane_id}')
+        if [ ! -s "$cands" ]; then echo "" >&2; echo "Нема що закривати." >&2; rm -f "$cands"; return 0; fi
+        if ! command -v gum >/dev/null || [ ! -t 0 ] || [ ! -t 2 ]; then
+            echo "" >&2
+            echo "Закрити:  just -g mem kill \"$(cut -d' ' -f1 "$cands" | xargs)\"   (лиши лише потрібні)" >&2
+            rm -f "$cands"; return 0
+        fi
+        local picked; picked=$(gum choose --no-limit --header "Закрити (пробіл — вибрати, enter — ок)" <"$cands" | cut -d' ' -f1 | xargs)
+        rm -f "$cands"
+        [ -n "$picked" ] && kill_windows "$picked"
+    }
+    kill_windows() {  # $1 = "s:i s:j" — re-checks each window right before closing it
+        local t pane name why n=0 i=0 fail=0
+        set -- $1; n=$#
+        for t in "$@"; do
+            i=$((i+1))
+            # exact match: `display -t` on a missing window silently falls back to the current one
+            IFS='|' read -r pane name < <(tmux list-windows -a -F '#S:#I|#{pane_id}|#W' | awk -F'|' -v t="$t" '$1==t{print $2"|"$3}')
+            [ -n "$pane" ] || { echo "  [$i/$n] $t — FAIL: нема такого вікна" >&2; fail=1; continue; }
+            why=$(keep_reason "$pane" "$name" "$t")
+            if [ -n "$why" ]; then echo "  [$i/$n] $t $name — SKIP ($why)" >&2; continue; fi
+            echo "→ [$i/$n] tmux kill-window -t $t   ($name)" >&2
+            tmux kill-window -t "$t" && echo "  OK" >&2 || { echo "  FAIL" >&2; fail=1; }
+        done
+        sleep 2
+        echo "памʼять: $(memory_pressure -Q 2>/dev/null | sed -n 's/.*free percentage: /вільно /p') · swap $(sysctl -n vm.swapusage 2>/dev/null | awk '{print $6"/"$3}')" >&2
+        echo "Повернути сесію: claude --resume (у потрібній теці)" >&2
+        return $fail
+    }
     run() {
         case "$1" in
             claude) report claude ;;
+            prune) prune "$2" ;;
+            kill)
+                [ -n "$2" ] || { echo "FAIL: дай вікна: just -g mem kill \"esp:3 esp:4\"" >&2; return 2; }
+                kill_windows "$2" ;;
             slim)
                 plugins disable; rc=$?
                 echo "" >&2
@@ -193,7 +265,7 @@ mem action="" plugin="":
                 echo "→ claude plugin enable $p --scope local   (in $PWD)" >&2
                 claude plugin enable "$p" --scope local && echo "  OK — діє для нових сесій у $PWD" >&2 || { echo "  FAIL" >&2; return 1; } ;;
             fat) plugins enable ;;
-            *) echo "FAIL: невідома дія '$1' — є: claude | slim | on [plugin] | fat" >&2; return 2 ;;
+            *) echo "FAIL: невідома дія '$1' — є: claude | prune [session] | kill \"s:i …\" | slim | on [plugin] | fat" >&2; return 2 ;;
         esac
     }
 
@@ -201,18 +273,20 @@ mem action="" plugin="":
     report all
     if ! command -v gum >/dev/null || [ ! -t 0 ] || [ ! -t 2 ]; then
         echo "" >&2
-        echo "Дії: just -g mem claude | slim | on [plugin] | fat" >&2
+        echo "Дії: just -g mem claude | prune [session] | kill \"s:i …\" | slim | on [plugin] | fat" >&2
         exit 0
     fi
     echo "" >&2
     choice=$(gum choose --header "Що далі?" \
         "сесії Claude (найважчі)" \
+        "закрити тимчасові Claude-вікна цієї tmux-сесії" \
         "mcp-slim: вимкнути playwright+aws-serverless глобально" \
         "увімкнути плагін у цьому проєкті" \
         "повернути плагіни глобально" \
         "вийти") || exit 0
     case "$choice" in
         сесії*)    a=claude ;;
+        закрити*)  a=prune ;;
         mcp-slim*) a=slim ;;
         увімкнути*) a=on ;;
         повернути*) a=fat ;;
