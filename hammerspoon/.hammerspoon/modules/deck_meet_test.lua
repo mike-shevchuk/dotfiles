@@ -160,6 +160,10 @@ c = post("/log?from=5&to=6", "5 0 clock unknown\n6 1767261600 dated")
 lg = rd(LOG) or ""
 check("at 0 → ??:??:??", c == 200 and lg:find("\n??:??:?? clock unknown\n", 1, true) ~= nil)
 check("an away line carries its date", lg:find(os.date("%H:%M:%S dated [%Y-%m-%d]\n", 1767261600), 1, true) ~= nil)
+-- T20 fix round: with a card every line comes as a batch → today's lines read as before, no date
+local now = os.time()
+c = post("/log?from=7&to=7", "7 " .. now .. " today")
+check("a line of today has no date", c == 200 and (rd(LOG) or ""):find(os.date("%H:%M:%S today\n", now), 1, true) ~= nil)
 
 local function start(id, q) return post("/meet?start=1&id=" .. id .. (q or "")) end
 local function stop(id, n, body) return post("/meet?stop=1&id=" .. id .. "&len=" .. n .. "&rate=16000&fmt=ulaw", body or "") end
