@@ -2139,7 +2139,7 @@ local function handle(method, path, headers, body)
     for _, r in ipairs(rows) do
       if r[1] > last then
         -- at 0 = the board's clock was unset: unknown; else the time first (just wifi parses it), the date last
-        -- when it is not today (with a card every line comes as a batch)
+        -- when it is not today (a batch of the same day reads like the live log)
         okw = f:write(r[2] > 0 and os.date("%H:%M:%S ", r[2]) or "??:??:?? ", r[3],
           r[2] > 0 and os.date("%F", r[2]) ~= os.date("%F") and os.date(" [%F]", r[2]) or "", "\n") and f:flush()
         if not okw then break end
