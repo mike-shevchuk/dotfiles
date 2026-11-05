@@ -724,15 +724,16 @@ end
 -- /pane answers from a cache at once; the capture runs async (a sync hs.execute stalled all of HS for up to 1 s),
 -- at most every 0.4 s per window+view, and a view nobody asked for in 60 s is dropped
 local paneCache = {}
-local function pane(id, colors, width, clean)
+local function pane(id, colors, width, clean, lines)
   width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
-  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean) }, "|")
+  lines = math.max(120, math.min(lines or 120, 400)) -- the board asks for more after a scroll to the top
+  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean), lines }, "|")
   for k, e in pairs(paneCache) do if now - e.asked > 60 then paneCache[k] = nil end end
   local e = paneCache[key] or { fetched = 0 }
   paneCache[key], e.asked = e, now
   if not e.busy and now - e.fetched >= 0.4 then
     e.busy, e.fetched = true, now
-    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-120", "-t", id }, function(out)
+    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-" .. lines, "-t", id }, function(out)
       local ok, text = pcall(render, out, colors, width, clean)
       if ok then e.data = { t = id, text = text } end
       e.busy = false
@@ -1956,7 +1957,7 @@ local function handle(method, path, headers, body)
     return out, code, h
   end
   if method == "GET" and route == "/netlog" then return reply({ log = netTrace.log }, 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean", tonumber(p.n)), 200, true) end
   if method == "POST" and route == "/send" and id then
     meet.typeInto(id, body or "", p.enter == "1")
     return reply("ok", 200)
