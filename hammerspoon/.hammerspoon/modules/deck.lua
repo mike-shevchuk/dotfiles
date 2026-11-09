@@ -1951,11 +1951,12 @@ local function state()
   end
   local recipes = {}
   for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
+  local sha = readFile(K.FW_SHA)
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = safe(limitGauges, {}), cpu = safe(cpuPct, 0), ram = sysmonitor.ramPct(),
     net = netTrace.cfg(), rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
-    recipes = recipes, slash = K.SLASH, voice = voice, fw = readFile(K.FW_SHA), fw_sig = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.sig"), fw_notes = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.notes"),
+    recipes = recipes, slash = K.SLASH, voice = voice, fw = sha, fw_sig = sha and readFile("/tmp/deck-ota.sig"), fw_notes = sha and readFile("/tmp/deck-ota.notes"),
     front = frontName, ring = strip((ringFor(frontName))), flex = flex.state(frontName, fw and fw:title() or "", deckVer), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
@@ -2148,10 +2149,9 @@ local function handle(method, path, headers, body)
     end
     return reply({ np = macNP, files = names, conv = clean(conversion) }, 200, true)
   end
-  local MEDIA_KEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN" }
-  if method == "POST" and route == "/media" and MEDIA_KEY[p.k] then
-    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], true):post()
-    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], false):post()
+  if method == "POST" and route == "/media" and SYSKEY[p.k] then
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[p.k], true):post()
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[p.k], false):post()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/convert" and (SIPS_FMT[p.f] or FFMPEG_FMT[p.f]) then
