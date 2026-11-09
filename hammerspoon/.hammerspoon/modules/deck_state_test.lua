@@ -203,16 +203,21 @@ do
   end }
   local function post(path, body) local b, c = handle("POST", path, H, body or ""); return c == 200 and dec(b) or nil, c, runs[#runs] end
   local r, _, a = post("/tiki")
-  check("/tiki runs fleet_data.py tiki", a and a[#a] == "tiki" and r and r.cards and r.cards[1].id == "WIN007")
+  check("/tiki runs fleet_data.py tiki 0 (the newest board)", a and a[#a - 1] == "tiki" and a[#a] == "0" and r and r.cards and r.cards[1].id == "WIN007")
+  post("/tiki?b=44")
+  check("/tiki?b=44 asks board 44", runs[#runs][#runs[#runs]] == "44")
+  local n0 = #runs
+  post("/tiki?b=4;4")
+  check("a bad board is the newest (cached), nothing run", #runs == n0)
   out = '{"id":"WIN007","blocks":[]}'
   r, _, a = post("/tiki?id=WIN007")
-  check("/tiki?id= runs tiki <id>", a and a[#a - 1] == "tiki" and a[#a] == "WIN007" and r and r.id == "WIN007")
+  check("/tiki?id= runs tiki 0 <id>", a and a[#a - 2] == "tiki" and a[#a] == "WIN007" and r and r.id == "WIN007")
   local n = #runs
   r = post("/tiki?id=x;rm")
   check("a bad id is not a card: the cached list, nothing run", #runs == n and r and r.cards)
   out = '{"ok":true,"id":"WIN007"}'
-  r, _, a = post("/tikireply?id=WIN007", "варіант 1")
-  check("/tikireply passes id + text as argv", a and a[#a - 2] == "tiki-reply" and a[#a - 1] == "WIN007" and a[#a] == "варіант 1" and r and r.ok)
+  r, _, a = post("/tikireply?id=WIN007&b=44", "варіант 1")
+  check("/tikireply passes board + id + text as argv", a and a[#a - 3] == "tiki-reply" and a[#a - 2] == "44" and a[#a - 1] == "WIN007" and a[#a] == "варіант 1" and r and r.ok)
   out = '{"cards":[],"week":"W45"}'
   r = post("/tiki")
   check("a reply drops the cached list", r and #r.cards == 0)
