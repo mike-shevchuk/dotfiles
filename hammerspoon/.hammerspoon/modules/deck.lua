@@ -1229,10 +1229,15 @@ local function flexCtx(app, title)
   return "Browser"
 end
 
+local active = { at = -1 }
 local function tmuxActive() -- the client Mike touched last: list-clients order says nothing about that
-  local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
-  local client, session = out:match("%S+%s+(%S+)%s+(%S+)")
-  return client, session
+  -- sync (~0.1 s on HS's thread) and /flexfav looks it up 3 times: one answer per second is enough
+  local now = hs.timer.secondsSinceEpoch()
+  if now - active.at >= 1 then
+    local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
+    active.at, active.client, active.session = now, out:match("%S+%s+(%S+)%s+(%S+)")
+  end
+  return active.client, active.session
 end
 
 local function menuWalk(items, path, out) -- every enabled item with a shortcut, under its menu path

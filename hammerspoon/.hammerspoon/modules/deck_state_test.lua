@@ -165,6 +165,20 @@ do
   hs.task = realTask
 end
 
+print("→ Ghostty's flex: the sync tmux list-clients runs once per request burst, not once per lookup")
+do
+  local calls, realExec, realTimer = 0, hs.execute, hs.timer
+  hs.execute = function(cmd) if cmd:find("list-clients", 1, true) then calls = calls + 1 end; return "1 /dev/ttys001 esp\n" end
+  local clock = 1000
+  hs.timer = setmetatable({ secondsSinceEpoch = function() return clock end }, { __index = realTimer })
+  handle("POST", "/flexfav?ctx=Ghostty&g=0&f=1", H, "")
+  check("/flexfav asks tmux once (it looks the session up 3 times)", calls == 1)
+  clock = clock + 2
+  handle("POST", "/flex?ctx=Ghostty&g=0", H, "")
+  check("a request 2 s later asks again", calls == 2)
+  hs.execute, hs.timer = realExec, realTimer
+end
+
 print("→ no meetings dir yet")
 os.execute("rm -rf '" .. MD .. "'")
 hs.fs.dir = function() error("cannot open") end
