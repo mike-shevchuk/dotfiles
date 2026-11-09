@@ -1768,9 +1768,11 @@ local function meetMenu()
   if meet.state == "rec" and meetMac then
     table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
   elseif meet.state == "rec" then
-    table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
-    if meet.note then -- the board is away: process what arrived so far (whatever it sends later is ignored)
-      table.insert(items, { title = "Обробити те, що вже прийшло", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    if meet.note then -- the board is away (dead battery): a stop sent to it never arrives, so stop here and process
+      -- what arrived + the Mac backup (whatever the board sends later is ignored)
+      table.insert(items, { title = "■ Зупинити й обробити (плата не на зв'язку)", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    else
+      table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
     end
   else
     for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
