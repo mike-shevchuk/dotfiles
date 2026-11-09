@@ -2107,6 +2107,23 @@ local function handle(method, path, headers, body)
     if not w or (w.tr or "") == "" then return reply({ blocks = {} }, 200, true) end
     return reply(fleetData.get("grill:" .. id, 20, { "grill", w.tr, w.idx }), 200, true)
   end
+  -- tiki fleet (~/.claude/fleet-board/w<N>/tiki): the list, one card, Mike's answer into its `reply` (tiki-replies.sh relays it)
+  local tid = p.id and p.id:match("^[%w%-]+$")
+  if method == "POST" and route == "/tiki" then
+    if tid then return reply(fleetData.get("tiki:" .. tid, 10, { "tiki", tid }), 200, true) end
+    return reply(fleetData.get("tiki", 20, { "tiki" }), 200, true)
+  end
+  if method == "POST" and route == "/tikireply" and tid and (body or ""):match("%S") then
+    task("/bin/sh", { "-c", 'PATH=$PATH:$HOME/.pyenv/shims exec python3 "$@"', "sh", fleetData.py, "tiki-reply", tid, body },
+      function(out)
+        local ok, d = pcall(hs.json.decode, out)
+        fleetData.cache.tiki, fleetData.cache["tiki:" .. tid] = nil, nil
+        if not (ok and d and d.ok) then
+          hs.notify.new({ title = "tiki: відповідь не записано в " .. tid, informativeText = ok and d and d.error or out }):send()
+        end
+      end)
+    return reply({ ok = true, id = tid }, 200, true)
+  end
   if method == "POST" and route == "/askother" and id then
     local ok = (body or "") ~= "" and fleetData.other(id, body)
     return reply({ ok = ok }, 200, true)

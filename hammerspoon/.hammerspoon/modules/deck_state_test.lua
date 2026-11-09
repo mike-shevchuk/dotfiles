@@ -193,6 +193,35 @@ do
   check("@1 still open → its pick kept", p["@1"] == "/t/live.jsonl")
 end
 
+print("→ tiki: list, card, reply (fleet_data.py stubbed; never the live board)")
+do
+  local runs, out = {}, '{"cards":[{"id":"WIN007","t":"x"}],"week":"W45"}'
+  local realtask = hs.task
+  hs.task = { new = function(_, cb, args)
+    runs[#runs + 1] = args
+    return { setEnvironment = function() end, start = function() cb(0, out) end }
+  end }
+  local function post(path, body) local b, c = handle("POST", path, H, body or ""); return c == 200 and dec(b) or nil, c, runs[#runs] end
+  local r, _, a = post("/tiki")
+  check("/tiki runs fleet_data.py tiki", a and a[#a] == "tiki" and r and r.cards and r.cards[1].id == "WIN007")
+  out = '{"id":"WIN007","blocks":[]}'
+  r, _, a = post("/tiki?id=WIN007")
+  check("/tiki?id= runs tiki <id>", a and a[#a - 1] == "tiki" and a[#a] == "WIN007" and r and r.id == "WIN007")
+  local n = #runs
+  r = post("/tiki?id=x;rm")
+  check("a bad id is not a card: the cached list, nothing run", #runs == n and r and r.cards)
+  out = '{"ok":true,"id":"WIN007"}'
+  r, _, a = post("/tikireply?id=WIN007", "варіант 1")
+  check("/tikireply passes id + text as argv", a and a[#a - 2] == "tiki-reply" and a[#a - 1] == "WIN007" and a[#a] == "варіант 1" and r and r.ok)
+  out = '{"cards":[],"week":"W45"}'
+  r = post("/tiki")
+  check("a reply drops the cached list", r and #r.cards == 0)
+  n = #runs
+  local _, c = post("/tikireply?id=WIN007", "  ")
+  check("an empty reply writes nothing", c ~= 200 and #runs == n)
+  hs.task = realtask
+end
+
 print("→ no meetings dir yet")
 os.execute("rm -rf '" .. MD .. "'")
 hs.fs.dir = function() error("cannot open") end
