@@ -1579,7 +1579,8 @@ local function meetState()
       and os.time() - (hs.fs.attributes(MEET_DIR .. "/" .. f, "modification") or 0) < meet.STUCK then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
   end
   table.sort(pending, function(a, b) return a.bid < b.bid end)
-  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd }
+  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd,
+    screen = meet.rec and os.time() - meet.rec.t0 or nil } -- ⏺ seconds, absent = not recording
 end
 -- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
 -- a board before SNTP sends a small id: named once by the Mac's clock, so its chunks land in one capture; the same id
@@ -1670,6 +1671,7 @@ local function meetStop(id, rate, fmt, len, x)
   local have = fsize(MEET_DIR .. "/" .. id .. ".pcm")
   if not (writeFile(MEET_DIR .. "/" .. id .. ".len", have .. " " .. rate .. " " .. (fmt or "pcm")) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
   meetDone[id], meet.len[id] = true, have
+  if meetId == id then meet.screenStop() end -- ⏺ still on: close the .mov now, meetStopNow waits for it
   if meetBackup and meetId == id then -- let ffmpeg close the backup file first, then process both
     local b = meetBackup
     b:setCallback(function() meetBackup = nil; meetStopNow(id, rate, fmt, len, x) end)
@@ -1681,6 +1683,7 @@ local function meetStop(id, rate, fmt, len, x)
 end
 -- x (a capture from the outbox): {past, kind, t0, lang, target, close = path of the CaptureClose json (marks, gaps)}
 meetStopNow = function(id, rate, fmt, len, x)
+  if meet.rec then meet.rec.after = function() meetStopNow(id, rate, fmt, len, x) end; return end -- rec_frames reads the .mov
   local live = meetId == id
   if live then meetId = nil end
   local t0, lang = x and x.t0 or meet.t0, x and x.lang or meet.lang
@@ -1843,6 +1846,36 @@ local function meetClips()
       return
     end
   end
+end
+-- 📷 / ⏺ on the board mid-meeting: the Mac's screen into the places meeting.py already reads — a shot into
+-- <id>_clips/ (shots()), a recording into the screencapture folder (rec_frames(), by the file's birth time)
+K.REC_MAX = 10800 -- knob: a forgotten ⏺ stops itself after 3 h
+function meet.recDir()
+  local loc = (hs.execute("/usr/bin/defaults read com.apple.screencapture location 2>/dev/null") or ""):match("^%s*(.-)%s*$")
+  return loc ~= "" and loc:gsub("^~", HOME) or HOME .. "/Desktop"
+end
+function meet.screenStop() -- screencapture -v stops on any key; SIGINT if it doesn't within 10 s
+  local r = meet.rec
+  if not r or r.stopping then return end
+  r.stopping = true
+  r.task:setInput("x")
+  hs.timer.doAfter(10, function() if meet.rec == r then r.task:interrupt() end end)
+end
+function meet.screen(act, on)
+  if act == "shot" then
+    local d = meetId and MEET_DIR .. "/" .. meetId .. "_clips" or SHOT_DIR
+    hs.fs.mkdir(d)
+    task("/usr/sbin/screencapture", { "-x", d .. "/" .. os.time() .. ".png" })
+  elseif on and not meet.rec then
+    local r = {}
+    r.t0, r.task = os.time(), hs.task.new("/usr/sbin/screencapture", function(code, _, err)
+      if code ~= 0 then print("deck: screen recording failed (" .. tostring(code) .. "): " .. tostring(err)) end
+      if meet.rec == r then meet.rec = nil end
+      if r.after then r.after() end
+    end, { "-v", "-x", "-V", tostring(K.REC_MAX), meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mov" })
+    meet.rec = r
+    r.task:start()
+  elseif not on then meet.screenStop() end
 end
 local function meetBar()
   meetClips()
@@ -2226,6 +2259,11 @@ local function handle(method, path, headers, body)
   -- start / pcm at a byte offset / stop are all idempotent
   -- 1029-20xxxx firmware wrote NVS from a PSRAM-stack task after a 200 here → int-wdt reboot loop; answering 503
   -- to that one stuck meeting keeps its uploader retrying (no NVS write) so the fixed firmware can be flashed
+  if method == "POST" and route == "/meet/screen" then -- 📷 act=shot · ⏺ act=rec&on=1|0 (idempotent: the board retries)
+    if p.act ~= "shot" and p.act ~= "rec" then return reply({ code = "meet.damaged", message = "act = shot | rec" }, 422, true) end
+    meet.screen(p.act, p.on == "1")
+    return reply({ screen = meet.rec and os.time() - meet.rec.t0 or nil }, 200, true)
+  end
   if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id == "1793298707" then
     return reply({ code = "meet.busy", message = "Busy, retry later" }, 503, true)
   end
