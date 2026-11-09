@@ -459,6 +459,12 @@ check("a finished note does not enter meet.last", not lastHas(M4))
 local f4 = assert(io.open(MD .. "/index.jsonl", "a")); f4:write(enc({ id = "n-loaded", title = "Нотатка", kind = "note", len = 3 }), "\n"); f4:close()
 reload()
 check("nor after a reload", not lastHas("n-loaded"))
+f4 = assert(io.open(MD .. "/index.jsonl", "a"))
+f4:write(enc({ id = "m-redo", title = "old", kind = "meet" }), "\n", enc({ id = "m-redo", title = "new", kind = "meet" }), "\n"); f4:close()
+reload()
+local redo = {}
+for _, e in ipairs(meetState().last) do if e.id == "m-redo" then redo[#redo + 1] = e.title end end
+check("a redone meeting (two index lines) takes one place, the newer", #redo == 1 and redo[1] == "new")
 c, j = post("/meet?stop=1&id=" .. DONE_AT .. "-1&len=15&rate=16000&fmt=ulaw", "")
 check("the index still knows what's done", c == 200 and j.delivered == true)
 

@@ -1528,6 +1528,8 @@ meet.len, meet.bids, meet.unsynced, meet.indexed = {}, {}, {}, {} -- (fields of 
 meet.MAX = 4294967295 -- the contract's uint32
 function meet.addLast(e) -- AC-24: the board's 5 are meetings; a voice note never takes a place
   if e.kind == "note" then return end
+  -- a redo (`just meet speakers`) appends a newer line for the same id: it replaces the old one, never a second place
+  for i = #meet.last, 1, -1 do if meet.last[i].id == e.id then table.remove(meet.last, i) end end
   table.insert(meet.last, 1, e); meet.last[6] = nil
 end
 function meet.noteBid(bid, name) -- the newest capture of an unsynced id, so a reload keeps its chunks together
