@@ -281,7 +281,7 @@ local jobPick = (function()
   if f then f:close() end
   return ok and type(t) == "table" and t or {}
 end)()
-local function savePick(id, tr)
+local function savePick(id, tr) -- tr nil: forget that window's pick
   jobPick[id] = tr
   local f = io.open(JOBPICK_FILE, "w")
   if f then f:write(hs.json.encode(jobPick)); f:close() end
@@ -396,6 +396,11 @@ local function parseSessions(out)
                             descs = strList(descs, 80), head = safeClean(head, 40), ctx = safeClean(ctx, 600) }
       end
     end
+  end
+  -- a closed window's pick would keep its transcript "taken" for good (no bg row for that job), and tmux reuses
+  -- window ids after a restart; an empty list = tmux said nothing, which proves no window gone
+  if next(seen) then
+    for wid in pairs(jobPick) do if not seen[wid] then savePick(wid, nil) end end
   end
   local rank = { permission = 1, choice = 2 }
   table.sort(asks, function(a, b) -- permission, then choice, then the rest; oldest first within each

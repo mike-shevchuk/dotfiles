@@ -69,6 +69,8 @@ end
 do local f = assert(io.open(MD .. "/index.jsonl", "a")); f:write(enc({ id = "n1", title = "Нотатка", kind = "note", past = true, summary = "s" }), "\n"); f:close() end
 w(MD .. "/p1.stage", "spk"); w(MD .. "/p1.bid", "1767265200-2")
 w(MD .. "/d1.stage", "done"); w(MD .. "/d1.bid", "1767265300-3") -- finished: must not stay pending
+os.execute("mkdir -p '" .. home .. "/.hammerspoon'") -- picks of a live window (@1) and of one closed long ago (@9)
+w(home .. "/.hammerspoon/deck-jobpick.json", '{"@1":"/t/live.jsonl","@9":"/t/gone.jsonl"}')
 
 -- Hammerspoon runs Lua 5.4; here Lua 5.5 makes a for-loop variable const, so deck.lua's assignments to a single-var loop variable are
 -- rewritten on load (test-only shim; the file on disk is untouched).
@@ -177,6 +179,18 @@ do
   handle("POST", "/flex?ctx=Ghostty&g=0", H, "")
   check("a request 2 s later asks again", calls == 2)
   hs.execute, hs.timer = realExec, realTimer
+end
+
+print("→ a closed window's transcript pick is forgotten")
+do
+  local function line(id) return id .. "\tesp:1\tzsh\t\tzsh" .. ("\t"):rep(13) end
+  local function picks() local f = io.open(home .. "/.hammerspoon/deck-jobpick.json"); local d = f and dec(f:read("a")) or {}; if f then f:close() end; return d end
+  deck._parseSessions("")
+  check("tmux said nothing (not running?) → picks kept", picks()["@9"] == "/t/gone.jsonl")
+  deck._parseSessions(line("@1") .. "\n" .. line("@2"))
+  local p = picks()
+  check("@9 is gone from tmux → its pick dropped", p["@9"] == nil)
+  check("@1 still open → its pick kept", p["@1"] == "/t/live.jsonl")
 end
 
 print("→ no meetings dir yet")
