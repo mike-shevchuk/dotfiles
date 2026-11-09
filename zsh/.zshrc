@@ -639,6 +639,17 @@ alias td="todoist-cli --color --namespace --indent --project-namespace"
 
 # Tmux management
 alias tma='tmux attach -t $(tmux ls | fzf --prompt="Attach to session: " --border --height=30% | cut -d: -f1)'
+# tmk: kill tmux sessions — fzf multi-pick (TAB), gum confirm, then kill each
+tmk() {
+  local s; local -a picked
+  picked=(${(f)"$(tmux ls 2>/dev/null | fzf -m --prompt='Kill session (TAB=multi): ' --border --height=30% | cut -d: -f1)"})
+  (( ${#picked} )) || return 0
+  gum confirm "Kill ${#picked} session(s): ${picked[*]}?" || return 1
+  for s in $picked; do
+    echo "→ tmux kill-session -t $s" >&2
+    tmux kill-session -t "$s" && echo "  OK" >&2 || echo "  FAIL" >&2
+  done
+}
 
 # Find file by content: rg -> fzf (live) -> open in $EDITOR at line
 # Usage: rgf [query] [path]
