@@ -1763,8 +1763,32 @@ local function meetMd(id)
   return MEET_DIR .. "/" .. id .. ".md"
 end
 
+-- processing progress for the 🎙 menu: meeting.py's .stage + whisper's own % (<id>.prog, whisper -pp); the speakers and
+-- the summary give no %, so they sit at a fixed share of the bar and show how long the step has run
+local MEET_STEPS = { stt = { 0, 70, "розшифровка" }, spk = { 70, 20, "мовці" }, sum = { 90, 10, "самері" } }
+function meet.progress()
+  if not meet.proc then return nil end
+  local base = MEET_DIR .. "/" .. meet.proc
+  local st = MEET_STEPS[(readFile(base .. ".stage") or ""):match("%a+") or ""]
+  if not st then return nil end
+  local w = tonumber(((readFile(base .. ".prog") or ""):match(".*progress%s*=%s*(%d+)%%"))) or 0
+  local pct = st[1] + (st[3] == "розшифровка" and st[2] * w // 100 or 0)
+  local m = hs.fs.attributes(base .. ".stage", "modification")
+  return pct, st[3], m and (os.time() - m) // 60 or 0
+end
+function meet.bar(pct) -- 10 cells: ▰ done, ▱ left
+  local n = math.floor(pct / 10 + 0.5)
+  return string.rep("▰", n) .. string.rep("▱", 10 - n)
+end
+
 local function meetMenu()
   local items = {}
+  local pct, step, mins = meet.progress()
+  if pct then
+    table.insert(items, { title = string.format("⏳ Обробка %s %d%% · %s (%d хв)", meet.bar(pct), pct, step, mins), disabled = true })
+    table.insert(items, { title = "   розшифровка → мовці → самері → папка", disabled = true })
+    table.insert(items, { title = "-" })
+  end
   if meet.state == "rec" and meetMac then
     table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
   elseif meet.state == "rec" then
@@ -1828,7 +1852,9 @@ local function meetBar()
     and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
   if not M.meetBar then return end
   local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
+  local pct = meet.progress()
   M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
+    or pct and string.format("🎙 %s %d%%", meet.bar(pct), pct)
     or (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "🎙…" or "🎙")
 end
 
@@ -1940,6 +1966,7 @@ local function stateEtag(st)
 end
 M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
 M._parseSessions = parseSessions -- test hook (deck_meet_test.lua)
+M._meet = meet -- test hook (deck_meet_test.lua: the 🎙 progress bar)
 
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end

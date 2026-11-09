@@ -555,6 +555,18 @@ tasks[#tasks].cb(); os.execute("sleep 1.1"); reload()
 c, j = post("/meet?stop=1&id=58&len=6&rate=16000&fmt=ulaw")
 check("repeated stop after another reload → still that capture", c == 200 and j.id == us and j.have == 6)
 
+-- the 🎙 menu's processing bar: whisper's % fills 0–70, speakers sit at 70, the summary at 90, no stage → no bar
+local mt = deck._meet
+mt.proc = "p1"
+local function put(f, s) local h = io.open(MD .. "/p1." .. f, "w"); h:write(s); h:close() end
+put("stage", "stt"); put("prog", "x: progress =  5%\nx: progress = 50%\n")
+check("stt 50% → 35", mt.progress() == 35 and mt.bar(35) == "▰▰▰▰▱▱▱▱▱▱")
+put("stage", "spk")
+local pct, step = mt.progress()
+check("spk → 70 · мовці", pct == 70 and step == "мовці")
+os.remove(MD .. "/p1.stage")
+check("archived → no bar", mt.progress() == nil)
+
 os.execute("rm -rf '" .. home .. "'")
 print(fails == 0 and "PASS" or ("FAIL " .. fails))
 os.exit(fails == 0 and 0 or 1)
