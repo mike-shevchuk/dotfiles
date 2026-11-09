@@ -89,6 +89,14 @@ local function task(cmd, args, cb)
   t:start()
   return t
 end
+-- a refresh a poll kicks off: skipped while its last run still works (Finder once took 42 s to answer an osascript,
+-- and the board asks every ~2 s)
+local running = {}
+local function taskOnce(key, cmd, args, cb)
+  if running[key] then return end
+  running[key] = true
+  task(cmd, args, function(out, code) running[key] = nil; if cb then cb(out, code) end end)
+end
 
 local function readFile(path)
   local f = io.open(path, "rb")
@@ -749,28 +757,25 @@ K.NP = {
 }
 -- AppleScript runs in /usr/bin/osascript tasks (never on Hammerspoon's thread: an Automation prompt or a busy
 -- app would stall the whole deck server); /mac answers from these caches and kicks off a refresh
-local macNP, macFiles = nil, {}
+local macNP, macFiles, macFound = nil, {}, {} -- macFound: app → its now playing (false = nothing)
 local function osa(script, cb) task("/usr/bin/osascript", { "-e", script }, cb) end
 
 local function refreshMac()
-  local found = {}
   for _, app in ipairs({ "Spotify", "Music" }) do
-    osa(K.NP[app], function(out)
+    taskOnce("np:" .. app, "/usr/bin/osascript", { "-e", K.NP[app] }, function(out)
       local st, title, artist, pos, dur = out:gsub("%s+$", ""):match("^(%w+)|(.-)|(.-)|(%d+)|(%d+)$")
-      found[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
-                            pos = tonumber(pos), dur = tonumber(dur) } or false
-      if found.Spotify ~= nil and found.Music ~= nil then
-        local sp, mu = found.Spotify, found.Music
-        macNP = (sp and sp.playing and sp) or (mu and mu.playing and mu) or sp or mu or nil
-      end
+      macFound[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
+                               pos = tonumber(pos), dur = tonumber(dur) } or false
+      local sp, mu = macFound.Spotify, macFound.Music
+      macNP = (sp and sp.playing and sp) or (mu and mu.playing and mu) or sp or mu or nil
     end)
   end
-  osa([[tell application "Finder" to set s to selection as alias list
+  taskOnce("finder", "/usr/bin/osascript", { "-e", [[tell application "Finder" to set s to selection as alias list
 set out to ""
 repeat with f in s
   set out to out & POSIX path of f & linefeed
 end repeat
-return out]], function(out)
+return out]] }, function(out)
     local files = {}
     for path in out:gmatch("[^\n]+") do
       if not path:match("/$") then files[#files + 1] = path end -- folders: no
@@ -871,7 +876,7 @@ end
 -- lead.py runs async: the board gets the last result (its long-press refresh brings the fresh one)
 local fleetRaw
 local function refreshFleet()
-  task("/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
+  taskOnce("fleet", "/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
        function(out) fleetRaw = out end)
 end
 local function fleetText(width)
@@ -1392,7 +1397,7 @@ local NO_KILL = { kernel_task = 1, WindowServer = 1, launchd = 1, loginwindow = 
 local topPids, memRaw = {}, ""
 local function memoryState()
   local raw = memRaw -- async below: three sync hs.execute here ran on every panel poll
-  task("/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
+  taskOnce("mem", "/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
     .. "/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level; /bin/df -g / | /usr/bin/awk 'NR==2{print $4}'" },
     function(out) memRaw = out end)
   local ps, rest = raw:match("^(.-)\1\n(.*)$")

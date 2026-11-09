@@ -140,6 +140,31 @@ check("a session changed state → new ETag", et(moved) ~= et(seed(3)))
 local more = seed(3); more.asks[2] = { id = "@3", kind = "choice", age = 1 }
 check("a new ask → new ETag", et(more) ~= et(seed(3)))
 
+print("→ a hung Finder / ps never piles up tasks (the board polls /mac and /panel every ~2 s)")
+do
+  local spawned, realTask = {}, hs.task
+  hs.task = { new = function(path, cb, args)
+    local t = { path = path, cb = cb, args = args }
+    spawned[#spawned + 1] = t
+    return setmetatable(t, { __index = function() return function() end end })
+  end }
+  local none = function() end
+  hs.audiodevice = { defaultOutputDevice = none, defaultInputDevice = none }
+  hs.brightness, hs.caffeinate, hs.host = { get = none }, { get = none }, { interfaceStyle = none }
+  local function count(p) local n = 0; for _, t in ipairs(spawned) do if t.path == p then n = n + 1 end end; return n end
+  handle("POST", "/mac", H, "")
+  local first = count("/usr/bin/osascript")
+  handle("POST", "/mac", H, ""); handle("POST", "/panel", H, ""); handle("POST", "/panel", H, "")
+  check("/mac starts its osascripts once", first == 3)
+  check("… and not again while they still run", count("/usr/bin/osascript") == first)
+  check("/panel's ps starts once while it runs", count("/bin/sh") == 1)
+  local n = #spawned
+  for k = 1, n do local t = spawned[k]; if t.cb then t.cb(0, "") end end
+  handle("POST", "/mac", H, "")
+  check("finished → the next /mac refreshes again", count("/usr/bin/osascript") == first * 2)
+  hs.task = realTask
+end
+
 print("→ no meetings dir yet")
 os.execute("rm -rf '" .. MD .. "'")
 hs.fs.dir = function() error("cannot open") end
