@@ -584,7 +584,7 @@ check("shot → 200, screencapture into <id>_clips/ (meeting.py attaches it)", c
 c, j = post("/meet/screen?act=rec&on=1")
 local rec = tasks[#tasks]
 check("rec on → 200 {screen=0}, ffmpeg grabs the screen into an .mp4", c == 200 and j.screen == 0
-  and last():find("ffmpeg", 1, true) ~= nil and last():find("avfoundation", 1, true) ~= nil and last():find("%.mp4$") ~= nil)
+  and last():find("ffmpeg", 1, true) ~= nil and last():find("avfoundation", 1, true) ~= nil and last():find(MD .. "/" .. name(SAT) .. "_screen-", 1, true) ~= nil and last():find("%.mp4$") ~= nil)
 rec.interrupt = function(self) self.stopped = true; return self end
 nsp = #spawned
 c, j = post("/meet/screen?act=rec&on=1")

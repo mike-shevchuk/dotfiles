@@ -1903,7 +1903,9 @@ function meet.screen(act, on)
     end, { "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "1", "-pixel_format", "nv12",
       "-framerate", "10", "-i", K.SCREEN_DEV .. ":none", "-t", tostring(K.REC_MAX), "-vf", "scale=1280:-2",
       "-c:v", "h264_videotoolbox", "-b:v", "1500k", "-y",
-      meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mp4" })
+      -- mid-meeting: next to it, so it moves into the meeting's folder with the summary (Mike 10.11), else the Desktop
+      meetId and MEET_DIR .. "/" .. meetId .. "_screen-" .. os.date("%H%M%S") .. ".mp4"
+        or meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mp4" })
     meet.rec = r
     r.task:start()
   elseif not on then meet.screenStop() end
