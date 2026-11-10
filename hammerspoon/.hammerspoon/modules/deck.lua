@@ -1867,16 +1867,18 @@ end
 -- 📷 / ⏺ on the board mid-meeting: the Mac's screen into the places meeting.py already reads — a shot into
 -- <id>_clips/ (shots()), a recording into the screencapture folder (rec_frames(), by the file's birth time)
 K.REC_MAX = 10800 -- knob: a forgotten ⏺ stops itself after 3 h
+K.SCREEN_DEV = "1" -- knob: avfoundation's «Capture screen 0» (ffmpeg -f avfoundation -list_devices true -i "")
 function meet.recDir()
   local loc = (hs.execute("/usr/bin/defaults read com.apple.screencapture location 2>/dev/null") or ""):match("^%s*(.-)%s*$")
   return loc ~= "" and loc:gsub("^~", HOME) or HOME .. "/Desktop"
 end
-function meet.screenStop() -- screencapture -v stops on any key; SIGINT if it doesn't within 10 s
+-- ffmpeg, not `screencapture -v`: without a terminal screencapture throws the file away on any stop (stdin key,
+-- SIGINT, SIGTERM — tested 10.11, two takes lost); ffmpeg finishes the .mp4 on SIGINT at once
+function meet.screenStop()
   local r = meet.rec
   if not r or r.stopping then return end
   r.stopping = true
-  r.task:setInput("x")
-  hs.timer.doAfter(10, function() if meet.rec == r then r.task:interrupt() end end)
+  r.task:interrupt()
 end
 function meet.screen(act, on)
   if act == "shot" then
@@ -1891,14 +1893,17 @@ function meet.screen(act, on)
       return
     end
     local r = {}
-    r.t0, r.task = os.time(), hs.task.new("/usr/sbin/screencapture", function(code, _, err)
-      if code ~= 0 then
+    r.t0, r.task = os.time(), hs.task.new(FFMPEG, function(code, _, err)
+      if code ~= 0 and not r.stopping then -- 255 = stopped by SIGINT, the file is complete
         print("deck: screen recording failed (" .. tostring(code) .. "): " .. tostring(err))
         hs.notify.new({ title = "⏺ Запис екрана зупинився з помилкою", informativeText = tostring(err) }):send()
       end
       if meet.rec == r then meet.rec = nil end
       if r.after then r.after() end
-    end, { "-v", "-x", "-V", tostring(K.REC_MAX), meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mov" })
+    end, { "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "1", "-pixel_format", "nv12",
+      "-framerate", "10", "-i", K.SCREEN_DEV .. ":none", "-t", tostring(K.REC_MAX), "-vf", "scale=1280:-2",
+      "-c:v", "h264_videotoolbox", "-b:v", "1500k", "-y",
+      meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mp4" })
     meet.rec = r
     r.task:start()
   elseif not on then meet.screenStop() end
