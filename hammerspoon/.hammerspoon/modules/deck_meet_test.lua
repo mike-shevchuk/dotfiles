@@ -583,17 +583,17 @@ check("shot → 200, screencapture into <id>_clips/ (meeting.py attaches it)", c
   and last():find("screencapture -x " .. MD .. "/" .. name(SAT) .. "_clips/", 1, true) ~= nil)
 c, j = post("/meet/screen?act=rec&on=1")
 local rec = tasks[#tasks]
-check("rec on → 200 {screen=0}, screencapture -v into a .mov", c == 200 and j.screen == 0
-  and last():find("screencapture -v -x", 1, true) ~= nil and last():find("%.mov$") ~= nil)
-rec.setInput = function(self, s) self.input = s; return self end
+check("rec on → 200 {screen=0}, ffmpeg grabs the screen into an .mp4", c == 200 and j.screen == 0
+  and last():find("ffmpeg", 1, true) ~= nil and last():find("avfoundation", 1, true) ~= nil and last():find("%.mp4$") ~= nil)
+rec.interrupt = function(self) self.stopped = true; return self end
 nsp = #spawned
 c, j = post("/meet/screen?act=rec&on=1")
 check("rec on again → still the one recording", c == 200 and j.screen == 0 and #spawned == nsp)
 c = post("/meet?stop=1&id=" .. SAT .. "-1&len=0&rate=16000&fmt=ulaw")
-check("meeting stop → the screen recording is told to stop, meeting.py waits", c == 200 and rawget(rec, "input") == "x" and #spawned == nsp)
+check("meeting stop → the screen recording gets SIGINT (ffmpeg closes the file), meeting.py waits", c == 200 and rawget(rec, "stopped") and #spawned == nsp)
 rec.cb(0)
-for k = #tasks, 1, -1 do if spawned[k]:find("ffmpeg", 1, true) then tasks[k].cb(); break end end -- the backup closes
-check("…the .mov closed → meeting.py runs (it reads the recording)", last():find("meeting.py", 1, true) ~= nil)
+for k = #tasks, 1, -1 do if tasks[k] ~= rec and spawned[k]:find("ffmpeg", 1, true) then tasks[k].cb(); break end end -- the backup closes
+check("…the .mp4 closed → meeting.py runs (it reads the recording)", last():find("meeting.py", 1, true) ~= nil)
 c, j = post("/meet/screen?act=rec&on=0")
 check("rec off with nothing recording → 200, no screen", c == 200 and j.screen == nil)
 c = post("/meet/screen?act=nope")
