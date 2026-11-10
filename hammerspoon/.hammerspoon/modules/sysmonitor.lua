@@ -164,20 +164,25 @@ local function updateTitle()
 end
 
 local buildMenu
-local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", TOPMEM_CMD }
+local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage" }
+-- the process table (top -l 1: ~0.6 s CPU) only every 6th tick = 60 s; the title needs just vm_stat
+local TOP_EVERY, tick = 6, 0
 local refreshTask
 function M.refresh()
     if not menubar or (refreshTask and refreshTask:isRunning()) then return end
+    local cmds = { table.unpack(REFRESH_CMDS) }
+    if tick % TOP_EVERY == 0 or not cached[TOPMEM_CMD] then table.insert(cmds, TOPMEM_CMD) end
+    tick = tick + 1
     refreshTask = hs.task.new("/bin/sh", function(_, out)
         local i = 0
         for part in ((out or "") .. "\1\n"):gmatch("(.-)\1\n") do
             i = i + 1
-            if REFRESH_CMDS[i] then cached[REFRESH_CMDS[i]] = part end
+            if cmds[i] then cached[cmds[i]] = part end
         end
         local used, total = getMemoryUsage()
         cachedRamPct = total > 0 and math.floor(used / total * 100) or 0
         updateTitle()
-    end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(REFRESH_CMDS, "; printf '\\1\\n'; ") })
+    end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(cmds, "; printf '\\1\\n'; ") })
     refreshTask:start()
 end
 
