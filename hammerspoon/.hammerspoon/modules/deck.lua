@@ -1,5 +1,6 @@
 -- ESP32 deck: HTTP API for the Waveshare ESP32-C5 touch board (firmware + web simulator: ~/code/esp-deck)
--- GET  /state               → dashboard, tmux sessions, recipes, voice state (JSON)
+-- GET  /state[?s=1]         → dashboard, recipes, voice state (JSON); s=1: no tmux sessions, their version `sv` instead
+-- GET  /sessions            → {sessions} with its own ETag (the board asks when sv moves or a sessions view is on screen)
 -- GET  /pane?t=@ID[&m=clean] → last lines of that tmux window (clean: no Claude chrome, turns marked \1u / \1a)
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
 -- POST /key?t=@ID&k=Enter   → one whitelisted tmux key (Escape to a Claude window also marks it done)
@@ -2006,16 +2007,27 @@ local function noAge(list)
   end
   return r
 end
+local function fnv(key)
+  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
+  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
+  return string.format("%016x", h64)
+end
 local function stateEtag(st)
   local k = {}
   for f, v in pairs(st) do if not MOVING[f] then k[f] = v end end
   k.sessions, k.asks = noAge(st.sessions), noAge(st.asks)
-  local key = hs.json.encode(k) .. os.time() // 60
-  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
-  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
-  return string.format('"%016x"', h64)
+  return '"' .. fnv(hs.json.encode(k) .. os.time() // 60) .. '"'
+end
+-- /state.sv: moves only when a window comes or goes or its state does — what a dark board needs (✓ toasts, the hero
+-- count); doing/ctx/age/order reach it through GET /sessions while a sessions view is on screen (owner 2026-11-10)
+local function sessVer(list)
+  local k = {}
+  for i, s in ipairs(list) do k[i] = (s.id or "") .. "=" .. (s.state or "") .. "/" .. (s.st or "") end
+  table.sort(k)
+  return fnv(table.concat(k, ";")):sub(1, 8)
 end
 M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
+M._sessVer = sessVer -- test hook (deck_state_test.lua)
 M._parseSessions = parseSessions -- test hook (deck_meet_test.lua)
 M._meet = meet -- test hook (deck_meet_test.lua: the 🎙 progress bar)
 
@@ -2029,8 +2041,10 @@ local function handle(method, path, headers, body)
   local p = query(qs)
   local id = p.t and p.t:match("^@%d+$")
 
-  if method == "GET" and route == "/state" then
-    local st = state()
+  if method == "GET" and (route == "/state" or route == "/sessions") then
+    local st = route == "/state" and state() or { sessions = sessions() }
+    -- ?s=1: a board that asks GET /sessions itself; plain /state keeps them for older firmware (remove once flashed)
+    if route == "/state" and p.s == "1" then st.sv, st.sessions = sessVer(st.sessions), nil end
     local out, code, h = reply(st, 200, true)
     h.ETag = stateEtag(st)
     if headers["If-None-Match"] == h.ETag then return "", 304, h end

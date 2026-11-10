@@ -114,6 +114,31 @@ check("meet.pending lists <id>.stage with bid", s.meet.pending and #s.meet.pendi
 check("no build announced → fw_sig absent/null", s.fw_sig == nil)
 check("no `limits` (the board draws `lim`)", s.limits == nil and s.lim ~= nil)
 
+print("→ Claude sessions: their own request (owner 2026-11-10)")
+check("/state (old firmware) still carries sessions", type(s.sessions) == "table")
+local lean = dec((handle("GET", "/state?s=1", H, "")))
+check("/state?s=1: no sessions, a version sv instead", lean.sessions == nil and type(lean.sv) == "string" and #lean.sv > 0)
+local sb, sc, sh = handle("GET", "/sessions", H, "")
+check("/sessions → 200 {sessions} with an ETag", sc == 200 and type(dec(sb).sessions) == "table" and sh and sh.ETag)
+local _, sc2 = handle("GET", "/sessions", { ["X-Deck-Token"] = "tok", ["If-None-Match"] = sh.ETag }, "")
+check("/sessions same ETag → 304", sc2 == 304)
+local _, sc3 = handle("GET", "/sessions", {}, "")
+check("/sessions without the token → 403", sc3 == 403)
+local sv = deck._sessVer
+local base = { { id = "@1", claude = true, state = "busy", st = "working", doing = "a", ctx = 5, age = 3 } }
+local function cp(t, f) local r = {}; for k, v in pairs(t[1]) do r[k] = v end; for k, v in pairs(f) do r[k] = v end; return { r } end
+check("sv holds while only doing/ctx/age move", sv(base) == sv(cp(base, { doing = "b", ctx = 9, age = 70 })))
+check("sv moves when a session's st moves", sv(base) ~= sv(cp(base, { st = "done" })))
+check("sv moves when a window comes or goes", sv(base) ~= sv({}) and sv(base) ~= sv({ base[1], { id = "@2", state = "idle" } }))
+local realopen = io.open
+io.open = function(p, m) -- an announced build: FW_SHA + the signature `just ota` leaves in /tmp
+  if p == "/tmp/deck-ota.sha" then return realopen(home .. "/fw.sha", m) elseif p == "/tmp/deck-ota.sig" then return realopen(home .. "/fw.sig", m) end
+  return realopen(p, m)
+end
+w(home .. "/fw.sha", "abc123"); w(home .. "/fw.sig", "MEUCIQ-test-signature")
+local announced = dec((get(nil)))
+io.open = realopen
+check("announced build → fw and fw_sig from /tmp/deck-ota.sig", announced.fw == "abc123" and announced.fw_sig == "MEUCIQ-test-signature")
 
 print("→ state changes → new ETag")
 w(MD .. "/p1.stage", "sum")
