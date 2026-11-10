@@ -389,3 +389,7 @@ bind w display-popup -E -w 85% -h 75% -d "#{pane_current_path}" "~/dotfiles/tmux
 # -- Initialize TPM (keep at bottom) ------------------------------------------
 
 run '~/.tmux/plugins/tpm/tpm'
+
+# Mouse wheel → ↑/↓ in fullscreen apps without mouse support (tiki, less, man) — Mike 10.11
+bind-key -n WheelUpPane if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { if-shell -F "#{alternate_on}" { send-keys -N 3 Up } { copy-mode -e } }
+bind-key -n WheelDownPane if-shell -F "#{||:#{pane_in_mode},#{mouse_any_flag}}" { send-keys -M } { if-shell -F "#{alternate_on}" { send-keys -N 3 Down } { send-keys -M } }
