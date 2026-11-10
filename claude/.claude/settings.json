@@ -10,7 +10,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx tsx ~/.claude/hooks/danger-guard.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/danger-guard.ts || exec npx tsx ~/.claude/hooks/danger-guard.ts"
           }
         ]
       },
@@ -30,7 +30,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx tsx ~/.claude/hooks/notification.ts --notify"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/notification.ts --notify || exec npx tsx ~/.claude/hooks/notification.ts --notify"
           },
           {
             "type": "command",
@@ -45,11 +45,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx tsx ~/.claude/hooks/stop.ts --chat"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/stop.ts --chat || exec npx tsx ~/.claude/hooks/stop.ts --chat"
           },
           {
             "type": "command",
-            "command": "npx tsx ~/.claude/hooks/cost-logger.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/cost-logger.ts || exec npx tsx ~/.claude/hooks/cost-logger.ts"
           },
           {
             "type": "command",
@@ -64,7 +64,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "npx tsx ~/.claude/hooks/subagent_stop.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/subagent_stop.ts || exec npx tsx ~/.claude/hooks/subagent_stop.ts"
           }
         ]
       }
