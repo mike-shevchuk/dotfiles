@@ -86,6 +86,38 @@ kbd{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--p
 #toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 6px 24px #0008;display:none;max-width:360px;z-index:10}
 .ro{color:var(--amber);font-size:12px}
 .muted{color:var(--faint)}
+
+/* screens + windows */
+#scr{width:100%;height:300px;display:block;background:var(--panel2);border-radius:8px}
+#scr .win{cursor:pointer;transition:opacity .15s}#scr .win:hover rect{stroke:#fff}
+.apps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+/* system */
+.kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);align-items:center}
+.kv:last-child{border-bottom:0}.kv span:first-child{color:var(--dim)}
+input[type=range]{accent-color:var(--blue);width:150px}
+.mini{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;width:150px}.mini span{display:block;height:100%}
+/* keyboard map */
+.layers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.kb{display:flex;flex-direction:column;gap:5px;overflow-x:auto;padding-bottom:4px}
+.kr{display:flex;gap:5px}
+.k{flex:none;width:42px;height:44px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--faint);font:600 12px ui-monospace,Menlo,monospace;
+   display:flex;flex-direction:column;justify-content:space-between;padding:4px 5px;position:relative;overflow:hidden}
+.k small{font:500 9px/1.1 -apple-system,system-ui,sans-serif;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k.on{background:linear-gradient(160deg,#1f6feb,#8957e5);border-color:#58a6ff;color:#fff;cursor:pointer}
+.k.on:hover{filter:brightness(1.2)}
+.k.w15{width:62px}.k.w175{width:74px}.k.w2{width:88px}.k.w225{width:98px}.k.sp{width:250px}
+/* health */
+.slow{display:grid;grid-template-columns:minmax(0,1fr) 70px;gap:4px 10px;font-size:12px;align-items:center}
+.slow .site{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
+.slow .b{height:8px;border-radius:4px;background:linear-gradient(90deg,var(--amber),var(--red))}
+.err{font:11px/1.4 ui-monospace,Menlo,monospace;color:#ffa198;background:#f8514912;border-left:2px solid var(--red);padding:4px 8px;margin:4px 0;white-space:pre-wrap;word-break:break-word}
+
+details.guide{margin-bottom:12px}
+details.guide summary{cursor:pointer;color:var(--blue);font-weight:600;list-style:none}
+details.guide summary::-webkit-details-marker{display:none}
+.gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:12px}
+.gg div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--dim)}
+.gg b{color:var(--text);display:block;margin-bottom:4px}
 </style>
 </head>
 <body>
@@ -99,6 +131,22 @@ kbd{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--p
     <button class="btn" id="refresh">↻ Оновити</button>
   </header>
 
+
+  <details class="guide card" id="guide">
+    <summary>❓ Що тут і як читати — натисни, щоб розгорнути</summary>
+    <div class="gg">
+      <div><b>Кільця зверху</b>RAM — скільки зайнято (активна + wired + стиснута). Swap — скільки памʼяті macOS вже виклала на диск: коли росте, Mac починає підвисати. Wired — памʼять ядра й драйверів, її не можна стиснути; якщо росте день у день — допомагає лише перезавантаження. Стиснута — macOS стискає памʼять, щоб не лізти в swap. Колір: зелений — норма, жовтий — тісно, червоний — бракує.</div>
+      <div><b>Склад памʼяті + графік</b>Смуга показує, з чого складаються 16 GB. Графік під нею — RAM% (синій) і swap% (помаранчевий) за час, поки сторінка відкрита: видно, чи щось росте.</div>
+      <div><b>Хто їсть памʼять</b>Карта: що більша плитка — то більше памʼяті (з урахуванням стиснутої і swap). Клік на групу (Claude, Thorium, Python…) — кожен процес окремо; клік на процес — деталі, його діти (MCP, LSP) і кнопка «Завершити». Hammerspoon, WindowServer і сам hub завершити не дасть.</div>
+      <div><b>Керування</b>Перемикачі Hammerspoon: caffeine (екран не гасне), гарячі клавіші (усі комбінації ⌥⇧ тощо), блок pinch-zoom, темна тема, швидкість прокрутки, pomodoro. Діє одразу, без перезавантаження Hammerspoon.</div>
+      <div><b>Екрани і вікна</b>Схема твоїх моніторів і всіх відкритих вікон у реальних пропорціях. Синя рамка — вікно у фокусі. Клік по вікну — переводить на нього фокус. Внизу — скільки вікон у кожної програми.</div>
+      <div><b>Система</b>Гучність і mute, яскравість, навантаження CPU (1/5/15 хв; якщо більше 10 — ядра не встигають), вільне місце на диску, скільки Mac працює без перезавантаження, IP.</div>
+      <div><b>Карта гарячих клавіш</b>Клавіатура для кожного набору модифікаторів (⌥⇧, ⌃⌥⇧, …). Підсвічені — вже зайняті (наведи — яка команда, клік — запустити). Сірі — вільні: туди можна вішати нові комбінації без конфліктів.</div>
+      <div><b>Здоровʼя Hammerspoon</b>Скільки разів Hammerspoon «зависав» (головний потік стояв) і які колбеки найповільніші — це й є причини лагів меню, deck і гарячих клавіш. Нижче — останні помилки з консолі Hammerspoon.</div>
+      <div><b>Усі команди</b>Кожна дія Hammerspoon: гарячі клавіші, дії, функції модулів і рецепти <code>just -g</code>. Пошук (клавіша <kbd>/</kbd>), фільтр за типом і категорією, ▶ — запустити. ★ — обрані в палітрі.</div>
+      <div><b>Хто що може</b>Дивитися — з будь-якого пристрою в домашній мережі (телефон теж). Керувати (запуск, перемикачі, завершення, фокус) — лише з самого Mac. Назви вікон і помилки консолі теж видно лише на Mac. Дані оновлюються кожні 10–30 с і лише коли вкладка відкрита.</div>
+    </div>
+  </details>
   <section class="grid stats">
     <div class="card stat" id="st-ram"></div>
     <div class="card stat" id="st-swap"></div>
@@ -127,6 +175,31 @@ kbd{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--p
     </div>
   </section>
 
+
+  <section class="grid main">
+    <div class="card">
+      <h2>Екрани і вікна <span class="muted" id="wcount"></span></h2>
+      <svg id="scr"></svg>
+      <div class="apps" id="apps"></div>
+    </div>
+    <div class="card">
+      <h2>Система</h2>
+      <div id="sys"></div>
+    </div>
+  </section>
+
+  <section class="grid main">
+    <div class="card">
+      <h2>Карта гарячих клавіш <span class="muted" id="kbinfo"></span></h2>
+      <div class="layers" id="layers"></div>
+      <div class="kb" id="kb"></div>
+      <div class="desc" style="margin-top:8px">Підсвічені клавіші вже зайняті в цьому шарі модифікаторів — наведи, щоб побачити команду, клікни, щоб запустити. Сірі — вільні для нових комбінацій.</div>
+    </div>
+    <div class="card">
+      <h2>Здоровʼя Hammerspoon</h2>
+      <div id="health"></div>
+    </div>
+  </section>
   <section class="card cmds">
     <h2>Усі команди Hammerspoon <span class="muted" id="cmdcount"></span></h2>
     <div class="cmdbar">
@@ -280,6 +353,116 @@ function renderCmds() {
   }));
 }
 
+
+/* ── screens + windows ─────────────────────────────────── */
+let LIVE = null;
+const appHue = n => { let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+function renderScreens() {
+  if (!LIVE?.screens?.length) return;
+  const S = LIVE.screens, x0 = Math.min(...S.map(s => s.x)), y0 = Math.min(...S.map(s => s.y)),
+        x1 = Math.max(...S.map(s => s.x + s.w)), y1 = Math.max(...S.map(s => s.y + s.h)), pad = 20;
+  const svg = $("#scr"); svg.setAttribute("viewBox", `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
+  const ns = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const kids = [];
+  for (const s of S) { kids.push(mk("rect", { x: s.x, y: s.y, width: s.w, height: s.h, rx: 24, fill: "#0d1117", stroke: s.main ? "#58a6ff" : "#30363d", "stroke-width": 6 }));
+    const t = mk("text", { x: s.x + 30, y: s.y + s.h - 30, fill: "#6e7681", "font-size": Math.max(28, s.h / 30) }); t.textContent = s.name + (s.main ? " · головний" : ""); kids.push(t); }
+  // tiny helper windows (HS canvases, popovers) only clutter the map
+  const wins = LIVE.wins.filter(w => w.w >= 120 && w.h >= 80);
+  for (const w of [...wins].reverse()) {
+    const g = mk("g", { class: "win" }), h = appHue(w.app);
+    g.append(mk("rect", { x: w.x, y: w.y, width: w.w, height: w.h, rx: 12, fill: `hsla(${h},55%,45%,${w.focused ? .55 : .28})`, stroke: w.focused ? "#58a6ff" : `hsl(${h},55%,60%)`, "stroke-width": w.focused ? 10 : 3 }));
+    const fs = Math.max(22, Math.min(46, w.w / 14)), t = mk("text", { x: w.x + 18, y: w.y + fs + 12, fill: "#fff", "font-size": fs, "font-weight": 650 });
+    t.textContent = w.app + (w.title ? " — " + w.title.slice(0, Math.floor(w.w / (fs * .55))) : ""); g.append(t);
+    const tt = mk("title", {}); tt.textContent = `${w.app}${w.title ? " — " + w.title : ""}\n${Math.round(w.w)}×${Math.round(w.h)}  ·  клік = фокус`; g.append(tt);
+    g.onclick = async () => { if (!SELF) return toast("фокус — лише з цього Mac", false); try { await post("/_hs/focus", { id: w.id }); setTimeout(loadLive, 400); } catch (e) { toast(e.message, false); } };
+    kids.push(g);
+  }
+  svg.replaceChildren(...kids);
+  const by = {}; for (const w of LIVE.wins) by[w.app] = (by[w.app] || 0) + 1;
+  $("#wcount").textContent = `· ${LIVE.wins.length} вікон, ${Object.keys(by).length} програм`;
+  $("#apps").replaceChildren(...Object.entries(by).sort((a, b) => b[1] - a[1]).map(([a, n]) => el("span", { class: "chip", style: `border-color:hsl(${appHue(a)},55%,45%)` }, `${a} ${n}`)));
+}
+
+/* ── system ────────────────────────────────────────────── */
+function renderSystem() {
+  if (!LIVE) return;
+  const L = LIVE, cores = 10, rows = [];
+  const kv = (k, v) => el("div", { class: "kv" }, el("span", {}, k), v);
+  const mini = (p, c) => el("div", { class: "mini" }, el("span", { style: `width:${Math.min(100, p * 100)}%;background:${c}` }));
+  if (L.audio) {
+    const r = el("input", { type: "range", min: 0, max: 100, value: L.audio.vol }); r.disabled = !SELF;
+    r.onchange = async () => { try { await post("/_hs/toggle", { what: "volume", value: +r.value }); } catch (e) { toast(e.message, false); } };
+    const m = el("button", { class: "btn" }, L.audio.mute ? "🔇" : "🔊"); m.disabled = !SELF;
+    m.onclick = async () => { try { await post("/_hs/toggle", { what: "mute" }); setTimeout(loadLive, 300); } catch (e) { toast(e.message, false); } };
+    rows.push(kv(`Гучність · ${L.audio.name}`, el("span", { style: "display:flex;gap:8px;align-items:center" }, r, m)));
+  }
+  if (L.bright != null) {
+    const r = el("input", { type: "range", min: 0, max: 100, value: Math.round(L.bright) }); r.disabled = !SELF;
+    r.onchange = async () => { try { await post("/_hs/toggle", { what: "brightness", value: +r.value }); } catch (e) { toast(e.message, false); } };
+    rows.push(kv("Яскравість", r));
+  }
+  if (L.load?.length) rows.push(kv(`Навантаження (1/5/15 хв, ${cores} ядер)`, el("span", { style: "display:flex;flex-direction:column;gap:3px;align-items:flex-end" },
+    el("span", { style: "font-variant-numeric:tabular-nums" }, L.load.map(x => x.toFixed(1)).join(" · ")), mini(L.load[0] / cores, L.load[0] > cores ? "var(--red)" : L.load[0] > cores * .7 ? "var(--amber)" : "var(--green)"))));
+  if (L.disk?.totalKB) { const fr = L.disk.freeKB / L.disk.totalKB;
+    rows.push(kv("Диск вільно", el("span", { style: "display:flex;flex-direction:column;gap:3px;align-items:flex-end" }, el("span", {}, `${fmt(L.disk.freeKB)} з ${fmt(L.disk.totalKB)}`), mini(1 - fr, fr < .1 ? "var(--red)" : fr < .2 ? "var(--amber)" : "var(--blue)")))); }
+  const d = Math.floor(L.uptime / 86400), h = Math.floor(L.uptime % 86400 / 3600);
+  rows.push(kv("Без перезавантаження", el("span", { style: L.uptime > 4 * 86400 ? "color:var(--amber)" : "" }, `${d}д ${h}г` + (L.uptime > 4 * 86400 ? " · wired росте — час на reboot" : ""))));
+  rows.push(kv("Мережа", el("span", {}, `${L.ip}${L.wifi ? " · Wi-Fi " + L.wifi : ""}`)));
+  $("#sys").replaceChildren(...rows);
+}
+
+/* ── keyboard map ──────────────────────────────────────── */
+const MODS = [["ctrl", "⌃"], ["alt", "⌥"], ["shift", "⇧"], ["cmd", "⌘"]];
+const normMod = m => ({ control: "ctrl", "⌃": "ctrl", option: "alt", "⌥": "alt", "⇧": "shift", command: "cmd", "⌘": "cmd" }[String(m).toLowerCase()] || String(m).toLowerCase());
+const layerOf = mods => { const set = new Set((Array.isArray(mods) ? mods : Object.values(mods || {})).map(normMod)); return MODS.filter(([m]) => set.has(m)).map(([, s]) => s).join("") || "без мод."; };
+const normKey = k => { k = String(k || "").toLowerCase(); return { "return": "enter", esc: "escape", "`": "grave", pageup: "pageup" }[k] || k; };
+const ROWS = [
+  [["escape","esc"],..."f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12".split(" ").map(k => [k, k.toUpperCase()])],
+  [["grave","`"],..."1234567890".split("").map(k => [k, k]),["-","-"],["=","="],["delete","⌫","w15"]],
+  [["tab","⇥","w15"],..."qwertyuiop".split("").map(k => [k, k.toUpperCase()]),["[","["],["]","]"],["\\","\\"]],
+  [["capslock","⇪","w175"],..."asdfghjkl".split("").map(k => [k, k.toUpperCase()]),[";",";"],["'","'"],["enter","⏎","w175"]],
+  [["shift","⇧","w225"],..."zxcvbnm".split("").map(k => [k, k.toUpperCase()]),[",",","],[".","."],["/","/"],["up","↑"]],
+  [["space","space","sp"],["left","←"],["down","↓"],["right","→"]],
+];
+let layer = null;
+function renderKeyboard() {
+  if (!ST) return;
+  const keys = ST.entries.filter(e => e.kind === "key" && e.key);
+  const layers = {}; for (const e of keys) (layers[layerOf(e.mods)] ??= []).push(e);
+  const names = Object.keys(layers).sort((a, b) => layers[b].length - layers[a].length);
+  if (!layer || !layers[layer]) layer = names[0];
+  $("#layers").replaceChildren(...names.map(n => { const c = el("span", { class: "chip" + (n === layer ? " on" : "") }, `${n} · ${layers[n].length}`); c.onclick = () => { layer = n; renderKeyboard(); }; return c; }));
+  const map = {}; for (const e of layers[layer] || []) map[normKey(e.key)] = e;
+  let free = 0, total = 0;
+  $("#kb").replaceChildren(...ROWS.map(r => el("div", { class: "kr" }, ...r.map(([id, cap, w]) => {
+    const e = map[id]; total++; if (!e) free++;
+    const k = el("div", { class: "k" + (w ? " " + w : "") + (e ? " on" : "") }, el("span", {}, cap), e ? el("small", {}, e.title) : null);
+    if (e) { k.title = `${e.chord} — ${e.title}\n${e.category || ""}`; k.onclick = async () => { if (!SELF) return toast("запуск — лише з цього Mac", false); try { await post("/_hs/run", { title: e.title, source: e.source }); toast("▶ " + e.title); } catch (x) { toast(x.message, false); } }; }
+    return k;
+  }))));
+  const unknown = (layers[layer] || []).filter(e => !ROWS.flat().some(([id]) => id === normKey(e.key)));
+  $("#kbinfo").textContent = `· шар ${layer}: зайнято ${total - free}, вільно ${free}` + (unknown.length ? ` · поза схемою: ${unknown.map(e => e.chord).join(" ")}` : "");
+}
+
+/* ── hammerspoon health ────────────────────────────────── */
+function renderHealth() {
+  if (!LIVE) return;
+  const L = LIVE, max = Math.max(1, ...(L.slow || []).map(s => s.sum));
+  const items = [el("div", { class: "kv" }, el("span", {}, "Зависання HS (головний потік стояв)"), el("span", { style: L.stalls ? "color:var(--amber)" : "" }, L.stalls ? `${L.stalls} · найдовше ${(L.stallMax / 1000).toFixed(1)} с` : "немає"))];
+  if (L.slow?.length) {
+    items.push(el("div", { class: "desc", style: "margin:10px 0 6px" }, "Найповільніші колбеки (>500 мс), за сумою часу — останні 3000 записів deck-slow.log"));
+    items.push(el("div", { class: "slow" }, ...L.slow.flatMap(s => [
+      el("div", {}, el("div", { class: "site", title: s.site }, s.site), el("div", { class: "b", style: `width:${s.sum / max * 100}%` })),
+      el("div", { style: "text-align:right;font-variant-numeric:tabular-nums", title: `останній ${s.last}` }, `×${s.n} · ${(s.max / 1000).toFixed(1)}с`)])));
+  }
+  if (L.errors?.length) { items.push(el("div", { class: "desc", style: "margin:12px 0 4px" }, "Останні помилки в консолі Hammerspoon")); items.push(...L.errors.slice(-6).map(e => el("div", { class: "err" }, e))); }
+  else if (SELF) items.push(el("div", { class: "desc", style: "margin-top:10px" }, "✅ Помилок у консолі немає"));
+  $("#health").replaceChildren(...items);
+}
+
+async function loadLive() {
+  try { LIVE = await (await fetch("/_hs/live", { cache: "no-store" })).json(); renderScreens(); renderSystem(); renderHealth(); } catch (e) { $("#sys").textContent = "немає даних: " + e.message; }
+}
 /* ── data ──────────────────────────────────────────────── */
 async function loadMem() {
   try { MEM = await (await fetch("/_hs/mem", { cache: "no-store" })).json(); renderSys(MEM.sys);
@@ -289,14 +472,15 @@ async function loadMem() {
 }
 async function loadState() {
   try { ST = await (await fetch("/_hs/state", { cache: "no-store" })).json(); if (ST.error) throw new Error(ST.error);
-    SELF = !!ST.self; $("#ro").hidden = SELF; renderControls(); renderCmds();
+    SELF = !!ST.self; $("#ro").hidden = SELF; renderControls(); renderCmds(); renderKeyboard(); renderScreens(); renderSystem(); renderHealth();
   } catch (e) { $("#controls").textContent = "Hammerspoon не відповідає: " + e.message; }
 }
 $("#q").oninput = renderCmds;
-$("#refresh").onclick = () => { loadMem(); loadState(); };
+$("#refresh").onclick = () => { loadMem(); loadState(); loadLive(); };
 addEventListener("keydown", e => { if (e.key === "/" && document.activeElement !== $("#q")) { e.preventDefault(); $("#q").focus(); } });
 addEventListener("resize", () => { clearTimeout(renderTree.t); renderTree.t = setTimeout(renderTree, 150); });
-loadMem(); loadState();
+loadMem(); loadState(); loadLive();
+setInterval(() => { if (!document.hidden) loadLive(); }, 10000);
 setInterval(() => { if (!document.hidden) loadMem(); }, 15000);   // topmem.py ≈ 0.4 s CPU — only while the tab is visible
 setInterval(() => { if (!document.hidden) loadState(); }, 30000);
 </script>
