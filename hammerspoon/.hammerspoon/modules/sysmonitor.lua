@@ -23,6 +23,13 @@ local function shellExec(cmd)
     return hs.execute(string.format("export PATH='%s'; %s", PATH, cmd))
 end
 
+local function utf8sub(str, n)
+    str = tostring(str or "")
+    local ok, len = pcall(utf8.len, str)
+    if not ok or not len or len <= n then return str end
+    return str:sub(1, (utf8.offset(str, n) or #str + 1) - 1) .. "…"
+end
+
 local function styled(text)
     return hs.styledtext.new(text, { font = FONT })
 end
@@ -88,32 +95,13 @@ local function formatUptime(etimeStr)
     return etimeStr
 end
 
--- footprint (compressed + swapped included) and claude → tmux window: see bin/topmem.sh
-local TOPMEM_CMD = os.getenv("HOME") .. "/.hammerspoon/bin/topmem.sh"
+-- memory tree (footprint incl. compressed + swapped; claude sessions named by tmux window): bin/topmem.py → JSON
+local TOPMEM_CMD = "/usr/bin/python3 -I " .. os.getenv("HOME") .. "/.hammerspoon/bin/topmem.py"
 
-local function getTopProcesses()
+local function getMemTree()
     local output = shellExec(TOPMEM_CMD)
-    if not output then return {} end
-
-    local procs = {}
-    for line in output:gmatch("[^\n]+") do
-        local pid, user, rss, cpu, etime, comm =
-            line:match("(%d+)%s+(%S+)%s+(%d+)%s+([%d.]+)%s+(%S+)%s+(.*)")
-        if pid then
-            local name = (comm:match("([^/]+)$") or comm):gsub("^%s+", ""):gsub("%s+$", "")
-            local rssMB = (tonumber(rss) or 0) / 1024
-
-            table.insert(procs, {
-                name = name,
-                pid = tonumber(pid),
-                user = user,
-                cpu = tonumber(cpu) or 0,
-                ramStr = formatMB(rssMB),
-                uptime = formatUptime(etime),
-            })
-        end
-    end
-    return procs
+    local ok, data = pcall(hs.json.decode, output or "")
+    return (ok and type(data) == "table" and data.groups) or {}
 end
 
 local function killProcess(pid, name)
@@ -190,7 +178,7 @@ end
 buildMenu = function()
 
     local used, total, details = getMemoryUsage()
-    local procs = getTopProcesses()
+    local tree = getMemTree()
     local swapUsed, swapTotal = getSwap()
 
     local pct = total > 0 and math.floor(used / total * 100) or 0
@@ -228,23 +216,32 @@ buildMenu = function()
 
     table.insert(menu, { title = "-" })
 
-    -- Process header
+    -- Memory tree: group → process/session → its children; click a process to kill it
     table.insert(menu, {
-        title = styled(string.format(
-            "%-3s %-16s %7s  %5s  %-7s  %s",
-            "#", "PROCESS", "RAM", "CPU", "UPTIME", "USER")),
+        title = styled(string.format("%-34s %8s %6s  %s", "ГРУПА (наведи — розгорнути)", "RAM", "CPU", "×")),
         disabled = true,
     })
-    table.insert(menu, { title = "-" })
-
-    -- Process list
-    for i, p in ipairs(procs) do
-        local procName = p.name:sub(1, 14)
+    for _, g in ipairs(tree) do
+        local sub = {}
+        if g.desc ~= "" then table.insert(sub, { title = styled(g.desc), disabled = true }); table.insert(sub, { title = "-" }) end
+        for _, it in ipairs(g.items) do
+            local kidsMenu = {}
+            for _, k in ipairs(it.kids or {}) do
+                table.insert(kidsMenu, { title = styled(string.format("  %-28s %8s  ×%d", k.name, formatMB(k.kb / 1024), k.n)), disabled = true })
+            end
+            if #kidsMenu > 0 then table.insert(kidsMenu, { title = "-" }) end
+            table.insert(kidsMenu, {
+                title = string.format("Kill PID %d (%s, uptime %s)", it.pid, it.label, formatUptime(it.etime)),
+                fn = function() killProcess(it.pid, it.label) end,
+            })
+            table.insert(sub, {
+                title = styled(string.format("%-44s %8s %5.1f%%  %s", utf8sub(it.label, 44), formatMB(it.kb / 1024), it.cpu, formatUptime(it.etime))),
+                menu = kidsMenu,
+            })
+        end
         table.insert(menu, {
-            title = styled(string.format(
-                "%-3s %-16s %7s  %4.1f%%  %-7s  %s",
-                i .. ".", procName, p.ramStr, p.cpu, p.uptime, p.user)),
-            fn = function() killProcess(p.pid, p.name) end,
+            title = styled(string.format("%-34s %8s %5.1f%%  ×%d", utf8sub(g.name, 34), formatMB(g.kb / 1024), g.cpu, g.n)),
+            menu = sub,
         })
     end
 
