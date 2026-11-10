@@ -88,8 +88,11 @@ local function formatUptime(etimeStr)
     return etimeStr
 end
 
+-- footprint (compressed + swapped included) and claude → tmux window: see bin/topmem.sh
+local TOPMEM_CMD = os.getenv("HOME") .. "/.hammerspoon/bin/topmem.sh"
+
 local function getTopProcesses()
-    local output = shellExec("ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10")
+    local output = shellExec(TOPMEM_CMD)
     if not output then return {} end
 
     local procs = {}
@@ -161,7 +164,7 @@ local function updateTitle()
 end
 
 local buildMenu
-local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", "ps -eo pid,user,rss,%cpu,etime,comm -m | head -11 | tail -10" }
+local REFRESH_CMDS = { "vm_stat", "sysctl vm.swapusage", TOPMEM_CMD }
 local refreshTask
 function M.refresh()
     if not menubar or (refreshTask and refreshTask:isRunning()) then return end
