@@ -136,7 +136,7 @@ def chromium_label(a):
         return "головний процес (вікна, історія, вкладки)" if "Helper" not in a else None
     if t[1] == "renderer":
         cid = re.search(r"--renderer-client-id=(\d+)", a)
-        return ("розширення" if "--extension-process" in a else "вкладка або iframe") + (f" #{cid[1]}" if cid else "")
+        return "розширення" if "--extension-process" in a else "вкладка або iframe"
     if t[1] == "gpu-process":
         return "GPU (малює сторінки)"
     if t[1] == "utility":
@@ -155,6 +155,8 @@ for pid, p in procs.items():
         label = script_label(pid, a) + (" · сирота (батько помер)" if p["ppid"] == 1 else "")
     elif ".app/" in a:
         grp, label = app_of(a), chromium_label(a) or re.sub(r"^.*/", "", a.split(" --")[0])[:40]
+        if grp in BROWSERS:
+            label += f" · PID {pid}"  # match it in the browser's ⇧Esc task manager (Process ID column)
     else:
         grp, label = exe(a), exe(a)
     groups[grp].append(item(pid, label, [pid]))

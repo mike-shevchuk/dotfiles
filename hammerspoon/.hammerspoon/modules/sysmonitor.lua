@@ -226,7 +226,7 @@ buildMenu = function()
         if g.desc ~= "" then table.insert(sub, { title = styled(g.desc), disabled = true }) end
         if g.taskman then
             -- only the browser knows which tab lives in which renderer: open its own task manager (⇧Esc)
-            table.insert(sub, { title = "🔎 Яка вкладка скільки їсть → диспетчер задач браузера (⇧Esc)", fn = function()
+            table.insert(sub, { title = "🔎 Назви вкладок → диспетчер задач браузера (⇧Esc): ПКМ по заголовку → «Process ID», звір PID", fn = function()
                 local app = hs.application.find(g.name) or hs.application.launchOrFocus(g.name)
                 if type(app) == "userdata" then app:activate() end
                 hs.timer.doAfter(0.4, function() hs.eventtap.keyStroke({ "shift" }, "escape") end)
