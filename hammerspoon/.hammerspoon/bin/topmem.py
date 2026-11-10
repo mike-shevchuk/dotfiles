@@ -150,6 +150,8 @@ SHELLS = {"bash", "sh", "zsh", "-zsh", "dash"}
 
 def owner(pid):
     """First ancestor that is not a shell / just: a claude session's tmux window, or the program's name."""
+    if pid in panes:  # the pane runs this very process (tmux new -s x 'just hub')
+        return panes[pid]
     p = procs[pid]["ppid"]
     while p > 1 and p in procs:
         a = procs[p]["args"]
@@ -183,12 +185,37 @@ def shell_label(pid, a):
     return f"{what.strip()} ← {owner(pid)}"
 
 
+def just_label(pid, a):
+    """just --justfile ~/code/x/justfile recipe args → "x/justfile: recipe args ← owner"; -g → global."""
+    t = a.split()[1:]
+    jf, rest, i = None, [], 0
+    while i < len(t):
+        if t[i] in ("--justfile", "-f", "--working-directory", "-d") and i + 1 < len(t):
+            if t[i] in ("--justfile", "-f"):
+                jf = t[i + 1]
+            i += 2
+            continue
+        if t[i] in ("-g", "--global-justfile"):
+            jf = "global"
+        elif not t[i].startswith("-"):
+            rest.append(t[i])
+        i += 1
+    if jf and jf != "global":
+        jf = "/".join(jf.replace(os.path.expanduser("~"), "~").split("/")[-3:])
+    if not jf:
+        cwd = re.search(r"^n(.+)$", sh("lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"), re.M)
+        jf = (os.path.basename(cwd[1]) + "/justfile") if cwd else "justfile"
+    return f"{jf}: {' '.join(rest)[:40] or '(default)'} ← {owner(pid)}"
+
+
 groups = defaultdict(list)
 for pid, p in procs.items():
     a = p["args"]
     if pid in claimed or (mem.get(pid, 0) < 1024 and exe(a) not in SHELLS):
         continue
-    if exe(a) in SHELLS:
+    if exe(a) == "just":
+        grp, label = "just", just_label(pid, a)
+    elif exe(a) in SHELLS:
         grp, label = "shell (bash/zsh/sh)", shell_label(pid, a)
     elif INTERP.search(exe(a)) and ".app/" not in a:
         grp = "Python" if "ython" in exe(a) or "uvicorn" in a else exe(a)
@@ -201,6 +228,7 @@ for pid, p in procs.items():
         grp, label = exe(a), exe(a)
     groups[grp].append(item(pid, label, [pid]))
 DESC["shell (bash/zsh/sh)"] = "оболонки: що запущено ← хто власник (вікно tmux, just, claude); сотні «0m» = сплеск коротких скриптів"
+DESC["just"] = "рецепти: justfile: рецепт аргументи ← хто запустив; великий RAM = just розбирає великий justfile"
 DESC["Python"] = "скрипти: файл + аргументи · тека, де запущено; «сирота» = його запускач уже завершився"
 groups["Claude"] = claude_items
 out = []
