@@ -23,6 +23,7 @@ DESC = {
     "Hammerspoon": "меню, deck, гарячі клавіші — не вбивати",
     "Docker": "VM Docker",
 }
+BROWSERS = ("Thorium Browser", "Brave Browser", "Google Chrome", "Microsoft Edge")
 UNIT = {"B": 1 / 1024, "K": 1, "M": 1024, "G": 1024 * 1024}
 
 
@@ -124,6 +125,26 @@ def script_label(pid, args):
     return f"{script} · {os.path.basename(m[1])}" if m else script
 
 
+UTIL = {"network": "мережа (усі запити браузера)", "storage": "сховище (cookies, IndexedDB)",
+        "audio": "аудіо", "video_capture": "камера / захоплення відео", "data_decoder": "розбір JSON/картинок"}
+
+
+def chromium_label(a):
+    """Chromium helpers: the flags say what a process is (tab names are only in the browser's ⇧Esc task manager)."""
+    t = re.search(r"--type=([\w-]+)", a)
+    if not t:
+        return "головний процес (вікна, історія, вкладки)" if "Helper" not in a else None
+    if t[1] == "renderer":
+        cid = re.search(r"--renderer-client-id=(\d+)", a)
+        return ("розширення" if "--extension-process" in a else "вкладка або iframe") + (f" #{cid[1]}" if cid else "")
+    if t[1] == "gpu-process":
+        return "GPU (малює сторінки)"
+    if t[1] == "utility":
+        u = re.search(r"--utility-sub-type=(\w+)", a)
+        return "служба: " + UTIL.get(u[1] if u else "", u[1] if u else "?")
+    return t[1]
+
+
 groups = defaultdict(list)
 for pid, p in procs.items():
     if pid in claimed or mem.get(pid, 0) < 1024:
@@ -133,7 +154,7 @@ for pid, p in procs.items():
         grp = "Python" if "ython" in exe(a) or "uvicorn" in a else exe(a)
         label = script_label(pid, a) + (" · сирота (батько помер)" if p["ppid"] == 1 else "")
     elif ".app/" in a:
-        grp, label = app_of(a), re.sub(r"^.*/", "", a.split(" --")[0])[:40]
+        grp, label = app_of(a), chromium_label(a) or re.sub(r"^.*/", "", a.split(" --")[0])[:40]
     else:
         grp, label = exe(a), exe(a)
     groups[grp].append(item(pid, label, [pid]))
@@ -142,7 +163,7 @@ groups["Claude"] = claude_items
 out = []
 for name, items in groups.items():
     items.sort(key=lambda i: -i["kb"])
-    out.append({"name": name, "desc": DESC.get(name, ""), "n": len(items), "kb": sum(i["kb"] for i in items),
+    out.append({"name": name, "desc": DESC.get(name, ""), "taskman": name in BROWSERS, "n": len(items), "kb": sum(i["kb"] for i in items),
                 "cpu": sum(i["cpu"] for i in items), "items": items[:40]})
 out.sort(key=lambda g: -g["kb"])
 print(json.dumps({"groups": out[:10]}, ensure_ascii=False))
