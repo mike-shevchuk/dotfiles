@@ -1884,9 +1884,18 @@ function meet.screen(act, on)
     hs.fs.mkdir(d)
     task("/usr/sbin/screencapture", { "-x", d .. "/" .. os.time() .. ".png" })
   elseif on and not meet.rec then
+    if not hs.screenRecordingState() then -- no permission: screencapture fails at once (Mike 10.11 lost a demo silently)
+      hs.notify.new({ title = "⏺ Запис екрана не почався",
+        informativeText = "Hammerspoon не має дозволу на запис екрана: System Settings → Privacy & Security → Screen Recording" }):send()
+      hs.screenRecordingState(true) -- asks macOS to show its permission prompt
+      return
+    end
     local r = {}
     r.t0, r.task = os.time(), hs.task.new("/usr/sbin/screencapture", function(code, _, err)
-      if code ~= 0 then print("deck: screen recording failed (" .. tostring(code) .. "): " .. tostring(err)) end
+      if code ~= 0 then
+        print("deck: screen recording failed (" .. tostring(code) .. "): " .. tostring(err))
+        hs.notify.new({ title = "⏺ Запис екрана зупинився з помилкою", informativeText = tostring(err) }):send()
+      end
       if meet.rec == r then meet.rec = nil end
       if r.after then r.after() end
     end, { "-v", "-x", "-V", tostring(K.REC_MAX), meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mov" })
