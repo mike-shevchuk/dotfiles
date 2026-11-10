@@ -109,11 +109,35 @@ for pid in procs:
     it["kids"] = [{"name": n, "n": c, "kb": kb} for n, (c, kb) in sorted(by.items(), key=lambda v: -v[1][1]) if kb >= 5 * 1024]
     claude_items.append(it)
 
+INTERP = re.compile(r"(python[\d.]*|Python|node|bun|ruby|perl|java|uvicorn)$")
+
+
+def script_label(pid, args):
+    """python helper/x.py serve 8893 → "x.py serve 8893 · esp-deck" (script + args + the dir it runs in)."""
+    a = args.split()
+    rest = [x for x in a[1:] if not x.startswith("-")][:3]
+    if "-m" in a[1:]:
+        rest = a[a.index("-m") + 1:a.index("-m") + 4]
+    script = " ".join([os.path.basename(rest[0])] + rest[1:]) if rest else exe(args)
+    cwd = sh("lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn")
+    m = re.search(r"^n(.+)$", cwd, re.M)
+    return f"{script} · {os.path.basename(m[1])}" if m else script
+
+
 groups = defaultdict(list)
 for pid, p in procs.items():
-    if pid not in claimed and mem.get(pid, 0) >= 1024:
-        groups[app_of(p["args"])].append(item(pid, exe(p["args"]) if ".app/" not in p["args"] else
-                                              re.sub(r"^.*/", "", p["args"].split(" --")[0])[:40], [pid]))
+    if pid in claimed or mem.get(pid, 0) < 1024:
+        continue
+    a = p["args"]
+    if INTERP.search(exe(a)) and ".app/" not in a:
+        grp = "Python" if "ython" in exe(a) or "uvicorn" in a else exe(a)
+        label = script_label(pid, a) + (" · сирота (батько помер)" if p["ppid"] == 1 else "")
+    elif ".app/" in a:
+        grp, label = app_of(a), re.sub(r"^.*/", "", a.split(" --")[0])[:40]
+    else:
+        grp, label = exe(a), exe(a)
+    groups[grp].append(item(pid, label, [pid]))
+DESC["Python"] = "скрипти: файл + аргументи · тека, де запущено; «сирота» = його запускач уже завершився"
 groups["Claude"] = claude_items
 out = []
 for name, items in groups.items():
