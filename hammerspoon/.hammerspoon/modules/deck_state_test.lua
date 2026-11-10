@@ -105,26 +105,15 @@ check("no token → 403 (never 304)", c4 == 403)
 
 print("→ AC-24 meetings back")
 local s = dec(b1)
-check("meet.last has at most 5", s.meet and #s.meet.last == 5)
-check("meet.last newest first", s.meet and s.meet.last[1] and s.meet.last[1].id == "m7" and s.meet.last[5].id == "m3")
+-- owner 2026-11-10: the board reads only last[0]; the other 4 + actions were ~27 % of every /state
+check("meet.last is only the newest", s.meet and #s.meet.last == 1 and s.meet.last[1].id == "m7")
 local n1 = s.meet.last[1]
-check("new-format entry keeps bid/kind/past/actions", n1.bid == "1767261600-1" and n1.kind == "meet" and n1.past == true and n1.actions[1] == "ping Bob")
-local old = s.meet.last[2]
-check("old-format entry defaults actions [] kind meet past false", old and type(old.actions) == "table" and #old.actions == 0 and old.kind == "meet" and old.past == false)
+check("the newest keeps id/bid/kind/past/title/at/summary/body, no actions", n1.bid == "1767261600-1" and n1.kind == "meet"
+  and n1.past == true and n1.title == "Test meeting 7" and n1.summary == "s7" and n1.body == "b7" and n1.actions == nil)
 check("meet.pending lists <id>.stage with bid", s.meet.pending and #s.meet.pending == 1 and s.meet.pending[1].bid == "1767265200-2" and s.meet.pending[1].stage == "spk")
 check("no build announced → fw_sig absent/null", s.fw_sig == nil)
-local big = s.meet.last[3]
-local bytes = 0; for _, a in ipairs(big.actions) do bytes = bytes + #a end
-check("actions capped in count and length", #big.actions == 8 and bytes <= 8 * 240 and utf8.len(big.actions[1]) == 120)
-local realopen = io.open
-io.open = function(p, m) -- an announced build: FW_SHA + the signature `just ota` leaves in /tmp
-  if p == "/tmp/deck-ota.sha" then return realopen(home .. "/fw.sha", m) elseif p == "/tmp/deck-ota.sig" then return realopen(home .. "/fw.sig", m) end
-  return realopen(p, m)
-end
-w(home .. "/fw.sha", "abc123"); w(home .. "/fw.sig", "MEUCIQ-test-signature")
-local announced = dec((get(nil)))
-io.open = realopen
-check("announced build → fw and fw_sig from /tmp/deck-ota.sig", announced.fw == "abc123" and announced.fw_sig == "MEUCIQ-test-signature")
+check("no `limits` (the board draws `lim`)", s.limits == nil and s.lim ~= nil)
+
 
 print("→ state changes → new ETag")
 w(MD .. "/p1.stage", "sum")

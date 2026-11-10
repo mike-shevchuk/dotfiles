@@ -113,7 +113,7 @@ local function writeFile(path, data) -- false on any failure, the close that flu
 end
 
 -- ── slow sources, refreshed in the background ──
-local limits, rem = {}, {}
+local rem = {}
 local slowTick = 0
 local HUB_DIR = HOME .. "/zettelkasten/claude_code"
 local HUB_URL = "http://localhost:8890/"
@@ -217,19 +217,8 @@ local function refreshSlow()
   if slowTick % 2 == 1 then -- calendar every ~2 min: DeckHelper writes CAL_FILE, state() reads it
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
-  -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
-  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. K.STATUSLINE }, function(out)
-    out = out:gsub("\27%[[%d;]*m", "")
-    for line in out:gmatch("[^\n]+") do
-      if line:find(" 5h ") then
-        local l = {}
-        for part in line:gmatch("[^|]+") do
-          if part:find(" 5h ") or part:find(" 7d ") then l[#l + 1] = clean(part) end
-        end
-        limits = l
-      end
-    end
-  end)
+  -- run for its side effect: it refreshes K.USAGE_CACHE / K.TOKENS_CACHE, which limitGauges reads (the board's `lim`)
+  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. K.STATUSLINE })
   task(K.REMINDERS, { "list" }, function(out)
     local r = {}
     for line in out:gmatch("[^\n]+") do
@@ -1506,7 +1495,7 @@ end
 
 -- 📝 voice journal: "я зараз іду гуляти" → one JSON line with the time and what Garmin said at that moment,
 -- for the teammate's patterns/advice (helper/health_metrics.py reads it); the board shows the last 3
-local health -- (the composite metrics, filled below; the journal notes the question it answers)
+local health, healthLinks -- (the composite metrics, filled below; the journal notes the question it answers; links: /open?h=, never sent)
 local JOURNAL = HOME .. "/.local/share/esp-deck/journal.jsonl"
 local journalTail = {}
 journalAdd = function(text, lang, at) -- at: said back then (a note from the outbox), so today's Garmin and question don't fit
@@ -1568,22 +1557,16 @@ do
   end
 end
 meet.STUCK = 3600 -- a .stage untouched this long: meeting.py died unseen (a reload, a reboot), no longer "processing"
-function meet.actions(a) -- the board's /state buffer is fixed (48 KB) and 5 meetings share it
-  local r = {}
-  for i = 1, math.min(#a, 8) do r[i] = safeClean(a[i], 120) end
-  return r
-end
 local function meetState()
   if meet.proc and (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") then
     local st = readFile(MEET_DIR .. "/" .. meet.proc .. ".stage")
     if st == "spk" or st == "sum" then meet.state = st end
   end
-  local last = {} -- the full summary (body) only for the newest: /state stays small
-  for i, e in ipairs(meet.last) do
-    -- '#' is a colour code on the board's label: markdown headings become plain lines there
-    last[i] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title, summary = e.summary,
-      actions = meet.actions(e.actions or {}), body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
-  end
+  -- only the newest, no actions: the board reads last[0] alone (owner 2026-11-10, AC-24); the Mac keeps 5
+  local e, last = meet.last[1], {}
+  -- '#' is a colour code on the board's label: markdown headings become plain lines there
+  if e then last[1] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title,
+    summary = e.summary, body = e.body and e.body:gsub("#+ ?", "") or nil } end
   local pending = {} -- <id>.stage files with a <id>.bid: captures the Mac is still processing
   local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
   for f in (ok and it or function() end), d do
@@ -1931,14 +1914,15 @@ local function refreshHealth()
   task(UV, { "run", "--quiet", "--with", "garminconnect", "python", HM_PY }, function(out)
     local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if not ok or type(d) ~= "table" or type(d.board) ~= "table" then return end
+    healthLinks = d.board.links
     local alerts = {}
     for i, a in ipairs(d.alerts or {}) do if i <= 3 then alerts[i] = { a[1], a[3] } end end
-    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
-               alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
-               move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
+    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress,
+               alerts = alerts, streak = (d.records or {}).streak, -- tip/synced/exercise_min: the board never read them
+               move_goal = d.move_goal, exercise_goal = d.exercise_goal,
                steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask, bb = d.board.bb,
                stress = d.board.stress, stress_now = d.stress and d.stress.now, score = d.board.score, sleep_q = d.board.sleep,
-               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
+               body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
                load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
                                    focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
                                    zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
@@ -2202,7 +2186,7 @@ local function handle(method, path, headers, body)
     -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
     -- a meeting's summary (.md) in the default app; the id is ours (date_time), nothing else opens
     if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { meetMd(p.meet) }) end
-    local hu = p.h and health and health.links and health.links[p.h]
+    local hu = p.h and healthLinks and healthLinks[p.h]
     if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
   end
