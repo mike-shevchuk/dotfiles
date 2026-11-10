@@ -145,12 +145,52 @@ def chromium_label(a):
     return t[1]
 
 
+SHELLS = {"bash", "sh", "zsh", "-zsh", "dash"}
+
+
+def owner(pid):
+    """First ancestor that is not a shell / just: a claude session's tmux window, or the program's name."""
+    p = procs[pid]["ppid"]
+    while p > 1 and p in procs:
+        a = procs[p]["args"]
+        if p in panes:
+            return panes[p]
+        if exe(a) not in SHELLS and not exe(a).startswith("just"):
+            if is_claude(p):
+                q = p
+                while q > 1 and q not in panes:
+                    q = procs.get(q, {}).get("ppid", 1)
+                return "claude " + panes.get(q, "")
+            return exe(a)
+        p = procs[p]["ppid"]
+    return "launchd (сирота)"
+
+
+def shell_label(pid, a):
+    if pid in panes:
+        return "оболонка вікна " + panes[pid]
+    if owner(pid) == "login":
+        return "оболонка вкладки терміналу (Ghostty)"
+    if "shell-snapshots" in a:
+        what = "інструмент Bash сесії Claude"
+    elif " -c " in a or " -lc " in a:
+        cmd = re.split(r" -l?c ", a, 1)[1]
+        what = "-c " + re.sub(r"/Users/[^/]+/", "~/", cmd)[:45]
+    else:
+        rest = [x for x in a.split()[1:] if not x.startswith("-")]
+        what = os.path.basename(rest[0]) + " " + " ".join(rest[1:3]) if rest else exe(a)
+        what = re.sub(r"^just-\w+$", "just-рецепт", what)
+    return f"{what.strip()} ← {owner(pid)}"
+
+
 groups = defaultdict(list)
 for pid, p in procs.items():
-    if pid in claimed or mem.get(pid, 0) < 1024:
-        continue
     a = p["args"]
-    if INTERP.search(exe(a)) and ".app/" not in a:
+    if pid in claimed or (mem.get(pid, 0) < 1024 and exe(a) not in SHELLS):
+        continue
+    if exe(a) in SHELLS:
+        grp, label = "shell (bash/zsh/sh)", shell_label(pid, a)
+    elif INTERP.search(exe(a)) and ".app/" not in a:
         grp = "Python" if "ython" in exe(a) or "uvicorn" in a else exe(a)
         label = script_label(pid, a) + (" · сирота (батько помер)" if p["ppid"] == 1 else "")
     elif ".app/" in a:
@@ -160,6 +200,7 @@ for pid, p in procs.items():
     else:
         grp, label = exe(a), exe(a)
     groups[grp].append(item(pid, label, [pid]))
+DESC["shell (bash/zsh/sh)"] = "оболонки: що запущено ← хто власник (вікно tmux, just, claude); сотні «0m» = сплеск коротких скриптів"
 DESC["Python"] = "скрипти: файл + аргументи · тека, де запущено; «сирота» = його запускач уже завершився"
 groups["Claude"] = claude_items
 out = []
