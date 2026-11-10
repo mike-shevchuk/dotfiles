@@ -227,6 +227,81 @@ hub port="8890" root="~/zettelkasten/claude_code":
           console.error(`  state ← ${b.op} from ${ip}`);
           return json(res);
         }
+        // ── /_hs: Hammerspoon + memory dashboard (page: .justdir/hub-hs.html). Reads from anyone on the LAN;
+        //    anything that changes the Mac (run, toggle, kill) only from the Mac itself.
+        if (p === "/_hs" || p.startsWith("/_hs/")) {
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          const self = /^(127\.|::1$|::ffff:127\.)/.test(ip) || ip.replace(/^::ffff:/, "") === curIP();
+          // hs CLI: never killed, never a `timeout` (crashes HS) — only its own -t; args go in base64, no quoting games
+          const hsc = async (lua: string) => {
+            const r = Bun.spawn(["/opt/homebrew/bin/hs", "-q", "-t", "8", "-c", lua], { stdout: "pipe", stderr: "pipe" });
+            const out = await new Response(r.stdout).text(); await r.exited; return out.trim();
+          };
+          const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64");
+          if (p === "/_hs") return html(await readFile(join(HOME, "dotfiles/.justdir/hub-hs.html"), "utf8") + HOME_LINK());
+          if (p === "/_hs/mem") {
+            const r = Bun.spawnSync(["/usr/bin/python3", "-I", join(HOME, ".hammerspoon/bin/topmem.py"), "--all"], { stdout: "pipe", stderr: "pipe" });
+            return new Response(r.stdout, { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          }
+          if (p === "/_hs/state") {
+            const out = await hsc(`local s,g,po=require("modules.system"),require("modules.guard"),require("modules.pomodoro")
+              local pal=require("modules.palette") if #pal.entries==0 then pal.parse() end
+              local e={} for _,x in ipairs(pal.entries) do e[#e+1]={title=x.title,chord=x.chord,category=x.category,kind=x.kind,detail=x.detail,source=x.source,fav=x.fav,params=x.params and true or nil} end
+              return hs.json.encode({caffeine=hs.caffeinate.get("displayIdle"),pinch=s.isPinchZoomBlocked(),scroll=s.getScrollMultiplier(),
+                guard=g.enabled,pomodoro=po.state,pomoTitle=po.getTitle() or "",dark=hs.host.interfaceStyle()=="Dark",
+                hotkeys=#hs.hotkey.getHotkeys(),entries=e})`);
+            try { return json({ ...JSON.parse(out), self }); } catch { return json({ error: "hs did not answer: " + out.slice(0, 200), self }, 502); }
+          }
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          if (!self) return json({ error: "керувати можна лише з цього Mac (з телефона — тільки перегляд)" }, 403);
+          const body = await req.text(); if (body.length > 4096) return new Response("too large", { status: 413 });
+          let q: any; try { q = JSON.parse(body); } catch { return bad("invalid JSON"); }
+          if (p === "/_hs/run") {
+            if (typeof q.title !== "string" || typeof q.source !== "string") return bad("title + source");
+            console.error(`  hs run ← ${q.title} (${q.source})`);
+            // same paths as the palette's own run(): replay a chord, an action, a just recipe, or a module function
+            return json({ result: await hsc(`local q=hs.json.decode(hs.base64.decode("${b64(q)}"))
+              local p=require("modules.palette") if #p.entries==0 then p.parse() end
+              for _,e in ipairs(p.entries) do if e.title==q.title and e.source==q.source then
+                if e.kind=="just" and e.params then return "needs-args" end
+                hs.timer.doAfter(0.05,function() local ok,err=pcall(function()
+                  if e.kind=="just" then p.runRecipe(e,"")
+                  elseif e.kind=="action" then p._actions[e.source]()
+                  elseif e.kind=="key" then hs.eventtap.keyStroke(e.mods,e.key,0)
+                  else require("modules."..e.module)[e.fn]() end end)
+                  if not ok then hs.alert.show("hub: "..tostring(err),3) end end)
+                return "ok" end end return "not-found"`) });
+          }
+          if (p === "/_hs/toggle") {
+            const lua: Record<string, string> = {
+              caffeine: `return tostring(hs.caffeinate.toggle("displayIdle"))`,
+              pinch: `require("modules.system").togglePinchZoom() return "ok"`,
+              guard: `require("modules.guard").toggle() return "ok"`,
+              pomodoro: `require("modules.pomodoro").toggle() return "ok"`,
+              dark: `require("modules.system").toggleDarkMode() return "ok"`,
+              scroll: `require("modules.system").setScrollMultiplier(${Number(q.value) || 1}, true) return "ok"`,
+            };
+            if (!lua[q.what]) return bad("what: " + Object.keys(lua).join("|"));
+            if (q.what === "scroll" && !(Number(q.value) >= 0.25 && Number(q.value) <= 5)) return bad("value 0.25–5");
+            console.error(`  hs toggle ← ${q.what} ${q.value ?? ""}`);
+            return json({ result: await hsc(lua[q.what]) });
+          }
+          if (p === "/_hs/kill") {
+            const pid = Number(q.pid);
+            if (!Number.isInteger(pid) || pid < 2) return bad("pid");
+            const ps = Bun.spawnSync(["ps", "-o", "user=,comm=", "-p", String(pid)]).stdout.toString().trim();
+            const [user, ...rest] = ps.split(/\s+/); const comm = rest.join(" ");
+            if (!ps) return json({ error: "no such process" }, 404);
+            if (user !== process.env.USER) return json({ error: `${comm}: чужий процес (${user})` }, 403);
+            // HS dies → CFMessagePort crash; the hub → this page; WindowServer/loginwindow → logout
+            if (/Hammerspoon|WindowServer|loginwindow|launchd/.test(comm) || pid === process.pid) return json({ error: `${comm}: не вбиваю` }, 403);
+            console.error(`  hs kill ← ${pid} ${comm}`);
+            try { process.kill(pid, "SIGTERM"); return json({ ok: true, pid, comm }); } catch (e) { return json({ error: String(e) }, 500); }
+          }
+          return new Response("not found", { status: 404 });
+        }
         if (p === "/__reload") {
           let self: ReadableStreamDefaultController;
           return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
