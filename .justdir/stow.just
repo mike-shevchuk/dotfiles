@@ -90,7 +90,7 @@ tnv:
 yazi:
     stow --no-folding --adopt --restow -t ~ yazi
 
-# fastfetch: LAN IP, gateway, DNS, Wi-Fi, load, memory pressure, Claude/tmux sessions
+# fastfetch: default look + LAN IP, Wi-Fi, hostname
 fastfetch:
     stow --no-folding --adopt --restow -t ~ fastfetch
 
