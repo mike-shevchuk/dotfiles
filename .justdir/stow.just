@@ -90,6 +90,10 @@ tnv:
 yazi:
     stow --no-folding --adopt --restow -t ~ yazi
 
+# fastfetch: LAN IP, gateway, DNS, Wi-Fi, load, memory pressure, Claude/tmux sessions
+fastfetch:
+    stow --no-folding --adopt --restow -t ~ fastfetch
+
 # Todoist config
 todoist:
     stow --no-folding --adopt --restow -t ~ todoist
@@ -107,7 +111,7 @@ hyperland:
     stow --no-folding --adopt --restow -t ~ hyperland
 
 # Stow all packages
-all: claude codex zsh tmux kitty lz pnv tnv yazi todoist fonts hammerspoon hyperland
+all: claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
     @echo "All packages stowed"
 
 # Unstow a package: just remove <pkg>
