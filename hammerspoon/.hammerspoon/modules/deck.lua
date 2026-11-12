@@ -20,6 +20,7 @@
 -- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
 -- POST /mac                 → now playing (Spotify / Music) + files selected in Finder + last conversion
 -- POST /media?k=play|next|prev|volup|voldown → media keys (also drive YouTube in the browser)
+-- POST /type?k=enter|esc|tab|bs|paste|up|down → that key in the window in front · no k: the body typed there as text
 -- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
@@ -1358,6 +1359,8 @@ local function strip(buttons) -- what the board needs: no actions
 end
 
 local MODS = { cmd = "cmd", command = "cmd", shift = "shift", alt = "alt", option = "alt", opt = "alt", ctrl = "ctrl", control = "ctrl", fn = "fn" }
+K.TYPE_KEYS = { enter = { {}, "return" }, esc = { {}, "escape" }, tab = { {}, "tab" }, bs = { {}, "delete" },
+  paste = { { "cmd" }, "v" }, up = { {}, "up" }, down = { {}, "down" } }
 local SYSKEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN", mute = "MUTE" }
 
 local function runAction(a, label)
@@ -2180,6 +2183,13 @@ local function handle(method, path, headers, body)
       names[#names + 1] = clean(f:match("[^/]+$"))
     end
     return reply({ np = macNP, files = names, conv = clean(conversion) }, 200, true)
+  end
+  if method == "POST" and route == "/type" then -- the flex tab's key bar / ⌨ / 🎤: into the window in front, never a shell
+    local k = K.TYPE_KEYS[p.k]
+    if k then hs.eventtap.keyStroke(k[1], k[2], 0)
+    elseif (body or ""):match("%S") then hs.eventtap.keyStrokes(body)
+    else return reply("bad key", 400) end
+    return reply("ok", 200)
   end
   if method == "POST" and route == "/media" and SYSKEY[p.k] then
     hs.eventtap.event.newSystemKeyEvent(SYSKEY[p.k], true):post()
