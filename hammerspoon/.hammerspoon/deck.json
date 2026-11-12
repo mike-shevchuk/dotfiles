@@ -1052,10 +1052,36 @@
         }
       ]
     },
+    "urls": { "meet.google.com/": "Meet", "zoom.us/wc": "Zoom", "app.zoom.us": "Zoom", "teams.microsoft.com": "Microsoft Teams", "teams.live.com": "Microsoft Teams" },
     "sites": {
+      "Zoom": [
+        {
+          "group": "Дзвінок",
+          "buttons": [
+            { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+shift+a" } },
+            { "label": "Камера", "icon": "video", "action": { "keys": "cmd+shift+v" } },
+            { "label": "Рука", "icon": "up", "action": { "keys": "alt+y" } },
+            { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+h" } },
+            { "label": "Учасники", "icon": "eye", "action": { "keys": "cmd+u" } },
+            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+w" } }
+          ]
+        }
+      ],
+      "Microsoft Teams": [
+        {
+          "group": "Дзвінок",
+          "buttons": [
+            { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+shift+m" } },
+            { "label": "Камера", "icon": "video", "action": { "keys": "cmd+shift+o" } },
+            { "label": "Рука", "icon": "up", "action": { "keys": "cmd+shift+k" } },
+            { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+r" } },
+            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+shift+h" } }
+          ]
+        }
+      ],
       "Meet": [
         {
-          "group": "Meet",
+          "group": "Дзвінок",
           "buttons": [
             { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+d" } },
             { "label": "Камера", "icon": "video", "action": { "keys": "cmd+e" } },

@@ -1216,9 +1216,28 @@ do
   if ok and type(t) == "table" then flexFav = t end
 end
 
-local function flexCtx(app, title)
+local CHROMIUM = { ["Brave Browser"] = 1, ["Google Chrome"] = 1, Thorium = 1 }
+local urlSeen = {}
+local function frontUrl(app, title) -- the active tab's URL via osascript, asked again only when the title changes.
+  -- Async: macOS asks Mike once for Automation (Hammerspoon → that browser) and a sync call would freeze HS meanwhile.
+  -- Until it answers, or without the permission, the URL is "" and the title decides
+  if not CHROMIUM[app] then return "" end
+  if (urlSeen.app ~= app or urlSeen.title ~= title) and not running.url then
+    local seen = { app = app, title = title, url = "" }
+    urlSeen = seen
+    taskOnce("url", "/usr/bin/osascript", { "-e", 'tell application "' .. app .. '" to return URL of active tab of front window' },
+      function(out, code) if code == 0 then seen.url = out:gsub("%s+$", "") end end)
+  end
+  return urlSeen.title == title and urlSeen.url or ""
+end
+
+local function flexCtx(app, title) -- a browser: deck.json flex.urls by the tab's URL first, then flex.sites by its title
   local f = deckCfg.flex or {}
   if not K.BROWSERS[app] then return app end
+  local url = frontUrl(app, title)
+  for frag, site in pairs(f.urls or {}) do
+    if url:find(frag, 1, true) then return site end
+  end
   for site in pairs(f.sites or {}) do
     if title:find(site, 1, true) then return site end
   end
