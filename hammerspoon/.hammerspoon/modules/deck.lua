@@ -193,23 +193,41 @@ end
 K.PORT_NAMES = { [7777] = "Hammerspoon · плата", [7778] = "прошивка для плати (just ota)", [8893] = "сайт здоров'я",
   [8894] = "сайт мітингів", [8890] = "hub", [8069] = "stt-host (whisper)" }
 local ports = {}
+-- a Claude Code process renames itself to its version ("2.1.322") and listens on a random local port (its IDE link):
+-- name it by the tmux window it runs in, walking up the parent pids to a pane (Mike 12.11: «що це за порти»)
+function K.portWho(cmd, pid, parent, pane)
+  if not (cmd or ""):match("^%d+%.%d+%.%d+$") then return cmd end
+  local p, hops = tonumber(pid), 0
+  while p and p > 1 and hops < 8 do
+    if pane[p] then return "Claude · " .. pane[p] end
+    p, hops = parent[p], hops + 1
+  end
+  return "Claude Code (не в tmux)"
+end
 local function refreshPorts()
   task("/usr/sbin/lsof", { "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn" }, function(out)
-    local seen, list, pid, cmd = {}, {}, nil, nil
-    for l in (out or ""):gmatch("[^\n]+") do
-      local k, v = l:sub(1, 1), l:sub(2)
-      if k == "p" then pid = v elseif k == "c" then cmd = v
-      elseif k == "n" then
-        local port = tonumber(v:match(":(%d+)$"))
-        if port and not seen[port] then
-          seen[port] = true
-          local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
-          table.insert(list, { port, (K.PORT_NAMES[port] or cmd or "?") .. loc })
+    task("/bin/ps", { "-axo", "pid=,ppid=" }, function(psout)
+      task(TMUX, { "list-panes", "-a", "-F", "#{pane_pid} #{session_name}:#{window_index} #{window_name}" }, function(tout)
+        local parent, pane = {}, {}
+        for a, b in (psout or ""):gmatch("(%d+)%s+(%d+)") do parent[tonumber(a)] = tonumber(b) end
+        for a, w in (tout or ""):gmatch("(%d+) ([^\n]+)") do pane[tonumber(a)] = w end
+        local seen, list, pid, cmd = {}, {}, nil, nil
+        for l in (out or ""):gmatch("[^\n]+") do
+          local k, v = l:sub(1, 1), l:sub(2)
+          if k == "p" then pid = v elseif k == "c" then cmd = v
+          elseif k == "n" then
+            local port = tonumber(v:match(":(%d+)$"))
+            if port and not seen[port] then
+              seen[port] = true
+              local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
+              table.insert(list, { port, (K.PORT_NAMES[port] or K.portWho(cmd, pid, parent, pane) or "?") .. loc })
+            end
+          end
         end
-      end
-    end
-    table.sort(list, function(a, b) return a[1] < b[1] end)
-    ports = list
+        table.sort(list, function(a, b) return a[1] < b[1] end)
+        ports = list
+      end)
+    end)
   end)
 end
 
