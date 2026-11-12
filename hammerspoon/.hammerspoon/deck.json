@@ -102,6 +102,7 @@
       "Ghostty": [
         {
           "group": "Claude",
+          "style": "round",
           "buttons": [
             { "label": "Відповідь 1", "icon": "ok", "key": "1", "action": { "tmux": "send-keys -t {s}: 1" } },
             { "label": "Відповідь 2", "icon": "close", "key": "2", "action": { "tmux": "send-keys -t {s}: 2" } },
@@ -843,14 +844,15 @@
       "zoom.us": [
         {
           "group": "Zoom",
+          "style": "round",
           "buttons": [
             { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+shift+a" } },
             { "label": "Камера", "icon": "video", "action": { "keys": "cmd+shift+v" } },
-            { "label": "Екран", "icon": "upload", "action": { "keys": "cmd+shift+s" } },
             { "label": "Рука", "icon": "up", "action": { "keys": "alt+y" } },
+            { "label": "Вийти", "icon": "close", "confirm": true, "action": { "keys": "cmd+w" } },
+            { "label": "Екран", "icon": "upload", "action": { "keys": "cmd+shift+s" } },
             { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+h" } },
-            { "label": "Учасники", "icon": "eye", "action": { "keys": "cmd+u" } },
-            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+w" } }
+            { "label": "Учасники", "icon": "eye", "action": { "keys": "cmd+u" } }
           ]
         }
       ],
@@ -1041,38 +1043,41 @@
       "Zoom": [
         {
           "group": "Дзвінок",
+          "style": "round",
           "buttons": [
             { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+shift+a" } },
             { "label": "Камера", "icon": "video", "action": { "keys": "cmd+shift+v" } },
             { "label": "Рука", "icon": "up", "action": { "keys": "alt+y" } },
+            { "label": "Вийти", "icon": "close", "confirm": true, "action": { "keys": "cmd+w" } },
             { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+h" } },
-            { "label": "Учасники", "icon": "eye", "action": { "keys": "cmd+u" } },
-            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+w" } }
+            { "label": "Учасники", "icon": "eye", "action": { "keys": "cmd+u" } }
           ]
         }
       ],
       "Microsoft Teams": [
         {
           "group": "Дзвінок",
+          "style": "round",
           "buttons": [
             { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+shift+m" } },
             { "label": "Камера", "icon": "video", "action": { "keys": "cmd+shift+o" } },
             { "label": "Рука", "icon": "up", "action": { "keys": "cmd+shift+k" } },
-            { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+r" } },
-            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+shift+h" } }
+            { "label": "Вийти", "icon": "close", "confirm": true, "action": { "keys": "cmd+shift+h" } },
+            { "label": "Чат", "icon": "list", "action": { "keys": "cmd+shift+r" } }
           ]
         }
       ],
       "Meet": [
         {
           "group": "Дзвінок",
+          "style": "round",
           "buttons": [
             { "label": "Мікрофон", "icon": "mute", "action": { "keys": "cmd+d" } },
             { "label": "Камера", "icon": "video", "action": { "keys": "cmd+e" } },
             { "label": "Рука", "icon": "up", "action": { "keys": "ctrl+cmd+h" } },
+            { "label": "Вийти", "icon": "close", "confirm": true, "action": { "keys": "cmd+w" } },
             { "label": "Чат", "icon": "list", "action": { "keys": "ctrl+cmd+c" } },
-            { "label": "Учасники", "icon": "eye", "action": { "keys": "ctrl+cmd+p" } },
-            { "label": "Вийти", "icon": "close", "action": { "keys": "cmd+w" } }
+            { "label": "Учасники", "icon": "eye", "action": { "keys": "ctrl+cmd+p" } }
           ]
         }
       ],
@@ -1223,17 +1228,18 @@
     "all": [
       {
         "group": "Desk",
+        "style": "round",
         "buttons": [
           { "label": "Вікно ліво", "icon": "left", "action": { "keys": "ctrl+alt+cmd+left" } },
           { "label": "Вікно право", "icon": "right", "action": { "keys": "ctrl+alt+cmd+right" } },
+          { "label": "Центр", "icon": "home", "action": { "keys": "ctrl+alt+cmd+c" } },
+          { "label": "Mission", "icon": "bars", "action": { "keys": "ctrl+up" } },
           { "label": "Стіл ліво", "icon": "prev", "action": { "keys": "ctrl+alt+cmd+," } },
           { "label": "Стіл право", "icon": "next", "action": { "keys": "ctrl+alt+cmd+." } },
           { "label": "Стіл 1", "icon": "list", "key": "1", "action": { "keys": "ctrl+alt+cmd+1" } },
           { "label": "Стіл 2", "icon": "list", "key": "2", "action": { "keys": "ctrl+alt+cmd+2" } },
           { "label": "Стіл 3", "icon": "list", "key": "3", "action": { "keys": "ctrl+alt+cmd+3" } },
-          { "label": "Центр", "icon": "home", "action": { "keys": "ctrl+alt+cmd+c" } },
           { "label": "Ширина", "icon": "bars", "action": { "keys": "ctrl+alt+cmd+r" } },
-          { "label": "Mission", "icon": "bars", "action": { "keys": "ctrl+up" } },
           { "label": "Вікна програми", "icon": "down", "action": { "keys": "ctrl+down" } }
         ]
       },

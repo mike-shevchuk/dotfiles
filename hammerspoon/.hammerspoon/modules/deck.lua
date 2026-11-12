@@ -1356,9 +1356,10 @@ local function flexReply(ctx, g)
     local fav = false
     for _, f in ipairs(flexFav[ctx] or {}) do fav = fav or flexSame(f, b) end
     btns[i] = { label = clean(b.label or ""), icon = b.icon, key = b.key and clean(b.key) or nil, fav = fav or nil,
-                color = b.color or cur.color }
+                color = b.color or cur.color, confirm = b.confirm or nil }
   end
-  return { ctx = ctx, g = g, groups = names, buttons = btns }
+  -- style "round": the group's first 4 are the Raven-style round toggles; confirm: a second tap runs it (Вийти)
+  return { ctx = ctx, g = g, groups = names, buttons = btns, style = cur and cur.style or nil }
 end
 
 local function flexToggleFav(ctx, g, f) -- returns the group to stay on: Обране appearing shifts every index by one
