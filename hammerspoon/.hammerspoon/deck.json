@@ -103,116 +103,24 @@
         {
           "group": "Claude",
           "buttons": [
-            {
-              "label": "Режим",
-              "icon": "loop",
-              "action": {
-                "tmux": "send-keys -t {s}: BTab"
-              }
-            },
-            {
-              "label": "Стоп",
-              "icon": "stop",
-              "action": {
-                "tmux": "send-keys -t {s}: Escape"
-              }
-            },
-            {
-              "label": "Так",
-              "icon": "ok",
-              "action": {
-                "tmux": "send-keys -t {s}: Enter"
-              }
-            },
             { "label": "Відповідь 1", "icon": "ok", "key": "1", "action": { "tmux": "send-keys -t {s}: 1" } },
             { "label": "Відповідь 2", "icon": "close", "key": "2", "action": { "tmux": "send-keys -t {s}: 2" } },
-            { "label": "Повторити", "icon": "up", "action": { "tmux": "send-keys -t {s}: Up Enter" } },
+            { "label": "Так", "icon": "ok", "action": { "tmux": "send-keys -t {s}: Enter" } },
+            { "label": "Стоп", "icon": "stop", "action": { "tmux": "send-keys -t {s}: Escape" } },
+            { "label": "Режим", "icon": "loop", "action": { "tmux": "send-keys -t {s}: BTab" } },
             { "label": "Ctrl+C", "icon": "stop", "key": "^C", "action": { "tmux": "send-keys -t {s}: C-c" } },
-            { "label": "Очистити", "icon": "trash", "key": "^L", "action": { "tmux": "send-keys -t {s}: C-l" } },
-            {
-              "label": "План",
-              "icon": "eye",
-              "action": {
-                "tmux": "send-keys -t {s}: '/plan' Enter"
-              }
-            },
-            {
-              "label": "Модель",
-              "icon": "settings",
-              "action": {
-                "tmux": "send-keys -t {s}: '/model' Enter"
-              }
-            },
-            {
-              "label": "Fast",
-              "icon": "bolt",
-              "action": {
-                "tmux": "send-keys -t {s}: '/fast' Enter"
-              }
-            },
-            {
-              "label": "Effort",
-              "icon": "up",
-              "action": {
-                "tmux": "send-keys -t {s}: '/effort' Enter"
-              }
-            },
-            {
-              "label": "Compact",
-              "icon": "down",
-              "action": {
-                "tmux": "send-keys -t {s}: '/compact' Enter"
-              }
-            },
-            {
-              "label": "Контекст",
-              "icon": "list",
-              "action": {
-                "tmux": "send-keys -t {s}: '/context' Enter"
-              }
-            },
-            {
-              "label": "Ліміти",
-              "icon": "charge",
-              "action": {
-                "tmux": "send-keys -t {s}: '/usage' Enter"
-              }
-            },
-            {
-              "label": "Resume",
-              "icon": "play",
-              "action": {
-                "tmux": "send-keys -t {s}: '/resume' Enter"
-              }
-            },
-            {
-              "label": "Rewind",
-              "icon": "prev",
-              "action": {
-                "tmux": "send-keys -t {s}: '/rewind' Enter"
-              }
-            },
-            {
-              "label": "Review",
-              "icon": "eye",
-              "action": {
-                "tmux": "send-keys -t {s}: '/review' Enter"
-              }
-            },
-            {
-              "label": "MCP",
-              "icon": "usb",
-              "action": {
-                "tmux": "send-keys -t {s}: '/mcp' Enter"
-              }
-            },
-            {
-              "label": "Clear",
-              "icon": "trash",
-              "action": {
-                "tmux": "send-keys -t {s}: '/clear'"
-              }
-            }
+            { "label": "Повторити", "icon": "up", "action": { "tmux": "send-keys -t {s}: Up Enter" } },
+            { "label": "mine-grill", "icon": "list", "action": { "tmux": "send-keys -t {s}: '/mine-grill' Enter" } },
+            { "label": "rc", "icon": "bolt", "action": { "tmux": "send-keys -t {s}: '/rc' Enter" } },
+            { "label": "clear", "icon": "trash", "action": { "tmux": "send-keys -t {s}: '/clear'" } },
+            { "label": "timeline", "icon": "list", "action": { "tmux": "send-keys -t {s}: '/timeline' Enter" } },
+            { "label": "review-pr-ukr", "icon": "eye", "action": { "tmux": "send-keys -t {s}: '/review-pr-ukr '" } },
+            { "label": "mine-full", "icon": "list", "action": { "tmux": "send-keys -t {s}: '/mine-full' Enter" } },
+            { "label": "model", "icon": "settings", "action": { "tmux": "send-keys -t {s}: '/model' Enter" } },
+            { "label": "lgtm", "icon": "ok", "action": { "tmux": "send-keys -t {s}: '/lgtm '" } },
+            { "label": "pr-state", "icon": "eye", "action": { "tmux": "send-keys -t {s}: '/pr-state' Enter" } },
+            { "label": "compact", "icon": "down", "action": { "tmux": "send-keys -t {s}: '/compact' Enter" } },
+            { "label": "Ліміти", "icon": "charge", "action": { "tmux": "send-keys -t {s}: '/usage' Enter" } }
           ]
         },
         {
@@ -974,6 +882,20 @@
           ]
         }
       ],
+      "Slack": [
+        {
+          "group": "Slack",
+          "buttons": [
+            { "label": "Перейти", "icon": "eye", "action": { "keys": "cmd+k" } },
+            { "label": "Непрочитані", "icon": "bell", "action": { "keys": "cmd+shift+a" } },
+            { "label": "Згадки", "icon": "up", "action": { "keys": "cmd+shift+m" } },
+            { "label": "Треди", "icon": "list", "action": { "keys": "cmd+shift+t" } },
+            { "label": "Наступний", "icon": "down", "action": { "keys": "alt+shift+down" } },
+            { "label": "Назад", "icon": "left", "action": { "keys": "cmd+[" } },
+            { "label": "Вперед", "icon": "right", "action": { "keys": "cmd+]" } }
+          ]
+        }
+      ],
       "Browser": [
         {
           "group": "Браузер",
@@ -1052,8 +974,70 @@
         }
       ]
     },
-    "urls": { "meet.google.com/": "Meet", "zoom.us/wc": "Zoom", "app.zoom.us": "Zoom", "teams.microsoft.com": "Microsoft Teams", "teams.live.com": "Microsoft Teams" },
+    "urls": { "meet.google.com/": "Meet", "zoom.us/wc": "Zoom", "app.zoom.us": "Zoom", "teams.microsoft.com": "Microsoft Teams", "teams.live.com": "Microsoft Teams", "github.com/": "GitHub", "mail.google.com": "Gmail", "linear.app/": "Linear", "app.slack.com": "Slack" },
     "sites": {
+      "GitHub": [
+        {
+          "group": "GitHub",
+          "buttons": [
+            { "label": "Pull requests", "icon": "list", "action": { "lua": "hs.eventtap.keyStrokes(\"gp\")" } },
+            { "label": "Issues", "icon": "bell", "action": { "lua": "hs.eventtap.keyStrokes(\"gi\")" } },
+            { "label": "Code", "icon": "file", "action": { "lua": "hs.eventtap.keyStrokes(\"gc\")" } },
+            { "label": "Шукати", "icon": "eye", "action": { "keys": "/" } },
+            { "label": "Файл", "icon": "folder", "action": { "keys": "t" } },
+            { "label": "Назад", "icon": "left", "action": { "keys": "cmd+[" } },
+            { "label": "Оновити", "icon": "refresh", "action": { "keys": "cmd+r" } },
+            { "label": "Копіювати URL", "icon": "copy", "action": { "lua": "hs.eventtap.keyStroke({\"cmd\" }, \"l\"); hs.eventtap.keyStroke({\"cmd\" }, \"c\"); hs.eventtap.keyStroke({}, \"escape\")" } }
+          ]
+        }
+      ],
+      "Gmail": [
+        {
+          "group": "Gmail",
+          "buttons": [
+            { "label": "Архів", "icon": "download", "action": { "keys": "e" } },
+            { "label": "Відповісти", "icon": "left", "action": { "keys": "r" } },
+            { "label": "Всім", "icon": "left", "action": { "keys": "a" } },
+            { "label": "Переслати", "icon": "right", "action": { "keys": "f" } },
+            { "label": "Далі", "icon": "down", "action": { "keys": "j" } },
+            { "label": "Назад", "icon": "up", "action": { "keys": "k" } },
+            { "label": "Написати", "icon": "edit", "action": { "keys": "c" } },
+            { "label": "Шукати", "icon": "eye", "action": { "keys": "/" } },
+            { "label": "Прочитано", "icon": "ok", "action": { "keys": "shift+i" } },
+            { "label": "Вхідні", "icon": "home", "action": { "lua": "hs.eventtap.keyStrokes(\"gi\")" } }
+          ]
+        }
+      ],
+      "Linear": [
+        {
+          "group": "Linear",
+          "buttons": [
+            { "label": "Нова", "icon": "plus", "action": { "keys": "c" } },
+            { "label": "Команди", "icon": "bars", "action": { "keys": "cmd+k" } },
+            { "label": "Статус", "icon": "loop", "action": { "keys": "s" } },
+            { "label": "Призначити", "icon": "up", "action": { "keys": "a" } },
+            { "label": "Мітка", "icon": "list", "action": { "keys": "l" } },
+            { "label": "Далі", "icon": "down", "action": { "keys": "j" } },
+            { "label": "Назад", "icon": "up", "action": { "keys": "k" } },
+            { "label": "Мої задачі", "icon": "home", "action": { "lua": "hs.eventtap.keyStrokes(\"gm\")" } },
+            { "label": "Вхідні", "icon": "bell", "action": { "lua": "hs.eventtap.keyStrokes(\"gi\")" } }
+          ]
+        }
+      ],
+      "Slack": [
+        {
+          "group": "Slack",
+          "buttons": [
+            { "label": "Перейти", "icon": "eye", "action": { "keys": "cmd+k" } },
+            { "label": "Непрочитані", "icon": "bell", "action": { "keys": "cmd+shift+a" } },
+            { "label": "Згадки", "icon": "up", "action": { "keys": "cmd+shift+m" } },
+            { "label": "Треди", "icon": "list", "action": { "keys": "cmd+shift+t" } },
+            { "label": "Наступний", "icon": "down", "action": { "keys": "alt+shift+down" } },
+            { "label": "Назад", "icon": "left", "action": { "keys": "cmd+[" } },
+            { "label": "Вперед", "icon": "right", "action": { "keys": "cmd+]" } }
+          ]
+        }
+      ],
       "Zoom": [
         {
           "group": "Дзвінок",
