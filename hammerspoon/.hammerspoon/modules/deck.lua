@@ -1352,6 +1352,25 @@ function flex.state(app, title, ver) -- `v` changes whenever the board has to re
 end
 end
 
+-- quiet usage log (Mike 12.11, 2–3 days): which context is in front and which board buttons get tapped, so the
+-- flex sets follow real use → ~/.local/share/esp-deck/front.jsonl, local only. Never a window title, URL or typed text:
+-- the context name (an app, or a site from deck.json, else "Browser"), a button label, a key name. Read: `just front-top`
+K.FRONT_LOG = HOME .. "/.local/share/esp-deck/front.jsonl"
+function K.frontLog(rec)
+  rec.t = os.time()
+  local f = io.open(K.FRONT_LOG, "a")
+  if f then f:write(hs.json.encode(rec), "\n"); f:close() end
+end
+function K.frontTick() -- every 5 s; a line only when the context changes; 5 min without input = "idle"
+  local fa, fw = hs.application.frontmostApplication(), hs.window.focusedWindow()
+  local app = fa and fa:name() or ""
+  local ctx = hs.host.idleTime() > 300 and "idle" or flex.ctx(app, fw and fw:title() or "")
+  if ctx ~= K.frontLast then
+    K.frontLast = ctx
+    K.frontLog({ app = ctx == "idle" and "" or app, ctx = ctx })
+  end
+end
+
 local function strip(buttons) -- what the board needs: no actions
   local out = {}
   for i, b in ipairs(buttons or {}) do out[i] = { label = clean(b.label or ""), icon = b.icon, color = b.color } end
@@ -2165,6 +2184,7 @@ local function handle(method, path, headers, body)
       b = g and g.buttons[tonumber(p.f) or 0]
     end
     if not b then return reply("no such button", 404) end
+    K.frontLog({ tap = b.label, ctx = p.f and p.ctx or p.app or "deck" })
     local t = runAction(b.action, b.label)
     return reply({ t = t or "" }, 200, true)
   end
@@ -2186,6 +2206,7 @@ local function handle(method, path, headers, body)
   end
   if method == "POST" and route == "/type" then -- the flex tab's key bar / ⌨ / 🎤: into the window in front, never a shell
     local k = K.TYPE_KEYS[p.k]
+    K.frontLog({ tap = p.k and ("key " .. p.k) or "type", ctx = K.frontLast }) -- the key's name, never the text
     if k then hs.eventtap.keyStroke(k[1], k[2], 0)
     elseif (body or ""):match("%S") then hs.eventtap.keyStrokes(body)
     else return reply("bad key", 400) end
@@ -2479,6 +2500,7 @@ end
 function M.start()
   refreshPorts()
   M.portsTimer = hs.timer.doEvery(60, refreshPorts)
+  M.frontTimer = hs.timer.doEvery(5, K.frontTick)
   M.meetBar = hs.menubar.new():setMenu(meetMenu)
   M.meetTimer = hs.timer.doEvery(1, meetBar)
   meetBar()
