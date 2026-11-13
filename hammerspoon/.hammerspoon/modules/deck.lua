@@ -20,7 +20,7 @@
 -- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
 -- POST /mac                 → now playing (Spotify / Music) + files selected in Finder + last conversion
 -- POST /media?k=play|next|prev|volup|voldown → media keys (also drive YouTube in the browser)
--- POST /type?k=enter|esc|tab|bs|paste|up|down → that key in the window in front · no k: the body typed there as text
+-- POST /type?k=enter|esc|tab|bs|paste|up|down → that key in the window in front · no k: the body typed there (?v=1: a 🎤 take, helper/dictate.py cleans it first)
 -- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
@@ -1416,6 +1416,7 @@ local function strip(buttons) -- what the board needs: no actions
 end
 
 local MODS = { cmd = "cmd", command = "cmd", shift = "shift", alt = "alt", option = "alt", opt = "alt", ctrl = "ctrl", control = "ctrl", fn = "fn" }
+K.DICTATE_PY = HOME .. "/code/esp-deck/helper/dictate.py"
 K.TYPE_KEYS = { enter = { {}, "return" }, esc = { {}, "escape" }, tab = { {}, "tab" }, bs = { {}, "delete" },
   paste = { { "cmd" }, "v" }, up = { {}, "up" }, down = { {}, "down" } }
 local SYSKEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN", mute = "MUTE" }
@@ -2246,8 +2247,13 @@ local function handle(method, path, headers, body)
     local k = K.TYPE_KEYS[p.k]
     K.frontLog({ tap = p.k and ("key " .. p.k) or "type", ctx = K.frontLast }) -- the key's name, never the text
     if k then hs.eventtap.keyStroke(k[1], k[2], 0)
-    elseif (body or ""):match("%S") then hs.eventtap.keyStrokes(body)
-    else return reply("bad key", 400) end
+    elseif not (body or ""):match("%S") then return reply("bad key", 400)
+    elseif p.v == "1" then -- 🎤: whisper's outros and fillers out (helper/dictate.py, Claude for a chat/mail), then typed
+      task("/usr/bin/python3", { K.DICTATE_PY, K.frontLast or "", body }, function(out, code)
+        out = code == 0 and out:gsub("%s+$", "") or body
+        if out:match("%S") then hs.eventtap.keyStrokes(out) end
+      end)
+    else hs.eventtap.keyStrokes(body) end
     return reply("ok", 200)
   end
   if method == "POST" and route == "/media" and SYSKEY[p.k] then
