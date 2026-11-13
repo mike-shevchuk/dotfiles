@@ -1587,6 +1587,21 @@ end
 local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
 local meet = { state = "idle", last = {} }
 local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
+-- a board 📷 by where the board said: front = its path typed into the tmux pane in focus (the Claude window you're in),
+-- clip = the image on the clipboard (⌘V anywhere), meet = into the live meeting's <id>_clips (meeting.py puts it at its
+-- moment); anything else (the open window's pane) = kept for 📎
+function K.shotTo(t, png)
+  if t == "clip" then hs.pasteboard.writeObjects(hs.image.imageFromPath(png))
+  elseif t == "meet" and meetId then
+    hs.fs.mkdir(MEET_DIR .. "/" .. meetId .. "_clips")
+    hs.image.imageFromPath(png):saveToFile(MEET_DIR .. "/" .. meetId .. "_clips/" .. os.time() .. ".png")
+  elseif t == "front" then
+    task(TMUX, { "display-message", "-p", "#{pane_id}" }, function(out, code)
+      local pane = out:match("%%%d+")
+      if code == 0 and pane then task(TMUX, { "send-keys", "-t", pane, "-l", png .. " " }) end
+    end)
+  else lastShot = png end
+end
 -- names sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op; their received length (the
 -- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
 local meetDone = {}
@@ -2355,12 +2370,12 @@ local function handle(method, path, headers, body)
     if f then f:write(body or ""); f:close() end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/shot" then -- saved, not typed: 📎 on the board pastes it where you want
+  if method == "POST" and route == "/shot" then -- t=front|clip|meet: the shade's / remote's 📷 says where it goes; else (t = the open window) saved, 📎 pastes it
     hs.fs.mkdir(SHOT_DIR)
     local png = SHOT_DIR .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
     local w, h = tonumber(p.w) or 320, tonumber(p.h) or 480
     task("/usr/bin/python3", { "-c", K.SHOT_PY, "/tmp/deck-shot.raw", tostring(w), tostring(h), png }, function()
-      if hs.fs.attributes(png) then lastShot = png end
+      if hs.fs.attributes(png) then K.shotTo(p.t, png) end
     end)
     return reply("ok", 200)
   end
