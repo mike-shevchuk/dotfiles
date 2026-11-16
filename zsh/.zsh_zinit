@@ -84,7 +84,11 @@ zinit ice wait"2" lucid; zinit light MichaelAquilina/zsh-you-should-use
 # Development tools - after 3s
 zinit ice wait"3" lucid; zinit snippet OMZ::plugins/docker/docker.plugin.zsh
 zinit ice wait"3" lucid; zinit snippet OMZ::plugins/docker-compose/docker-compose.plugin.zsh
-zinit ice wait"3" lucid; zinit snippet OMZ::plugins/github/github.plugin.zsh
+# gh completion (OMZ "github" plugin is deprecated — it targets the legacy hub CLI;
+# OMZ "gh" needs $ZSH_CACHE_DIR, which we don't set). Generated once, regenerated on `zinit update`.
+zinit ice wait"3" lucid has"gh" id-as"gh-completion" as"completion" \
+    atclone"gh completion -s zsh > _gh" atpull"%atclone"
+zinit light zdharma-continuum/null
 zinit ice wait"3" lucid; zinit snippet OMZ::plugins/pip/pip.plugin.zsh
 # helm plugin dropped: helm binary not installed on Mac or Orange Pi (dead weight).
 # Re-add this line once helm actually lands on a machine.
