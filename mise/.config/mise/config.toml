@@ -1,0 +1,10 @@
+# Global mise tools — stowed to ~/.config/mise/config.toml (`just mise`).
+# New machine: `just mise` → installs everything below, no sudo needed.
+[tools]
+node = "lts"   # some plugins/MCP servers hardcode node/npx; bun is the default runner
+bun = "latest" # runs Claude hooks (*.ts) and bunx MCP servers
+jq = "latest"  # statusline JSON parsing (required)
+gh = "latest"  # statusline PR/CI badges, gh completion
+
+[settings]
+experimental = true
