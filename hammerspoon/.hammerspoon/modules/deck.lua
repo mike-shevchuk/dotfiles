@@ -1085,6 +1085,31 @@ local function chat(id, n, force, job)
           done({ msgs = {}, err = "pick", jobs = jobs.active }) -- the board asks which session this window shows
         end)
       end
+      -- a `claude agents` window (no transcript of its own): the background session that is alive right now — the
+      -- newest-written transcript of the active jobs — not a guess from the window's project folder, which showed
+      -- an old chat while the terminal was current (Mike 17.11). The board's pick (?job=) still wins
+      if job and jobs.tr[job] then return withPath(jobs.tr[job]) end
+      if #jobs.active > 0 then
+        return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
+          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null" }, function(ps)
+          if not (ps or ""):find("claude agents", 1, true) then return K.chatByDir(id, cwd, withPath) end
+          local best, bestM
+          for _, j in ipairs(jobs.active) do
+            local t = jobs.tr[j.id]
+            local m = t and hs.fs.attributes(t, "modification")
+            if m and (not bestM or m > bestM) then best, bestM = t, m end
+          end
+          if best then return withPath(best) end
+          K.chatByDir(id, cwd, withPath)
+        end)
+      end
+      K.chatByDir(id, cwd, withPath)
+    end)
+  end
+  return e.data or { msgs = {}, wait = true }
+end
+-- a window with no transcript tag: the newest transcript of its project folder that no other window claims
+function K.chatByDir(id, cwd, withPath)
       local dir = cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or ""
       if not hs.fs.attributes(dir) then return withPath("") end
       task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. dir .. "/*.jsonl | head -20" }, function(o)
@@ -1096,9 +1121,6 @@ local function chat(id, n, force, job)
         end
         withPath("")
       end)
-    end)
-  end
-  return e.data or { msgs = {}, wait = true }
 end
 
 local function query(qs)
