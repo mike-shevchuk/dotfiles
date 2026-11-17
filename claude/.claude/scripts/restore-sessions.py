@@ -99,8 +99,14 @@ def restore(s: dict) -> None:
         run(["tmux", "new-session", "-d", "-s", t, "-c", s["cwd"]])
     cmd = f"claude --resume {s['id']}; exec zsh"
     print(f"━━━ tmux ━━━  tmux new-window -d -t {t} -n '{name}' -c {s['cwd']} '{cmd}'", flush=True)
-    run(["tmux", "new-window", "-d", "-t", f"{t}:", "-n", name, "-c", s["cwd"], cmd])
-    run(["tmux", "set-window-option", "-t", f"{t}:{name}", "automatic-rename", "off"])
+    wid = run(["tmux", "new-window", "-d", "-P", "-F", "#{window_id}", "-t", f"{t}:", "-n", name, "-c", s["cwd"], cmd]).stdout.strip()
+    wid = wid or f"{t}:{name}"
+    run(["tmux", "set-window-option", "-t", wid, "automatic-rename", "off"])
+    # the board/phone «Чат» reads @agent_transcript; the hook sets it only on the window's next prompt, so a restored
+    # idle window showed some other, old transcript (Mike 17.11: «термінал актуальний, а чат дуже старий»)
+    tr = glob.glob(f"{HOME}/.claude/projects/*/{s['id']}.jsonl")
+    if tr:
+        run(["tmux", "set-option", "-w", "-t", wid, "@agent_transcript", max(tr, key=os.path.getmtime)])
 
 
 def selftest() -> None:
