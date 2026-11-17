@@ -1111,20 +1111,51 @@ local function chat(id, n, force, job)
         return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
           " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null" }, function(ps)
           if not (ps or ""):find("claude agents", 1, true) then return K.chatByDir(id, cwd, withPath) end
-          local best, bestM
-          for _, j in ipairs(jobs.active) do
-            local t = jobs.tr[j.id]
-            local m = t and hs.fs.attributes(t, "modification")
-            if m and (not bestM or m > bestM) then best, bestM = t, m end
-          end
-          if best then return withPath(best) end
-          K.chatByDir(id, cwd, withPath)
+          -- the session the window shows = the one whose latest words are on its screen now; the newest-written job
+          -- was wrong when several run (esp:1 showed the W46 lead's chat, 18.11). Newest-written only as a fallback
+          task(TMUX, { "capture-pane", "-p", "-J", "-S", "-80", "-t", id }, function(screen)
+            local best = K.jobOnScreen(screen or "")
+            if not best then
+              local bestM
+              for _, j in ipairs(jobs.active) do
+                local t = jobs.tr[j.id]
+                local m = t and hs.fs.attributes(t, "modification")
+                if m and (not bestM or m > bestM) then best, bestM = t, m end
+              end
+            end
+            if best then return withPath(best) end
+            K.chatByDir(id, cwd, withPath)
+          end)
         end)
       end
       K.chatByDir(id, cwd, withPath)
     end)
   end
   return e.data or { msgs = {}, wait = true }
+end
+-- which active background job's transcript has its latest assistant words on this screen (whitespace-insensitive)
+function K.jobOnScreen(screen)
+  local flat = screen:gsub("%s+", "")
+  local best, bestLen
+  for _, j in ipairs(jobs.active) do
+    local t = jobs.tr[j.id]
+    local f = t and io.open(t, "rb")
+    if f then
+      local size = f:seek("end")
+      f:seek("set", math.max(0, size - 200000))
+      local tail = f:read("a") or ""
+      f:close()
+      for txt in tail:gmatch('"type":"text","text":"(.-)"[,}]') do
+        local w = txt:gsub("\\n", " "):gsub("\\u%x%x%x%x", ""):gsub("\\.", ""):gsub("[%*`#>|_]", ""):gsub("%s+", "")
+        -- a 24-byte piece from the middle of a reply: long enough to be unique, short enough to sit on one screen
+        if #w >= 32 then
+          local piece = w:sub(math.floor(#w / 2) - 12, math.floor(#w / 2) + 11)
+          if flat:find(piece, 1, true) and (not bestLen or #w > bestLen) then best, bestLen = t, #w end
+        end
+      end
+    end
+  end
+  return best
 end
 -- a window with no transcript tag: the newest transcript of its project folder that no other window claims
 function K.chatByDir(id, cwd, withPath)
