@@ -969,3 +969,12 @@ fi
 # Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
 # PATH entry on the Orange Pi, which shares this file via stow)
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
+
+# Cardputer (esp-deck/cardputer Term app, 40–48 columns, small font): plain prompt instead of agnoster.
+# Term starts zsh with CARDPUTER=1 (components/app_term hosts.txt); nothing else in this file changes.
+if [[ -n $CARDPUTER ]]; then
+  autoload -Uz add-zsh-hook
+  add-zsh-hook -d precmd prompt_agnoster_precmd 2>/dev/null
+  PROMPT='%F{cyan}%1~%f %(?..%F{red}%?%f )%# '
+  RPROMPT=''
+fi
