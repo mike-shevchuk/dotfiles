@@ -748,7 +748,7 @@ end
 local paneCache = {}
 local function pane(id, colors, width, clean, lines)
   width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
-  lines = math.max(120, math.min(lines or 120, 400)) -- the board asks for more after a scroll to the top
+  lines = math.max(120, math.min(lines or 120, 3000)) -- the device asks for more as its view nears the top (phone: up to 3000)
   local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean), lines }, "|")
   for k, e in pairs(paneCache) do if now - e.asked > 60 then paneCache[k] = nil end end
   local e = paneCache[key] or { fetched = 0 }
@@ -756,11 +756,17 @@ local function pane(id, colors, width, clean, lines)
   if not e.busy and now - e.fetched >= 0.4 then
     e.busy, e.fetched = true, now
     task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-" .. lines, "-t", id }, function(out)
-      local ok, text = pcall(render, out, colors, width, clean)
-      if ok then e.data = { t = id, text = text } end
+      if out ~= e.raw then -- a long history rendered again only when the pane changed (render runs on Hammerspoon's thread)
+        local ok, text = pcall(render, out, colors, width, clean)
+        if ok then e.raw, e.data = out, { t = id, text = text } end
+      end
       e.busy = false
     end)
+    -- a full-screen program (Claude Code: the alternate screen) has no history here; the device then scrolls it by
+    -- that program's own PageUp / PageDown (/key) instead of asking for more lines
+    task(TMUX, { "display-message", "-p", "-t", id, "#{alternate_on}" }, function(out) e.alt = (out or ""):match("1") ~= nil end)
   end
+  if e.data then e.data.alt = e.alt or false end
   return e.data or { t = id, text = "", wait = true }
 end
 
