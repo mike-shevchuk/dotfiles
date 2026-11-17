@@ -714,7 +714,7 @@ local function wrap(segs, width, out)
 end
 
 -- a capture-pane → the board's text; clean = paneclean's view, its first line of a turn starts "\1u" / "\1a"
-local function render(out, colors, width, clean)
+local function render(out, colors, width, clean, keep) -- keep: at most that many lines, from the end (60 when not said)
   out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
   local items = {}
   for line in (out .. "\n"):gmatch("(.-)\n") do items[#items + 1] = { s = (line:gsub("%s+$", "")) } end
@@ -739,13 +739,18 @@ local function render(out, colors, width, clean)
     end
     blank = empty
   end
-  while #lines > 60 do table.remove(lines, 1) end -- the board re-renders all of it every second: keep it light
+  -- 60 was the limit whatever the device asked for (2026-11-17: «дуже мала історія») — /pane?n= never reached past
+  -- it. Now the device says how much it wants: little at the live end, more as its view nears the top
+  keep = keep or 60
+  if #lines > keep then lines = table.move(lines, #lines - keep + 1, #lines, 1, {}) end
   return table.concat(lines, "\n")
 end
 
 -- /pane answers from a cache at once; the capture runs async (a sync hs.execute stalled all of HS for up to 1 s),
 -- at most every 0.4 s per window+view, and a view nobody asked for in 60 s is dropped
 local paneCache = {}
+K.panehist = require("modules.panehist")
+K.paneKeyed = {} -- window → { k, at }: the last key the device sent it (/key): which side a page with no row in common is on
 local function pane(id, colors, width, clean, lines)
   width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
   lines = math.max(120, math.min(lines or 120, 3000)) -- the device asks for more as its view nears the top (phone: up to 3000)
@@ -755,16 +760,23 @@ local function pane(id, colors, width, clean, lines)
   paneCache[key], e.asked = e, now
   if not e.busy and now - e.fetched >= 0.4 then
     e.busy, e.fetched = true, now
-    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-" .. lines, "-t", id }, function(out)
-      if out ~= e.raw then -- a long history rendered again only when the pane changed (render runs on Hammerspoon's thread)
-        local ok, text = pcall(render, out, colors, width, clean)
-        if ok then e.raw, e.data = out, { t = id, text = text } end
-      end
-      e.busy = false
+    -- a full-screen program (Claude Code: the alternate screen) has no history in tmux: the device scrolls it by that
+    -- program's own PageUp / PageDown (/key), and the screens it pages through are joined into one text (panehist)
+    task(TMUX, { "display-message", "-p", "-t", id, "#{alternate_on}" }, function(alt)
+      e.alt = (alt or ""):match("1") ~= nil
+      task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-" .. lines, "-t", id }, function(out)
+        if out ~= e.raw then -- rendered again only when the pane changed (render runs on Hammerspoon's thread)
+          local src, k = out, K.paneKeyed[id]
+          if e.alt then
+            local okh, joined = pcall(K.panehist.feed, id, out, isRule, k and now - k.at < 4 and k.k or nil, now)
+            if okh then src = joined end
+          end
+          local ok, text = pcall(render, src, colors, width, clean, lines)
+          if ok then e.raw, e.data = out, { t = id, text = text } end
+        end
+        e.busy = false
+      end)
     end)
-    -- a full-screen program (Claude Code: the alternate screen) has no history here; the device then scrolls it by
-    -- that program's own PageUp / PageDown (/key) instead of asking for more lines
-    task(TMUX, { "display-message", "-p", "-t", id, "#{alternate_on}" }, function(out) e.alt = (out or ""):match("1") ~= nil end)
   end
   if e.data then e.data.alt = e.alt or false end
   return e.data or { t = id, text = "", wait = true }
@@ -2044,6 +2056,12 @@ end
 local function safe(fn, dflt) local ok, v = pcall(fn); if ok then return v end; return dflt end -- one bad source must not kill /state
 local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
+  -- a finished take is offered for 90 s, then forgotten: a device opening its chat later picked up an old take (a test's
+  -- «Привід. Це перевірка…» landed in esp:1 at 00:0x, 17.11, an hour after it was said)
+  if voice.state == "done" then
+    voice.at = voice.at or os.time()
+    if os.time() - voice.at > 90 then voice = { state = "idle", text = "" } end
+  end
   local fa = hs.application.frontmostApplication()
   local fn = fa and fa:name()
   frontName = type(fn) == "string" and fn or ""
@@ -2170,6 +2188,7 @@ local function handle(method, path, headers, body)
     return reply({ r = r, top = top }, 200, true)
   end
   if method == "POST" and route == "/key" and id and validKey(p.k) then
+    K.paneKeyed[id] = { k = p.k, at = hs.timer.secondsSinceEpoch() }
     task(TMUX, { "send-keys", "-t", id, p.k })
     -- Escape interrupts Claude (the board's "Ні" too) and an interrupt fires no Stop hook: without this the window
     -- would keep its answered ask / "working" for good. agent-state.sh done drops them (the hook wants $TMUX)
