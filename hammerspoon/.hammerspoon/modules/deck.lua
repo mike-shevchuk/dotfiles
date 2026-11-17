@@ -1051,7 +1051,8 @@ local function chat(id, n, force, job)
       end)
     end
     local jid = id:match("^job:(%w+)$") -- a background session's row: its own transcript, no window behind it
-    if jid then return withPath(jobs.tr[jid] or "") end
+    -- not `return withPath(...)`: that left chat() returning nil → /chat 503 for every job: row (Cardputer 17.11)
+    if jid then withPath(jobs.tr[jid] or ""); return e.data or { msgs = {}, wait = true } end
     -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
     -- window's own project folder. A dead one = a `claude agents` client: the background job it most likely
     -- shows (the latest active one), kept for that window until ↻ — never a teammate's transcript.
