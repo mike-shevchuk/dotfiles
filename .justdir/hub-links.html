@@ -57,6 +57,8 @@ section h2{font-size:12px;text-transform:uppercase;letter-spacing:.12em;color:va
 .about{color:var(--mut);font-size:13px;margin:8px 0 0}
 .links{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
 .links a{font-size:13px;padding:5px 10px;border-radius:10px;background:var(--pill);border:1px solid transparent;transition:all .18s}
+.links .off{font-size:13px;padding:5px 10px;border-radius:10px;border:1px dashed var(--line);color:var(--down);cursor:not-allowed}
+span.name{cursor:default}span.name:hover{color:inherit}
 .links a:hover{border-color:var(--acc);color:var(--acc);transform:translateY(-1px)}
 a.sel{outline:2px solid var(--acc);outline-offset:2px;border-radius:8px}
 .links a.sel{color:var(--acc)}
@@ -113,12 +115,15 @@ function render() {
     for (const p of data.projects.filter(p => p.group === g)) {
       const m = score(`${p.name} ${p.id} ${p.about} ${p.url}`, q), ls = p.links.map(l => ({ l, m: score(`${l.t} ${l.u}`, q) }));   // the address counts too: «weight» finds «Ноутбук ваги»
       if (q && !m && !ls.some(x => x.m)) continue;
-      const mainId = `h${hits.length}`; if (!q || m) hits.push({ id: mainId, s: m ? m.s : 0, u: p.url });
-      const links = ls.map(({ l, m: lm }) => { const id = `h${hits.length}`; if (q && lm) hits.push({ id, s: lm.s, u: l.u }); return `<a id="${id}" href="${esc(l.u)}" title="${esc(l.u)}">${hl(l.t, lm?.at.filter(k => k < l.t.length))}</a>`; }).join("");
+      const mainId = `h${hits.length}`, tip = esc(p.reg ? `вимкнено — just -g proj up ${p.id}` : "вимкнено — сервіс не відповідає");
+      if ((!q || m) && !p.off) hits.push({ id: mainId, s: m ? m.s : 0, u: p.url });
+      const links = ls.map(({ l, m: lm }) => { const id = `h${hits.length}`, t = hl(l.t, lm?.at.filter(k => k < l.t.length));
+        if (l.off) return `<span class="off" title="${tip}">${t}</span>`;   // the card's own port is down: not a link
+        if (q && lm) hits.push({ id, s: lm.s, u: l.u }); return `<a id="${id}" href="${esc(l.u)}" title="${esc(l.u)}">${t}</a>`; }).join("");
       const nameAt = m ? m.at.filter(k => k < p.name.length) : [];
       cards += `<article class="card ${p.up === false ? "down" : ""}" data-id="${esc(p.id)}" style="--i:${n++};--vt:c-${esc(p.id).replace(/[^\w-]/g, "_")}">
         <div class="top"><span class="icon">${esc(p.icon || "▫️")}</span>
-          <a class="name" id="${mainId}" href="${esc(p.url || "#")}">${hl(p.name, nameAt)}</a>
+          ${p.off || !p.url ? `<span class="name" title="${p.off ? tip : ""}">${hl(p.name, nameAt)}</span>` : `<a class="name" id="${mainId}" href="${esc(p.url)}">${hl(p.name, nameAt)}</a>`}
           ${p.port ? `<span class="port">:${p.port}</span>` : ""}${p.up === null ? "" : `<span class="dot ${p.up ? "up" : ""}" title="${p.up ? "живий" : "не відповідає"}"></span>`}</div>
         ${p.about ? `<p class="about">${esc(p.about)}</p>` : ""}${links ? `<div class="links">${links}</div>` : ""}</article>`;
     }
@@ -149,7 +154,8 @@ async function load(first) {
     $("#meta").innerHTML = `${up}/${known} живі · ${esc(d.ip)} · W${d.week}` + (d.error ? ` · <span class="err">${esc(d.error)}</span>` : "");
     if (first) { data = d; chips(); render(); return; }
     // later polls: only the dots change, no re-animation
-    for (const p of d.projects) { const old = data.projects.find(x => x.id === p.id); if (old) old.up = p.up; }
+    // a service went up/down → its links turn on/off: re-render (rare); otherwise only the dots
+    if (d.projects.some(p => data.projects.find(x => x.id === p.id)?.up !== p.up)) { data = d; render(); return; }
     document.querySelectorAll(".card").forEach(c => {
       const p = data.projects.find(x => x.id === c.dataset.id); if (!p) return;
       c.classList.toggle("down", p.up === false); const dot = c.querySelector(".dot"); if (dot) dot.classList.toggle("up", !!p.up);
