@@ -1,0 +1,116 @@
+# Hub links — the page at http://<Mac IP>:8890/_links (served by `just -g hub`). Edit here; the page re-reads on refresh.
+# Placeholders: {IP} = the Mac's LAN IP right now · {HUB} = http://{IP}:8890 · {W} = current week (W1 = week of Jan's first Monday)
+# Project: id (= registry.conf name, if any), name, icon, group, about, url (main link), check (port | path that must exist),
+#          links: list of [title, url] ("quote" a title with { } in it) — the project's important links (boards, notes, reports, dashboards).
+# Projects in ~/code/projctl/registry.conf that are not listed here appear by themselves (group «projctl», check = their port).
+# No secrets here: the page is readable by anything on the LAN.
+
+groups: [esp, health, b2b, projctl, home]
+
+projects:
+  - id: esp-deck
+    name: esp-deck
+    icon: 🎛
+    group: esp
+    about: мітинги — запис, самері, питання; з телефона — після входу з ключем
+    url: "http://{IP}:8894/"
+    check: 8894
+    links:
+      - [Запитати, "http://{IP}:8894/ask"]
+      - [Пам'ять, "http://{IP}:8894/memory"]
+      - [Ремонт плати, "{HUB}/_esp/board-repair/index.html"]
+      - [Брифи esp, "{HUB}/_esp/"]
+
+  - id: phone
+    name: Телефон · PWA
+    icon: 📱
+    group: esp
+    about: інтерфейс плати на телефоні (https, свій CA)
+    url: "https://{IP}:8072/"
+    check: 8072
+    links:
+      - [Версія на перевірку, "https://{IP}:8072/next/"]
+      - [CA-сертифікат, "https://{IP}:8072/ca.crt"]
+      - [Бриф, "{HUB}/_esp/phone-deck.md"]
+
+  - id: cardputer
+    name: Cardputer
+    icon: 🎴
+    group: esp
+    about: M5 Cardputer по USB (●, коли підключений)
+    url: "{HUB}/_esp/cardputer.md"
+    check: /dev/cu.usbmodem21101
+    links:
+      - [Команда, "{HUB}/_esp/cardputer-team.md"]
+      - [Симулятор плати (лише Mac), "http://127.0.0.1:8071/"]
+
+  - id: radar
+    name: Радар Wi-Fi
+    icon: 📡
+    group: esp
+    about: wifi_test radar
+    url: "http://{IP}:8895/"
+    check: 8895
+    links:
+      - [Бриф поверхів, "{HUB}/_esp/radar-floors.md"]
+
+  - id: health
+    name: Здоров'я
+    icon: ❤️
+    group: health
+    about: вага, сон, Garmin — дашборд
+    url: "http://{IP}:8893/"
+    check: 8893
+    links:
+      - [Ноутбук ваги, "http://{IP}:8893/weight-notebook"]
+      - [Що впливає на вагу, "http://{IP}:8893/weight-next"]
+      - [Ноутбук, "http://{IP}:8893/notebook"]
+      - [Графіки (бриф), "{HUB}/_esp/health-charts.md"]
+
+  - id: fleet
+    name: rescue-serverless
+    icon: 🚑
+    group: b2b
+    about: fleet, tiki board, звіти
+    url: "{HUB}/rescue-serverless/fleet/w{W}-board.html"
+    links:
+      - ["Tiki board W{W}", "{HUB}/rescue-serverless/fleet/w{W}-board.html"]
+      - ["Fleet W{W}", "{HUB}/rescue-serverless/fleet/w{W}/"]
+      - ["Visual plans W{W}", "{HUB}/rescue-serverless/w{W}/visual-plan/"]
+      - [Звіти (alerts), "{HUB}/rescue-serverless/alerts/"]
+      - [Нотатки, "{HUB}/rescue-serverless/"]
+      - [Linear, "https://linear.app/punchrescue"]
+
+  - id: hub
+    name: Нотатки · hub
+    icon: 🗂
+    group: projctl
+    about: zettelkasten/claude_code
+    url: "{HUB}/"
+    check: 8890
+    links:
+      - [Усі файли, "{HUB}/_all"]
+      - [Hammerspoon + пам'ять, "{HUB}/_hs"]
+
+  - id: drive
+    name: Drive
+    icon: 💾
+    group: home
+    url: "http://{IP}:8070/"
+    check: 8070
+
+  - id: immich
+    name: Immich
+    icon: 🖼
+    group: home
+    about: фото
+    url: "http://{IP}:3003/"
+    check: 3003
+
+  - id: stt-host
+    name: STT host
+    icon: 🎙
+    group: home
+    about: whisper для голосу
+    url: "http://{IP}:8069/"
+    check: 8069
