@@ -123,7 +123,7 @@ function render() {
       const nameAt = m ? m.at.filter(k => k < p.name.length) : [];
       cards += `<article class="card ${p.up === false ? "down" : ""}" data-id="${esc(p.id)}" style="--i:${n++};--vt:c-${esc(p.id).replace(/[^\w-]/g, "_")}">
         <div class="top"><span class="icon">${esc(p.icon || "▫️")}</span>
-          ${p.off || !p.url ? `<span class="name" title="${p.off ? tip : ""}">${hl(p.name, nameAt)}</span>` : `<a class="name" id="${mainId}" href="${esc(p.url)}">${hl(p.name, nameAt)}</a>`}
+          ${p.off || !p.url ? `<span class="name" title="${p.off ? tip : "без веб-сторінки"}">${hl(p.name, nameAt)}</span>` : `<a class="name" id="${mainId}" href="${esc(p.url)}">${hl(p.name, nameAt)}</a>`}
           ${p.port ? `<span class="port">:${p.port}</span>` : ""}${p.up === null ? "" : `<span class="dot ${p.up ? "up" : ""}" title="${p.up ? "живий" : "не відповідає"}"></span>`}</div>
         ${p.about ? `<p class="about">${esc(p.about)}</p>` : ""}${links ? `<div class="links">${links}</div>` : ""}</article>`;
     }
