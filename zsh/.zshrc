@@ -3,6 +3,12 @@
 # ZSH CONFIGURATION
 # =============================================================================
 
+# Fallback when the remote host lacks terminfo for $TERM (e.g. xterm-ghostty
+# over SSH) — otherwise zle echoes every keystroke twice and tput errors out.
+if ! infocmp "$TERM" >/dev/null 2>&1; then
+    export TERM=xterm-256color
+fi
+
 # =============================================================================
 # HISTORY CONFIGURATION
 # =============================================================================
