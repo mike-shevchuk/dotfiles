@@ -237,4 +237,23 @@ for name, items in groups.items():
     out.append({"name": name, "desc": DESC.get(name, ""), "taskman": name in BROWSERS, "n": len(items), "kb": sum(i["kb"] for i in items),
                 "cpu": sum(i["cpu"] for i in items), "items": items[:40]})
 out.sort(key=lambda g: -g["kb"])
-print(json.dumps({"groups": out[:10]}, ensure_ascii=False))
+
+
+def system():
+    """RAM split the way the menu counts it (used = active + wired + compressed), swap, pressure level."""
+    vm = sh("vm_stat")
+    page = int((re.search(r"page size of (\d+)", vm) or [0, 16384])[1])
+    pg = lambda k: int((re.search(rf"{k}:\s+(\d+)", vm) or [0, 0])[1]) * page / 1024  # KB
+    sw = dict(re.findall(r"(\w+) = ([\d.]+)M", sh("sysctl", "-n", "vm.swapusage")))
+    lvl = sh("sysctl", "-n", "kern.memorystatus_vm_pressure_level").strip()
+    d = {k: pg(v) for k, v in (("active", "Pages active"), ("wired", "Pages wired down"), ("inactive", "Pages inactive"),
+                               ("compressed", "Pages occupied by compressor"), ("free", "Pages free"))}
+    d.update(total=int(sh("sysctl", "-n", "hw.memsize") or 0) / 1024, used=d["active"] + d["wired"] + d["compressed"],
+             swapUsed=float(sw.get("used", 0)) * 1024, swapTotal=float(sw.get("total", 0)) * 1024,
+             pressure={"1": "normal", "2": "warn", "4": "critical"}.get(lvl, lvl or "?"))
+    return d
+
+
+import sys as _sys
+limit = 10 if "--all" not in _sys.argv else 99  # the menu shows 10 groups; the hub page takes them all
+print(json.dumps({"groups": out[:limit], "sys": system()}, ensure_ascii=False))
