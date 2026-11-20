@@ -9,6 +9,12 @@ if ! infocmp "$TERM" >/dev/null 2>&1; then
     export TERM=xterm-256color
 fi
 
+# Disable mouse-tracking modes before every prompt. A TUI (tmux, yazi, nvim,
+# lazygit) that crashes or loses its SSH link leaves them on, and every mouse
+# move then prints escape garbage like `5;45;12M` into the shell.
+_reset_mouse() { printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l' }
+precmd_functions+=(_reset_mouse)
+
 # =============================================================================
 # HISTORY CONFIGURATION
 # =============================================================================
