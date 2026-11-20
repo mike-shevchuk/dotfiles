@@ -1,30 +1,44 @@
 # --- Stow packages ---
 
+# Stow one package with the REPO as the source of truth. Never use --adopt:
+# it moves a pre-existing local file INTO the repo, overwriting the tracked
+# config (a fresh Claude Code install's 3-line settings.json once replaced the
+# real 158-line one that way). Instead, every real file sitting where a link
+# must go is moved aside to <file>.pre-stow-<timestamp>, then stow links in.
+[private]
+_stow pkg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    ts=$(date +%Y%m%d-%H%M%S)
+    # dry run lists conflicts as "... over existing target <rel> since ..."
+    conflicts=$(stow -n --no-folding --restow -t ~ "{{pkg}}" 2>&1 \
+        | sed -n 's/.* over existing target \(.*\) since .*/\1/p' || true)
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        mv "$HOME/$rel" "$HOME/$rel.pre-stow-$ts"
+        echo "  backed up ~/$rel → ~/$rel.pre-stow-$ts" >&2
+    done <<< "$conflicts"
+    # any conflict the dry run didn't name makes this fail loudly — never adopts
+    stow --no-folding --restow -t ~ "{{pkg}}"
+
 # Claude Code settings, hooks, sounds, statusline, commands
 claude:
-    stow --no-folding --adopt --restow -t ~ claude
+    @just --justfile "{{justfile()}}" _stow claude
 
 # Stow Codex configuration into ~/.codex
 codex:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    config="$HOME/.codex/config.toml"
-    if [ -f "$config" ] && [ ! -L "$config" ]; then
-        backup="$config.pre-stow-$(date +%Y%m%d-%H%M%S)"
-        mv "$config" "$backup"
-        echo "Backed up existing Codex config to $backup"
-    fi
-    stow --no-folding --restow -t ~ codex
+    @just --justfile "{{justfile()}}" _stow codex
 
 # Zsh config, plugins, spaces
 zsh:
-    stow --no-folding --adopt --restow -t ~ zsh
+    @just --justfile "{{justfile()}}" _stow zsh
 
 # Tmux config + plugins (tpm can't auto-discover plugins from .tmux.conf.local)
 tmux:
     #!/usr/bin/env bash
     set -euo pipefail
-    stow --no-folding --adopt --restow -t ~ tmux
+    just --justfile "{{justfile()}}" _stow tmux
     plugins_dir="$HOME/.tmux/plugins"
     plugins="
         tpm=tmux-plugins/tpm
@@ -72,47 +86,47 @@ tmux:
 
 # Kitty terminal config
 kitty:
-    stow --no-folding --adopt --restow -t ~ kitty
+    @just --justfile "{{justfile()}}" _stow kitty
 
 # LazyVIM neovim config
 lz:
-    stow --no-folding --adopt --restow -t ~ lz
+    @just --justfile "{{justfile()}}" _stow lz
 
 # PWNVIM neovim config
 pnv:
-    stow --no-folding --adopt --restow -t ~ pnv
+    @just --justfile "{{justfile()}}" _stow pnv
 
 # TNVIM neovim config
 tnv:
-    stow --no-folding --adopt --restow -t ~ tnv
+    @just --justfile "{{justfile()}}" _stow tnv
 
 # Yazi file manager config
 yazi:
-    stow --no-folding --adopt --restow -t ~ yazi
+    @just --justfile "{{justfile()}}" _stow yazi
 
 # fastfetch: default look + LAN IP, Wi-Fi, hostname
 fastfetch:
-    stow --no-folding --adopt --restow -t ~ fastfetch
+    @just --justfile "{{justfile()}}" _stow fastfetch
 
 # Todoist config
 todoist:
-    stow --no-folding --adopt --restow -t ~ todoist
+    @just --justfile "{{justfile()}}" _stow todoist
 
 # Nerd fonts
 fonts:
-    stow --no-folding --adopt --restow -t ~ fonts
+    @just --justfile "{{justfile()}}" _stow fonts
 
 # Hammerspoon system monitor (macOS only)
 hammerspoon:
-    stow --no-folding --adopt --restow -t ~ hammerspoon
+    @just --justfile "{{justfile()}}" _stow hammerspoon
 
 # Hyprland config (Linux only)
 hyperland:
-    stow --no-folding --adopt --restow -t ~ hyperland
+    @just --justfile "{{justfile()}}" _stow hyperland
 
 # mise global tools (node, bun, jq, gh) → ~/.config/mise/config.toml, then install them
 mise:
-    stow --no-folding --adopt --restow -t ~ mise
+    @just --justfile "{{justfile()}}" _stow mise
     mise install
 
 # Stow all packages
