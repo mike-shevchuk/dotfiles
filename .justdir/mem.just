@@ -194,6 +194,7 @@ mem action="" plugin="":
         # lead = 👑 name or window :1 (after a restore the name can become the claude version)
         [[ $2 == 👑* || $3 == *:1 ]] && { echo "лід"; return; }
         screen=$(tmux capture-pane -p -t "$1")
+        [[ ${4:-} == working ]] && { echo "працює (@agent_state)"; return; }
         grep -q 'esc to interrupt' <<<"$screen" && { echo "працює"; return; }
         draft=$(grep '^❯' <<<"$screen" | tail -1 | sed 's/^❯[[:space:]]*//')
         [ -n "$draft" ] && echo "чернетка: ${draft:0:30}"
@@ -210,7 +211,7 @@ mem action="" plugin="":
             [ -n "$m" ] || m="$(( $(ps -o rss= -p "$cpid") / 1024 ))M"
             idle=$(( (now - act) / 60 ))
             [ -n "$tr" ] && [ -f "$tr" ] && idle=$(( (now - $(stat -f %m "$tr" 2>/dev/null || stat -c %Y "$tr")) / 60 ))
-            why=$(keep_reason "$pane" "$name" "$win")
+            why=$(keep_reason "$pane" "$name" "$win" "$st")
             [ -z "$why" ] && echo "$win $name $m" >>"$cands"
             printf '%-9s %-24.24s %-5s %8s %6s  %s\n' "$win" "$name" "${st:--}" "$idle" "$m" "${why:-✅ можна закрити}"
         done < <(tmux list-panes -s -t "$sess" -F '#{pane_pid}|#S:#I|#W|#{@agent_state}|#{@agent_transcript}|#{window_activity}|#{pane_id}')
@@ -225,14 +226,14 @@ mem action="" plugin="":
         [ -n "$picked" ] && kill_windows "$picked"
     }
     kill_windows() {  # $1 = "s:i s:j" — re-checks each window right before closing it
-        local t pane name why n=0 i=0 fail=0
+        local t pane name st why n=0 i=0 fail=0
         set -- $1; n=$#
         for t in "$@"; do
             i=$((i+1))
             # exact match: `display -t` on a missing window silently falls back to the current one
-            IFS='|' read -r pane name < <(tmux list-windows -a -F '#S:#I|#{pane_id}|#W' | awk -F'|' -v t="$t" '$1==t{print $2"|"$3}')
+            IFS='|' read -r pane name st < <(tmux list-windows -a -F '#S:#I|#{pane_id}|#W|#{@agent_state}' | awk -F'|' -v t="$t" '$1==t{print $2"|"$3"|"$4}')
             [ -n "$pane" ] || { echo "  [$i/$n] $t — FAIL: нема такого вікна" >&2; fail=1; continue; }
-            why=$(keep_reason "$pane" "$name" "$t")
+            why=$(keep_reason "$pane" "$name" "$t" "$st")
             if [ -n "$why" ]; then echo "  [$i/$n] $t $name — SKIP ($why)" >&2; continue; fi
             echo "→ [$i/$n] tmux kill-window -t $t   ($name)" >&2
             tmux kill-window -t "$t" && echo "  OK" >&2 || { echo "  FAIL" >&2; fail=1; }

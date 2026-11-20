@@ -227,6 +227,122 @@ hub port="8890" root="~/zettelkasten/claude_code":
           console.error(`  state ← ${b.op} from ${ip}`);
           return json(res);
         }
+        // ── /_hs: Hammerspoon + memory dashboard (page: .justdir/hub-hs.html). Reads from anyone on the LAN;
+        //    anything that changes the Mac (run, toggle, kill) only from the Mac itself.
+        if (p === "/_hs" || p.startsWith("/_hs/")) {
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          const self = /^(127\.|::1$|::ffff:127\.)/.test(ip) || ip.replace(/^::ffff:/, "") === curIP();
+          // hs CLI: never killed, never a `timeout` (crashes HS) — only its own -t; args go in base64, no quoting games
+          const hsc = async (lua: string) => {
+            const r = Bun.spawn(["/opt/homebrew/bin/hs", "-q", "-t", "8", "-c", lua], { stdout: "pipe", stderr: "pipe" });
+            const out = await new Response(r.stdout).text(); await r.exited; return out.trim();
+          };
+          const b64 = (o: unknown) => Buffer.from(JSON.stringify(o)).toString("base64");
+          if (p === "/_hs") return html(await readFile(join(HOME, "dotfiles/.justdir/hub-hs.html"), "utf8") + HOME_LINK());
+          if (p === "/_hs/mem") {
+            const r = Bun.spawnSync(["/usr/bin/python3", "-I", join(HOME, ".hammerspoon/bin/topmem.py"), "--all"], { stdout: "pipe", stderr: "pipe" });
+            return new Response(r.stdout, { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          }
+          if (p === "/_hs/state") {
+            const out = await hsc(`local s,g,po=require("modules.system"),require("modules.guard"),require("modules.pomodoro")
+              local pal=require("modules.palette") if #pal.entries==0 then pal.parse() end
+              local e={} for _,x in ipairs(pal.entries) do e[#e+1]={title=x.title,chord=x.chord,category=x.category,kind=x.kind,detail=x.detail,source=x.source,fav=x.fav,params=x.params and true or nil,mods=x.mods,key=x.key} end
+              return hs.json.encode({caffeine=hs.caffeinate.get("displayIdle"),pinch=s.isPinchZoomBlocked(),scroll=s.getScrollMultiplier(),
+                guard=g.enabled,pomodoro=po.state,pomoTitle=po.getTitle() or "",dark=hs.host.interfaceStyle()=="Dark",
+                hotkeys=#hs.hotkey.getHotkeys(),entries=e})`);
+            try { return json({ ...JSON.parse(out), self }); } catch { return json({ error: "hs did not answer: " + out.slice(0, 200), self }, 502); }
+          }
+          if (p === "/_hs/live") {
+            const out = await hsc(`local o={screens={},wins={},errors={}}
+              for _,s in ipairs(hs.screen.allScreens()) do local f=s:fullFrame() o.screens[#o.screens+1]={name=s:name(),x=f.x,y=f.y,w=f.w,h=f.h,main=(s==hs.screen.mainScreen())} end
+              local fw=hs.window.focusedWindow() local fid=fw and fw:id() or -1
+              for _,w in ipairs(hs.window.orderedWindows()) do local f=w:frame() local a=w:application()
+                o.wins[#o.wins+1]={id=w:id(),app=a and a:name() or "?",title=w:title() or "",x=f.x,y=f.y,w=f.w,h=f.h,focused=(w:id()==fid)} end
+              local d=hs.audiodevice.defaultOutputDevice()
+              if d then o.audio={name=d:name(),vol=math.floor((d:outputVolume() or 0)+0.5),mute=d:outputMuted()} end
+              local b=hs.brightness.get() if b and b==b then o.bright=b end
+              o.wifi=hs.wifi.currentNetwork()
+              local errs={} for l in (hs.console.getConsole() or ""):gmatch("[^\\n]+") do if l:find("rror") or l:find("traceback") then errs[#errs+1]=l:sub(1,240) end end
+              for i=math.max(1,#errs-11),#errs do o.errors[#o.errors+1]=errs[i] end
+              return hs.json.encode(o)`);
+            let hsd: any = {}; try { hsd = JSON.parse(out); } catch { hsd = { error: "hs: " + out.slice(0, 120) }; }
+            // window titles / console lines can carry mail subjects, paths, tokens: only the Mac itself sees them
+            if (!self) { for (const w of hsd.wins ?? []) w.title = ""; hsd.errors = []; }
+            const sh = (...a: string[]) => Bun.spawnSync(a, { stdout: "pipe", stderr: "pipe" }).stdout.toString().trim();
+            const load = sh("sysctl", "-n", "vm.loadavg").replace(/[{}]/g, "").trim().split(/\s+/).map(Number);
+            const boot = Number((sh("sysctl", "-n", "kern.boottime").match(/sec = (\d+)/) ?? [])[1] ?? 0);
+            const df = sh("df", "-k", "/System/Volumes/Data").split("\n")[1]?.split(/\s+/) ?? [];
+            // stallprof: "HH:MM:SS slow <what> <file:line> N ms" / "HH:MM:SS HS stall N ms …" — last 3000 lines, grouped by site
+            const slow: Record<string, { n: number; max: number; sum: number; last: string }> = {}; let stalls = 0, stallMax = 0;
+            try {
+              const lines = (await readFile(join(HOME, "Library/Logs/deck-slow.log"), "utf8")).trimEnd().split("\n").slice(-3000);
+              for (const l of lines) {
+                let m = l.match(/^(\S+) slow (\S+) (\S+) (\d+) ms/);
+                if (m) { const k = `${m[3]} · ${m[2]}`.replace(/^.*\/(extensions\/hs\/)/, "$1"); const e = (slow[k] ??= { n: 0, max: 0, sum: 0, last: "" }); e.n++; e.sum += +m[4]; e.max = Math.max(e.max, +m[4]); e.last = m[1]; continue; }
+                m = l.match(/HS stall (\d+) ms/); if (m) { stalls++; stallMax = Math.max(stallMax, +m[1]); }
+              }
+            } catch {}
+            const top = Object.entries(slow).map(([site, v]) => ({ site, ...v })).sort((a, b) => b.sum - a.sum).slice(0, 12);
+            return json({ ...hsd, load, uptime: boot ? Math.floor(Date.now() / 1000) - boot : 0, disk: { freeKB: +df[3] || 0, totalKB: +df[1] || 0 }, ip: curIP(), slow: top, stalls, stallMax });
+          }
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          if (!self) return json({ error: "керувати можна лише з цього Mac (з телефона — тільки перегляд)" }, 403);
+          const body = await req.text(); if (body.length > 4096) return new Response("too large", { status: 413 });
+          let q: any; try { q = JSON.parse(body); } catch { return bad("invalid JSON"); }
+          if (p === "/_hs/run") {
+            if (typeof q.title !== "string" || typeof q.source !== "string") return bad("title + source");
+            console.error(`  hs run ← ${q.title} (${q.source})`);
+            // same paths as the palette's own run(): replay a chord, an action, a just recipe, or a module function
+            return json({ result: await hsc(`local q=hs.json.decode(hs.base64.decode("${b64(q)}"))
+              local p=require("modules.palette") if #p.entries==0 then p.parse() end
+              for _,e in ipairs(p.entries) do if e.title==q.title and e.source==q.source then
+                if e.kind=="just" and e.params then return "needs-args" end
+                hs.timer.doAfter(0.05,function() local ok,err=pcall(function()
+                  if e.kind=="just" then p.runRecipe(e,"")
+                  elseif e.kind=="action" then p._actions[e.source]()
+                  elseif e.kind=="key" then hs.eventtap.keyStroke(e.mods,e.key,0)
+                  else require("modules."..e.module)[e.fn]() end end)
+                  if not ok then hs.alert.show("hub: "..tostring(err),3) end end)
+                return "ok" end end return "not-found"`) });
+          }
+          if (p === "/_hs/toggle") {
+            const lua: Record<string, string> = {
+              caffeine: `return tostring(hs.caffeinate.toggle("displayIdle"))`,
+              pinch: `require("modules.system").togglePinchZoom() return "ok"`,
+              guard: `require("modules.guard").toggle() return "ok"`,
+              pomodoro: `require("modules.pomodoro").toggle() return "ok"`,
+              dark: `require("modules.system").toggleDarkMode() return "ok"`,
+              scroll: `require("modules.system").setScrollMultiplier(${Number(q.value) || 1}, true) return "ok"`,
+              volume: `local d=hs.audiodevice.defaultOutputDevice() if d then d:setOutputVolume(${Math.round(Number(q.value))}) end return "ok"`,
+              mute: `local d=hs.audiodevice.defaultOutputDevice() if d then d:setOutputMuted(not d:outputMuted()) end return "ok"`,
+              brightness: `hs.brightness.set(${Math.round(Number(q.value))}) return "ok"`,
+            };
+            if (!lua[q.what]) return bad("what: " + Object.keys(lua).join("|"));
+            if (q.what === "scroll" && !(Number(q.value) >= 0.25 && Number(q.value) <= 5)) return bad("value 0.25–5");
+            if ((q.what === "volume" || q.what === "brightness") && !(Number(q.value) >= 0 && Number(q.value) <= 100)) return bad("value 0–100");
+            console.error(`  hs toggle ← ${q.what} ${q.value ?? ""}`);
+            return json({ result: await hsc(lua[q.what]) });
+          }
+          if (p === "/_hs/focus") {
+            const id = Number(q.id); if (!Number.isInteger(id)) return bad("id");
+            return json({ result: await hsc(`local w=hs.window.get(${id}) if not w then return "gone" end w:unminimize() w:focus() return "ok"`) });
+          }
+          if (p === "/_hs/kill") {
+            const pid = Number(q.pid);
+            if (!Number.isInteger(pid) || pid < 2) return bad("pid");
+            const ps = Bun.spawnSync(["ps", "-o", "user=,comm=", "-p", String(pid)]).stdout.toString().trim();
+            const [user, ...rest] = ps.split(/\s+/); const comm = rest.join(" ");
+            if (!ps) return json({ error: "no such process" }, 404);
+            if (user !== process.env.USER) return json({ error: `${comm}: чужий процес (${user})` }, 403);
+            // HS dies → CFMessagePort crash; the hub → this page; WindowServer/loginwindow → logout
+            if (/Hammerspoon|WindowServer|loginwindow|launchd/.test(comm) || pid === process.pid) return json({ error: `${comm}: не вбиваю` }, 403);
+            console.error(`  hs kill ← ${pid} ${comm}`);
+            try { process.kill(pid, "SIGTERM"); return json({ ok: true, pid, comm }); } catch (e) { return json({ error: String(e) }, 500); }
+          }
+          return new Response("not found", { status: 404 });
+        }
         if (p === "/__reload") {
           let self: ReadableStreamDefaultController;
           return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
