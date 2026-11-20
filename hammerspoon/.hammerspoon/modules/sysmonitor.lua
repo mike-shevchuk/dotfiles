@@ -104,6 +104,24 @@ local function getMemTree()
     return (ok and type(data) == "table" and data.groups) or {}
 end
 
+-- apps the Mac (or this menu) needs: quitting them logs out, kills the board's Mac side, or just respawns
+local KEEP_APPS = { Hammerspoon = true, Finder = true, Dock = true, SystemUIServer = true, ControlCenter = true,
+    NotificationCenter = true, loginwindow = true, WindowServer = true }
+
+local function quitApp(name)
+    local app = hs.application.get(name)
+    if not app then return hs.alert.show(name .. ": не знайдено (вже закрито?)", 2) end
+    if hs.dialog.blockAlert("Закрити весь " .. name .. "?", "Як ⌘Q: застосунок збереже стан і закриється разом з усіма своїми процесами.", "Закрити", "Скасувати") ~= "Закрити" then return end
+    app:kill()
+    hs.timer.doAfter(4, function()
+        local still = hs.application.get(name)
+        if still and still:isRunning() and hs.dialog.blockAlert(name .. " не закрився за 4 с", "Закрити примусово (kill -9 усіх процесів)?", "Примусово", "Скасувати") == "Примусово" then
+            still:kill9()
+        end
+        M.refresh()
+    end)
+end
+
 local function killProcess(pid, name)
     local btn = hs.dialog.blockAlert(
         string.format("Kill process: %s (PID %d)?", name, pid),
@@ -231,6 +249,11 @@ buildMenu = function()
                 if type(app) == "userdata" then app:activate() end
                 hs.timer.doAfter(0.4, function() hs.eventtap.keyStroke({ "shift" }, "escape") end)
             end })
+        end
+        if g.app and not KEEP_APPS[g.name] then
+            -- the whole app at once (Brave ×24 helpers): ⌘Q-style quit first, force only if it is still up
+            table.insert(sub, { title = string.format("⏻ Закрити весь %s (×%d процесів, %s)", g.name, g.n, formatMB(g.kb / 1024)),
+                fn = function() quitApp(g.name) end })
         end
         if #sub > 0 then table.insert(sub, { title = "-" }) end
         for _, it in ipairs(g.items) do

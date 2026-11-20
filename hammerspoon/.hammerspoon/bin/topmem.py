@@ -209,6 +209,7 @@ def just_label(pid, a):
 
 
 groups = defaultdict(list)
+app_groups = set()  # groups that are one GUI app (Brave, Docker…): the menu can quit the whole app
 for pid, p in procs.items():
     a = p["args"]
     if pid in claimed or (mem.get(pid, 0) < 1024 and exe(a) not in SHELLS):
@@ -221,6 +222,8 @@ for pid, p in procs.items():
         grp = "Python" if "ython" in exe(a) or "uvicorn" in a else exe(a)
         label = script_label(pid, a) + (" · сирота (батько помер)" if p["ppid"] == 1 else "")
     elif ".app/" in a:
+        if re.match(r"/(System/)?Applications/[^/]+\.app/", a):  # a real app, not Python.app inside a framework
+            app_groups.add(app_of(a))
         grp, label = app_of(a), chromium_label(a) or re.sub(r"^.*/", "", a.split(" --")[0])[:40]
         if grp in BROWSERS:
             label += f" · PID {pid}"  # match it in the browser's ⇧Esc task manager (Process ID column)
@@ -234,7 +237,7 @@ groups["Claude"] = claude_items
 out = []
 for name, items in groups.items():
     items.sort(key=lambda i: -i["kb"])
-    out.append({"name": name, "desc": DESC.get(name, ""), "taskman": name in BROWSERS, "n": len(items), "kb": sum(i["kb"] for i in items),
+    out.append({"name": name, "desc": DESC.get(name, ""), "taskman": name in BROWSERS, "app": name in app_groups, "n": len(items), "kb": sum(i["kb"] for i in items),
                 "cpu": sum(i["cpu"] for i in items), "items": items[:40]})
 out.sort(key=lambda g: -g["kb"])
 
