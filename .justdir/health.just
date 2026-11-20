@@ -119,8 +119,8 @@ health:
     check "tmux"              tmux         optional  "terminal multiplexer"       "brew/apt/pacman install tmux"
 
     # Claude Code deps
-    check "node"              node         required  "hooks runtime (tsx)"        "install node"
-    check "npx"               npx          required  "runs hook scripts"          "comes with node"
+    check "bun"               bun          required  "Claude hooks runtime + opensessions"  "brew install oven-sh/bun/bun"
+    check "node"              node         optional  "npx for MCP servers (playwright)"     "brew install node"
     check "jq"                jq           required  "statusline JSON parsing"    "brew/apt/pacman install jq"
     check "gh"                gh           optional  "statusline PR info"         "brew/apt/pacman install gh"
     check "xh"                xh           required  "statusline usage API + HTTP recipes"  "brew install xh / cargo install xh"
@@ -154,7 +154,6 @@ health:
         check_tmux_plugin "tmux-sidebar"    "file tree sidebar"
         check_tmux_plugin "opensessions"    "session sidebar + agent status"
         # Disabled: tmux-resurrect (session save/restore), tmux-continuum (auto-save)
-        check "bun"               bun          optional  "opensessions runtime"       "curl -fsSL https://bun.sh/install | bash"
     fi
 
     # macOS tools
