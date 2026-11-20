@@ -9,9 +9,11 @@ local PROJECT_ID = "6cf7g4H5532pQmW3" -- Back2Back
 local DOOING_SECTION = "6cf7g6cWMX2c3qpV"
 local REFRESH_MIN = 3
 
+local warned = false
 local function getToken()
   local token = env.get("TODOIST_TOKEN")
-  if not token then
+  if not token and not warned then -- once, not every refresh
+    warned = true
     hs.alert.show("Todoist: add TODOIST_TOKEN to ~/.hammerspoon/.env", 5)
   end
   return token
