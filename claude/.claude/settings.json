@@ -114,7 +114,7 @@
     "context7@claude-plugins-official": true,
     "code-review@claude-plugins-official": true,
     "code-simplifier@claude-plugins-official": true,
-    "playwright@claude-plugins-official": true,
+    "playwright@claude-plugins-official": false,
     "superpowers@claude-plugins-official": true,
     "huggingface-skills@claude-plugins-official": false,
     "claude-md-management@claude-plugins-official": true,

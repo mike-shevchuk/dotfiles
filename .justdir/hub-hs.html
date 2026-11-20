@@ -1,0 +1,488 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mac · Hammerspoon</title>
+<style>
+:root{
+  --bg:#0d1117;--panel:#161b22;--panel2:#1c2129;--line:#30363d;--text:#e6edf3;--dim:#8b949e;--faint:#6e7681;
+  --blue:#58a6ff;--green:#3fb950;--amber:#d29922;--red:#f85149;--orange:#db6d28;--violet:#a371f7;--teal:#39c5cf;
+  --r:12px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 -apple-system,BlinkMacSystemFont,"SF Pro Text",system-ui,sans-serif}
+.wrap{max-width:1280px;margin:0 auto;padding:20px 16px 72px}
+header{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:16px}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+h2{font-size:13px;margin:0 0 10px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.06em}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid var(--line);color:var(--dim);font-size:12px}
+.pill .dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.pill.warn .dot{background:var(--amber)} .pill.critical .dot{background:var(--red);box-shadow:0 0 8px var(--red)}
+.spacer{flex:1}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px}
+.grid{display:grid;gap:12px}
+.stats{grid-template-columns:repeat(4,minmax(0,1fr))}
+.main{grid-template-columns:minmax(0,2fr) minmax(0,1fr);margin-top:12px}
+@media (max-width:900px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}.main{grid-template-columns:1fr}}
+.stat{display:flex;gap:12px;align-items:center}
+.ring{width:64px;height:64px;flex:none}
+.ring circle{fill:none;stroke-width:7}
+.ring .bgc{stroke:var(--panel2)}
+.ring .fg{stroke-linecap:round;transform:rotate(-90deg);transform-origin:50% 50%;transition:stroke-dashoffset .6s ease,stroke .3s}
+.stat .v{font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.stat .l{color:var(--dim);font-size:12px}
+.stat .s{color:var(--faint);font-size:12px}
+.bar{display:flex;height:12px;border-radius:6px;overflow:hidden;background:var(--panel2);margin:10px 0 6px}
+.bar span{display:block;height:100%;transition:width .6s ease}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;color:var(--dim);font-size:12px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+.spark{width:100%;height:56px;display:block;margin-top:8px}
+/* treemap */
+.tmhead{display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap}
+.crumb{color:var(--blue);cursor:pointer;font-weight:600}
+.crumb.cur{color:var(--text);cursor:default}
+#tm{position:relative;height:440px;border-radius:8px;overflow:hidden;background:var(--panel2)}
+.tile{position:absolute;border:1px solid var(--bg);border-radius:4px;padding:6px 7px;overflow:hidden;cursor:pointer;color:#fff;transition:filter .15s}
+.tile:hover{filter:brightness(1.18)}
+.tile b{display:block;font-size:12px;font-weight:650;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 2px #0008}
+.tile small{display:block;font-size:11px;opacity:.85;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.desc{color:var(--dim);font-size:12px;margin:-4px 0 10px;min-height:16px}
+#tip{position:fixed;pointer-events:none;background:#000d;border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:12px;max-width:340px;z-index:9;display:none}
+/* detail drawer */
+#detail{margin-top:12px;display:none}
+#detail .row{display:flex;justify-content:space-between;gap:12px;padding:4px 0;border-bottom:1px dashed var(--line);font-variant-numeric:tabular-nums}
+#detail .row span:first-child{color:var(--dim)}
+/* controls */
+.ctl{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px solid var(--line)}
+.ctl:last-child{border-bottom:0}
+.ctl .t{font-weight:600}.ctl .h{color:var(--faint);font-size:12px}
+.sw{position:relative;width:42px;height:24px;border-radius:12px;background:var(--panel2);border:1px solid var(--line);cursor:pointer;flex:none;transition:background .2s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:18px;height:18px;border-radius:50%;background:var(--dim);transition:transform .2s,background .2s}
+.sw.on{background:#1f6feb55;border-color:var(--blue)}.sw.on::after{transform:translateX(18px);background:var(--blue)}
+.seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{background:none;border:0;color:var(--dim);padding:4px 9px;cursor:pointer;font:inherit;font-size:12px}
+.seg button.on{background:var(--blue);color:#0d1117;font-weight:650}
+button.btn{background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:5px 12px;cursor:pointer;font:inherit;font-size:13px}
+button.btn:hover{border-color:var(--blue)}
+button.btn.danger{color:var(--red)}button.btn.danger:hover{border-color:var(--red)}
+button:disabled,.sw.dis{opacity:.45;cursor:not-allowed}
+/* commands */
+.cmds{margin-top:12px}
+.cmdbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px}
+input[type=search]{flex:1;min-width:220px;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:8px;padding:8px 12px;font:inherit}
+input[type=search]:focus{outline:none;border-color:var(--blue)}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:2px 10px;font-size:12px;color:var(--dim);cursor:pointer;user-select:none}
+.chip.on{border-color:var(--blue);color:var(--blue);background:#1f6feb22}
+.list{max-height:520px;overflow:auto;border-top:1px solid var(--line)}
+.cmd{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:10px;align-items:center;padding:7px 4px;border-bottom:1px solid #21262d}
+.cmd:hover{background:var(--panel2)}
+.cmd .tt{font-weight:550;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmd .dd{color:var(--faint);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+kbd{font:600 11px ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px;color:var(--text)}
+.kind{font-size:11px;border-radius:5px;padding:1px 6px;border:1px solid var(--line);color:var(--dim)}
+.kind.key{color:var(--blue)}.kind.just{color:var(--green)}.kind.action{color:var(--violet)}.kind.fn{color:var(--amber)}
+#toast{position:fixed;right:16px;bottom:16px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 14px;box-shadow:0 6px 24px #0008;display:none;max-width:360px;z-index:10}
+.ro{color:var(--amber);font-size:12px}
+.muted{color:var(--faint)}
+
+/* screens + windows */
+#scr{width:100%;height:300px;display:block;background:var(--panel2);border-radius:8px}
+#scr .win{cursor:pointer;transition:opacity .15s}#scr .win:hover rect{stroke:#fff}
+.apps{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+/* system */
+.kv{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-bottom:1px solid var(--line);align-items:center}
+.kv:last-child{border-bottom:0}.kv span:first-child{color:var(--dim)}
+input[type=range]{accent-color:var(--blue);width:150px}
+.mini{height:6px;border-radius:3px;background:var(--panel2);overflow:hidden;width:150px}.mini span{display:block;height:100%}
+/* keyboard map */
+.layers{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+.kb{display:flex;flex-direction:column;gap:5px;overflow-x:auto;padding-bottom:4px}
+.kr{display:flex;gap:5px}
+.k{flex:none;width:42px;height:44px;border-radius:7px;border:1px solid var(--line);background:var(--panel2);color:var(--faint);font:600 12px ui-monospace,Menlo,monospace;
+   display:flex;flex-direction:column;justify-content:space-between;padding:4px 5px;position:relative;overflow:hidden}
+.k small{font:500 9px/1.1 -apple-system,system-ui,sans-serif;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.k.on{background:linear-gradient(160deg,#1f6feb,#8957e5);border-color:#58a6ff;color:#fff;cursor:pointer}
+.k.on:hover{filter:brightness(1.2)}
+.k.w15{width:62px}.k.w175{width:74px}.k.w2{width:88px}.k.w225{width:98px}.k.sp{width:250px}
+/* health */
+.slow{display:grid;grid-template-columns:minmax(0,1fr) 70px;gap:4px 10px;font-size:12px;align-items:center}
+.slow .site{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Menlo,monospace}
+.slow .b{height:8px;border-radius:4px;background:linear-gradient(90deg,var(--amber),var(--red))}
+.err{font:11px/1.4 ui-monospace,Menlo,monospace;color:#ffa198;background:#f8514912;border-left:2px solid var(--red);padding:4px 8px;margin:4px 0;white-space:pre-wrap;word-break:break-word}
+
+details.guide{margin-bottom:12px}
+details.guide summary{cursor:pointer;color:var(--blue);font-weight:600;list-style:none}
+details.guide summary::-webkit-details-marker{display:none}
+.gg{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:10px;margin-top:12px}
+.gg div{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:13px;color:var(--dim)}
+.gg b{color:var(--text);display:block;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🔨 Mac · Hammerspoon</h1>
+    <span class="pill" id="press"><span class="dot"></span><span>тиск: …</span></span>
+    <span class="pill" id="upd">оновлення…</span>
+    <span class="ro" id="ro" hidden>перегляд: керувати можна лише з цього Mac</span>
+    <span class="spacer"></span>
+    <button class="btn" id="refresh">↻ Оновити</button>
+  </header>
+
+
+  <details class="guide card" id="guide">
+    <summary>❓ Що тут і як читати — натисни, щоб розгорнути</summary>
+    <div class="gg">
+      <div><b>Кільця зверху</b>RAM — скільки зайнято (активна + wired + стиснута). Swap — скільки памʼяті macOS вже виклала на диск: коли росте, Mac починає підвисати. Wired — памʼять ядра й драйверів, її не можна стиснути; якщо росте день у день — допомагає лише перезавантаження. Стиснута — macOS стискає памʼять, щоб не лізти в swap. Колір: зелений — норма, жовтий — тісно, червоний — бракує.</div>
+      <div><b>Склад памʼяті + графік</b>Смуга показує, з чого складаються 16 GB. Графік під нею — RAM% (синій) і swap% (помаранчевий) за час, поки сторінка відкрита: видно, чи щось росте.</div>
+      <div><b>Хто їсть памʼять</b>Карта: що більша плитка — то більше памʼяті (з урахуванням стиснутої і swap). Клік на групу (Claude, Thorium, Python…) — кожен процес окремо; клік на процес — деталі, його діти (MCP, LSP) і кнопка «Завершити». Hammerspoon, WindowServer і сам hub завершити не дасть.</div>
+      <div><b>Керування</b>Перемикачі Hammerspoon: caffeine (екран не гасне), гарячі клавіші (усі комбінації ⌥⇧ тощо), блок pinch-zoom, темна тема, швидкість прокрутки, pomodoro. Діє одразу, без перезавантаження Hammerspoon.</div>
+      <div><b>Екрани і вікна</b>Схема твоїх моніторів і всіх відкритих вікон у реальних пропорціях. Синя рамка — вікно у фокусі. Клік по вікну — переводить на нього фокус. Внизу — скільки вікон у кожної програми.</div>
+      <div><b>Система</b>Гучність і mute, яскравість, навантаження CPU (1/5/15 хв; якщо більше 10 — ядра не встигають), вільне місце на диску, скільки Mac працює без перезавантаження, IP.</div>
+      <div><b>Карта гарячих клавіш</b>Клавіатура для кожного набору модифікаторів (⌥⇧, ⌃⌥⇧, …). Підсвічені — вже зайняті (наведи — яка команда, клік — запустити). Сірі — вільні: туди можна вішати нові комбінації без конфліктів.</div>
+      <div><b>Здоровʼя Hammerspoon</b>Скільки разів Hammerspoon «зависав» (головний потік стояв) і які колбеки найповільніші — це й є причини лагів меню, deck і гарячих клавіш. Нижче — останні помилки з консолі Hammerspoon.</div>
+      <div><b>Усі команди</b>Кожна дія Hammerspoon: гарячі клавіші, дії, функції модулів і рецепти <code>just -g</code>. Пошук (клавіша <kbd>/</kbd>), фільтр за типом і категорією, ▶ — запустити. ★ — обрані в палітрі.</div>
+      <div><b>Хто що може</b>Дивитися — з будь-якого пристрою в домашній мережі (телефон теж). Керувати (запуск, перемикачі, завершення, фокус) — лише з самого Mac. Назви вікон і помилки консолі теж видно лише на Mac. Дані оновлюються кожні 10–30 с і лише коли вкладка відкрита.</div>
+    </div>
+  </details>
+  <section class="grid stats">
+    <div class="card stat" id="st-ram"></div>
+    <div class="card stat" id="st-swap"></div>
+    <div class="card stat" id="st-wired"></div>
+    <div class="card stat" id="st-cmp"></div>
+  </section>
+
+  <section class="card" style="margin-top:12px">
+    <h2>Склад памʼяті</h2>
+    <div class="bar" id="mbar"></div>
+    <div class="legend" id="mleg"></div>
+    <svg class="spark" id="spark" viewBox="0 0 600 56" preserveAspectRatio="none"></svg>
+    <div class="legend"><span><i style="background:var(--blue)"></i>RAM %</span><span><i style="background:var(--orange)"></i>swap %</span><span class="muted" id="sparkInfo"></span></div>
+  </section>
+
+  <section class="grid main">
+    <div class="card">
+      <div class="tmhead"><h2 style="margin:0">Хто їсть памʼять</h2><span class="muted">·</span><span id="crumbs"></span></div>
+      <div class="desc" id="tmdesc"></div>
+      <div id="tm"></div>
+      <div id="detail" class="card"></div>
+    </div>
+    <div class="card">
+      <h2>Керування</h2>
+      <div id="controls"></div>
+    </div>
+  </section>
+
+
+  <section class="grid main">
+    <div class="card">
+      <h2>Екрани і вікна <span class="muted" id="wcount"></span></h2>
+      <svg id="scr"></svg>
+      <div class="apps" id="apps"></div>
+    </div>
+    <div class="card">
+      <h2>Система</h2>
+      <div id="sys"></div>
+    </div>
+  </section>
+
+  <section class="grid main">
+    <div class="card">
+      <h2>Карта гарячих клавіш <span class="muted" id="kbinfo"></span></h2>
+      <div class="layers" id="layers"></div>
+      <div class="kb" id="kb"></div>
+      <div class="desc" style="margin-top:8px">Підсвічені клавіші вже зайняті в цьому шарі модифікаторів — наведи, щоб побачити команду, клікни, щоб запустити. Сірі — вільні для нових комбінацій.</div>
+    </div>
+    <div class="card">
+      <h2>Здоровʼя Hammerspoon</h2>
+      <div id="health"></div>
+    </div>
+  </section>
+  <section class="card cmds">
+    <h2>Усі команди Hammerspoon <span class="muted" id="cmdcount"></span></h2>
+    <div class="cmdbar">
+      <input type="search" id="q" placeholder="Пошук: назва, клавіші, категорія…  ( / — фокус )">
+      <div class="seg" id="kinds"></div>
+    </div>
+    <div class="chips" id="cats"></div>
+    <div class="list" id="list"></div>
+  </section>
+</div>
+<div id="tip"></div>
+<div id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) { if (k === "class") e.className = v; else if (k.startsWith("on")) e[k] = v; else if (k === "style") e.style.cssText = v; else e.setAttribute(k, v); } for (const k of kids) if (k != null) e.append(k); return e; };
+const fmt = kb => kb >= 1048576 ? (kb / 1048576).toFixed(1) + " GB" : Math.round(kb / 1024) + " MB";
+const up = e => { const m = /^(?:(\d+)-)?(?:(\d+):)?(\d+):\d+$/.exec(e || ""); if (!m) return e || ""; const d = +(m[1] || 0), h = +(m[2] || 0), mi = +m[3]; return d ? `${d}д ${h}г` : h ? `${h}г ${mi}хв` : `${mi}хв`; };
+let SELF = false, MEM = null, ST = null, path = [], hist = [];
+
+function toast(msg, ok = true) { const t = $("#toast"); t.textContent = msg; t.style.borderColor = ok ? "var(--green)" : "var(--red)"; t.style.display = "block"; clearTimeout(toast.t); toast.t = setTimeout(() => t.style.display = "none", 3500); }
+async function post(url, body) {
+  const r = await fetch(url, { method: "POST", body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({ error: r.statusText }));
+  if (!r.ok || j.error) throw new Error(j.error || r.statusText);
+  return j;
+}
+
+/* ── stats ─────────────────────────────────────────────── */
+function ring(pct, color) {
+  const r = 26, c = 2 * Math.PI * r;
+  return `<svg class="ring" viewBox="0 0 64 64"><circle class="bgc" cx="32" cy="32" r="${r}"/><circle class="fg" cx="32" cy="32" r="${r}" stroke="${color}" stroke-dasharray="${c}" stroke-dashoffset="${c * (1 - Math.min(1, pct))}"/><text x="32" y="36" text-anchor="middle" fill="#e6edf3" font-size="13" font-weight="650">${Math.round(pct * 100)}%</text></svg>`;
+}
+const lvl = p => p > .9 ? "var(--red)" : p > .75 ? "var(--amber)" : "var(--green)";
+function stat(id, pct, label, value, sub, color) { $(id).innerHTML = ring(pct, color || lvl(pct)) + `<div><div class="l">${label}</div><div class="v">${value}</div><div class="s">${sub}</div></div>`; }
+function renderSys(s) {
+  const p = s.used / s.total, sp = s.swapTotal ? s.swapUsed / s.swapTotal : 0;
+  stat("#st-ram", p, "RAM зайнято", `${fmt(s.used)} / ${fmt(s.total)}`, `вільно ${fmt(s.free)} · неактивна ${fmt(s.inactive)}`);
+  stat("#st-swap", sp, "Swap (на диску)", `${fmt(s.swapUsed)} / ${fmt(s.swapTotal)}`, "росте, коли RAM бракує", sp > .8 ? "var(--red)" : "var(--orange)");
+  stat("#st-wired", s.wired / s.total, "Wired (ядро, драйвери)", fmt(s.wired), "не стискається; росте з аптаймом → reboot", "var(--violet)");
+  stat("#st-cmp", s.compressed / s.total, "Стиснута", fmt(s.compressed), "macOS стискає, щоб не лізти в swap", "var(--teal)");
+  const pr = $("#press"); pr.className = "pill " + s.pressure; pr.lastElementChild.textContent = "тиск: " + ({ normal: "норма", warn: "високий", critical: "КРИТИЧНИЙ" }[s.pressure] || s.pressure);
+  const parts = [["Wired", s.wired, "var(--violet)"], ["Активна", s.active, "var(--blue)"], ["Стиснута", s.compressed, "var(--teal)"], ["Неактивна", s.inactive, "var(--faint)"], ["Вільна", s.free, "var(--green)"]];
+  $("#mbar").replaceChildren(...parts.map(([n, v, c]) => el("span", { style: `width:${v / s.total * 100}%;background:${c}`, title: `${n}: ${fmt(v)}` })));
+  $("#mleg").replaceChildren(...parts.map(([n, v, c]) => el("span", {}, el("i", { style: `background:${c}` }), `${n} ${fmt(v)}`)));
+  hist.push({ t: Date.now(), r: p, s: sp }); hist = hist.slice(-120);
+  const W = 600, H = 56, line = k => hist.map((h, i) => `${i ? "L" : "M"}${(i / Math.max(1, hist.length - 1) * W).toFixed(1)},${(H - 4 - h[k] * (H - 8)).toFixed(1)}`).join("");
+  $("#spark").innerHTML = `<path d="${line("r")}" fill="none" stroke="#58a6ff" stroke-width="2" vector-effect="non-scaling-stroke"/><path d="${line("s")}" fill="none" stroke="#db6d28" stroke-width="2" vector-effect="non-scaling-stroke"/>`;
+  $("#sparkInfo").textContent = `останні ${Math.round((hist.at(-1).t - hist[0].t) / 60000)} хв, поки сторінка відкрита`;
+}
+
+/* ── treemap (squarified) ──────────────────────────────── */
+const HUE = n => /^Claude/.test(n) ? 22 : /Thorium|Brave|Chrome|Safari|Edge/.test(n) ? 212 : n === "Python" ? 140 : /^shell/.test(n) ? 220 : n === "just" ? 270 : /WindowServer|kernel|Dock|Finder|Spotlight|Notification|VTDecoder|mds/.test(n) ? 185 : 250;
+function squarify(items, x, y, w, h) {
+  const out = [], total = items.reduce((a, b) => a + b.v, 0); if (!total) return out;
+  const scale = w * h / total; let rest = items.map(i => ({ ...i, a: i.v * scale }));
+  while (rest.length) {
+    const short = Math.min(w, h); let row = [], best = Infinity;
+    for (const it of rest) {
+      const r = [...row, it], s = r.reduce((a, b) => a + b.a, 0), mx = Math.max(...r.map(z => z.a)), mn = Math.min(...r.map(z => z.a));
+      const worst = Math.max(short * short * mx / (s * s), s * s / (short * short * mn));
+      if (worst > best) break; best = worst; row = r;
+    }
+    const s = row.reduce((a, b) => a + b.a, 0), thick = s / short; let off = 0;
+    for (const it of row) { const len = it.a / thick; out.push(w >= h ? { ...it, x, y: y + off, w: thick, h: len } : { ...it, x: x + off, y, w: len, h: thick }); off += len; }
+    if (w >= h) { x += thick; w -= thick; } else { y += thick; h -= thick; }
+    rest = rest.slice(row.length);
+  }
+  return out;
+}
+function renderTree() {
+  if (!MEM) return;
+  const box = $("#tm"), W = box.clientWidth, H = box.clientHeight;
+  let nodes, desc = "", hue;
+  if (!path.length) {
+    nodes = MEM.groups.filter(g => g.kb > 20 * 1024).map(g => ({ v: g.kb, name: g.name, sub: `${fmt(g.kb)} · ×${g.n} · CPU ${g.cpu.toFixed(0)}%`, g }));
+    desc = "Клікни групу — побачиш кожен процес. Розмір плитки = реальна памʼять (з урахуванням стиснутої і swap).";
+  } else {
+    const g = path[0]; hue = HUE(g.name); desc = g.desc || "";
+    nodes = g.items.filter(i => i.kb > 1024).map(i => ({ v: i.kb, name: i.label, sub: `${fmt(i.kb)} · CPU ${i.cpu.toFixed(1)}% · ${up(i.etime)}`, it: i }));
+  }
+  $("#tmdesc").textContent = desc;
+  $("#crumbs").replaceChildren(el("span", { class: "crumb" + (path.length ? "" : " cur"), onclick: () => { path = []; $("#detail").style.display = "none"; renderTree(); } }, "усе"),
+    ...(path.length ? [" › ", el("span", { class: "crumb cur" }, path[0].name)] : []));
+  nodes.sort((a, b) => b.v - a.v);
+  const max = nodes[0]?.v || 1;
+  box.replaceChildren(...squarify(nodes, 0, 0, W, H).map(n => {
+    const hh = hue ?? HUE(n.name), light = 26 + 16 * Math.sqrt(n.v / max);
+    const t = el("div", { class: "tile", style: `left:${n.x}px;top:${n.y}px;width:${n.w}px;height:${n.h}px;background:hsl(${hh} 55% ${light}%)` });
+    if (n.w > 46 && n.h > 22) t.append(el("b", {}, n.name)); if (n.w > 70 && n.h > 38) t.append(el("small", {}, n.sub));
+    t.onmousemove = e => { const tp = $("#tip"); tp.style.display = "block"; tp.style.left = Math.min(e.clientX + 14, innerWidth - 350) + "px"; tp.style.top = e.clientY + 14 + "px"; tp.replaceChildren(el("b", {}, n.name), el("div", { class: "muted" }, n.sub), ...(n.g?.desc ? [el("div", {}, n.g.desc)] : [])); };
+    t.onmouseleave = () => $("#tip").style.display = "none";
+    t.onclick = () => { $("#tip").style.display = "none"; if (n.g) { path = [n.g]; renderTree(); } else showDetail(n.it); };
+    return t;
+  }));
+}
+function showDetail(it) {
+  const d = $("#detail"); d.style.display = "block";
+  const kids = (it.kids || []).map(k => el("div", { class: "row" }, el("span", {}, `↳ ${k.name} ×${k.n}`), el("span", {}, fmt(k.kb))));
+  const kill = el("button", { class: "btn danger", onclick: async () => {
+    if (!confirm(`Завершити PID ${it.pid} (${it.label})?`)) return;
+    try { const r = await post("/_hs/kill", { pid: it.pid }); toast(`Завершено ${r.comm} (${r.pid})`); setTimeout(loadMem, 1500); } catch (e) { toast(e.message, false); }
+  } }, "Завершити процес (SIGTERM)");
+  if (!SELF) kill.disabled = true;
+  d.replaceChildren(el("h2", {}, it.label), el("div", { class: "row" }, el("span", {}, "PID"), el("span", {}, String(it.pid))),
+    el("div", { class: "row" }, el("span", {}, "Памʼять (разом з дітьми)"), el("span", {}, fmt(it.kb))),
+    el("div", { class: "row" }, el("span", {}, "CPU"), el("span", {}, it.cpu.toFixed(1) + "%")),
+    el("div", { class: "row" }, el("span", {}, "Працює"), el("span", {}, up(it.etime))), ...kids, el("div", { style: "margin-top:10px" }, kill));
+  d.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+/* ── controls ──────────────────────────────────────────── */
+function renderControls() {
+  if (!ST) return;
+  const sw = (what, on, title, hint) => { const s = el("div", { class: "sw" + (on ? " on" : "") + (SELF ? "" : " dis"), role: "switch", "aria-checked": String(!!on), title: SELF ? "" : "лише з цього Mac" });
+    s.onclick = async () => { if (!SELF) return; try { await post("/_hs/toggle", { what }); s.classList.toggle("on"); setTimeout(loadState, 600); } catch (e) { toast(e.message, false); } };
+    return el("div", { class: "ctl" }, el("div", {}, el("div", { class: "t" }, title), el("div", { class: "h" }, hint)), s); };
+  const seg = el("div", { class: "seg" }, ...[0.5, 1, 1.5, 2, 3].map(v => { const b = el("button", { class: Math.abs(ST.scroll - v) < .01 ? "on" : "" }, v + "×"); b.disabled = !SELF;
+    b.onclick = async () => { try { await post("/_hs/toggle", { what: "scroll", value: v }); ST.scroll = v; renderControls(); } catch (e) { toast(e.message, false); } }; return b; }));
+  const pomo = el("button", { class: "btn" }, ST.pomodoro === "idle" ? "▶ Старт 25 хв" : "⏸ Зупинити"); pomo.disabled = !SELF;
+  pomo.onclick = async () => { try { await post("/_hs/toggle", { what: "pomodoro" }); setTimeout(loadState, 600); } catch (e) { toast(e.message, false); } };
+  $("#controls").replaceChildren(
+    sw("caffeine", ST.caffeine, "☕️ Caffeine", "екран не гасне"),
+    sw("guard", ST.guard, "🔨 Гарячі клавіші", `${ST.hotkeys} комбінацій Hammerspoon`),
+    sw("pinch", ST.pinch, "🤏 Блок pinch-zoom", "трекпад не масштабує випадково"),
+    sw("dark", ST.dark, "🌙 Темна тема macOS", "перемикає системну тему"),
+    el("div", { class: "ctl" }, el("div", {}, el("div", { class: "t" }, "↕ Швидкість прокрутки"), el("div", { class: "h" }, "множник трекпада/миші")), seg),
+    el("div", { class: "ctl" }, el("div", {}, el("div", { class: "t" }, "🍅 Pomodoro"), el("div", { class: "h" }, ST.pomoTitle || ({ idle: "не запущено", work: "робота", break: "перерва" }[ST.pomodoro] || ST.pomodoro))), pomo));
+}
+
+/* ── commands ──────────────────────────────────────────── */
+const KIND = { key: "клавіші", action: "дія", just: "just", fn: "функція" };
+let kindF = "", catF = "";
+function renderCmds() {
+  if (!ST) return;
+  const all = ST.entries.map(e => ({ ...e, k: e.kind === "key" ? "key" : e.kind === "action" ? "action" : e.kind === "just" ? "just" : "fn" }));
+  $("#cmdcount").textContent = `· ${all.length}`;
+  $("#kinds").replaceChildren(...[["", "усі"], ...Object.entries(KIND)].map(([k, n]) => { const b = el("button", { class: kindF === k ? "on" : "" }, n); b.onclick = () => { kindF = k; renderCmds(); }; return b; }));
+  const cats = [...new Set(all.map(e => e.category).filter(Boolean))].sort();
+  $("#cats").replaceChildren(...["", ...cats].map(c => { const n = all.filter(e => !c || e.category === c).length; const ch = el("span", { class: "chip" + (catF === c ? " on" : "") }, `${c || "усі категорії"} ${n}`); ch.onclick = () => { catF = catF === c ? "" : c; renderCmds(); }; return ch; }));
+  const q = $("#q").value.trim().toLowerCase();
+  const rows = all.filter(e => (!kindF || e.k === kindF) && (!catF || e.category === catF) && (!q || `${e.title} ${e.chord || ""} ${e.category || ""} ${e.detail || ""} ${e.source || ""}`.toLowerCase().includes(q)))
+    .sort((a, b) => (b.fav ? 1 : 0) - (a.fav ? 1 : 0));
+  $("#list").replaceChildren(...rows.map(e => {
+    const run = el("button", { class: "btn" }, "▶"); run.title = e.params ? "потрібні аргументи — запусти з палітри" : "Запустити";
+    run.disabled = !SELF || !!e.params;
+    run.onclick = async () => { try { const r = await post("/_hs/run", { title: e.title, source: e.source }); toast(r.result === "ok" ? `▶ ${e.title}` : `${e.title}: ${r.result}`, r.result === "ok"); } catch (err) { toast(err.message, false); } };
+    return el("div", { class: "cmd" },
+      el("div", { style: "min-width:0" }, el("div", { class: "tt" }, (e.fav ? "★ " : "") + e.title), el("div", { class: "dd" }, [e.category, e.detail || e.source].filter(Boolean).join(" · "))),
+      el("div", { style: "display:flex;gap:6px;align-items:center" }, e.chord ? el("kbd", {}, e.chord) : null, el("span", { class: "kind " + e.k }, KIND[e.k])), run);
+  }));
+}
+
+
+/* ── screens + windows ─────────────────────────────────── */
+let LIVE = null;
+const appHue = n => { let h = 0; for (const c of n) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+function renderScreens() {
+  if (!LIVE?.screens?.length) return;
+  const S = LIVE.screens, x0 = Math.min(...S.map(s => s.x)), y0 = Math.min(...S.map(s => s.y)),
+        x1 = Math.max(...S.map(s => s.x + s.w)), y1 = Math.max(...S.map(s => s.y + s.h)), pad = 20;
+  const svg = $("#scr"); svg.setAttribute("viewBox", `${x0 - pad} ${y0 - pad} ${x1 - x0 + 2 * pad} ${y1 - y0 + 2 * pad}`);
+  const ns = "http://www.w3.org/2000/svg", mk = (t, a) => { const e = document.createElementNS(ns, t); for (const k in a) e.setAttribute(k, a[k]); return e; };
+  const kids = [];
+  for (const s of S) { kids.push(mk("rect", { x: s.x, y: s.y, width: s.w, height: s.h, rx: 24, fill: "#0d1117", stroke: s.main ? "#58a6ff" : "#30363d", "stroke-width": 6 }));
+    const t = mk("text", { x: s.x + 30, y: s.y + s.h - 30, fill: "#6e7681", "font-size": Math.max(28, s.h / 30) }); t.textContent = s.name + (s.main ? " · головний" : ""); kids.push(t); }
+  // tiny helper windows (HS canvases, popovers) only clutter the map
+  const wins = LIVE.wins.filter(w => w.w >= 120 && w.h >= 80);
+  for (const w of [...wins].reverse()) {
+    const g = mk("g", { class: "win" }), h = appHue(w.app);
+    g.append(mk("rect", { x: w.x, y: w.y, width: w.w, height: w.h, rx: 12, fill: `hsla(${h},55%,45%,${w.focused ? .55 : .28})`, stroke: w.focused ? "#58a6ff" : `hsl(${h},55%,60%)`, "stroke-width": w.focused ? 10 : 3 }));
+    const fs = Math.max(22, Math.min(46, w.w / 14)), t = mk("text", { x: w.x + 18, y: w.y + fs + 12, fill: "#fff", "font-size": fs, "font-weight": 650 });
+    t.textContent = w.app + (w.title ? " — " + w.title.slice(0, Math.floor(w.w / (fs * .55))) : ""); g.append(t);
+    const tt = mk("title", {}); tt.textContent = `${w.app}${w.title ? " — " + w.title : ""}\n${Math.round(w.w)}×${Math.round(w.h)}  ·  клік = фокус`; g.append(tt);
+    g.onclick = async () => { if (!SELF) return toast("фокус — лише з цього Mac", false); try { await post("/_hs/focus", { id: w.id }); setTimeout(loadLive, 400); } catch (e) { toast(e.message, false); } };
+    kids.push(g);
+  }
+  svg.replaceChildren(...kids);
+  const by = {}; for (const w of LIVE.wins) by[w.app] = (by[w.app] || 0) + 1;
+  $("#wcount").textContent = `· ${LIVE.wins.length} вікон, ${Object.keys(by).length} програм`;
+  $("#apps").replaceChildren(...Object.entries(by).sort((a, b) => b[1] - a[1]).map(([a, n]) => el("span", { class: "chip", style: `border-color:hsl(${appHue(a)},55%,45%)` }, `${a} ${n}`)));
+}
+
+/* ── system ────────────────────────────────────────────── */
+function renderSystem() {
+  if (!LIVE) return;
+  const L = LIVE, cores = 10, rows = [];
+  const kv = (k, v) => el("div", { class: "kv" }, el("span", {}, k), v);
+  const mini = (p, c) => el("div", { class: "mini" }, el("span", { style: `width:${Math.min(100, p * 100)}%;background:${c}` }));
+  if (L.audio) {
+    const r = el("input", { type: "range", min: 0, max: 100, value: L.audio.vol }); r.disabled = !SELF;
+    r.onchange = async () => { try { await post("/_hs/toggle", { what: "volume", value: +r.value }); } catch (e) { toast(e.message, false); } };
+    const m = el("button", { class: "btn" }, L.audio.mute ? "🔇" : "🔊"); m.disabled = !SELF;
+    m.onclick = async () => { try { await post("/_hs/toggle", { what: "mute" }); setTimeout(loadLive, 300); } catch (e) { toast(e.message, false); } };
+    rows.push(kv(`Гучність · ${L.audio.name}`, el("span", { style: "display:flex;gap:8px;align-items:center" }, r, m)));
+  }
+  if (L.bright != null) {
+    const r = el("input", { type: "range", min: 0, max: 100, value: Math.round(L.bright) }); r.disabled = !SELF;
+    r.onchange = async () => { try { await post("/_hs/toggle", { what: "brightness", value: +r.value }); } catch (e) { toast(e.message, false); } };
+    rows.push(kv("Яскравість", r));
+  }
+  if (L.load?.length) rows.push(kv(`Навантаження (1/5/15 хв, ${cores} ядер)`, el("span", { style: "display:flex;flex-direction:column;gap:3px;align-items:flex-end" },
+    el("span", { style: "font-variant-numeric:tabular-nums" }, L.load.map(x => x.toFixed(1)).join(" · ")), mini(L.load[0] / cores, L.load[0] > cores ? "var(--red)" : L.load[0] > cores * .7 ? "var(--amber)" : "var(--green)"))));
+  if (L.disk?.totalKB) { const fr = L.disk.freeKB / L.disk.totalKB;
+    rows.push(kv("Диск вільно", el("span", { style: "display:flex;flex-direction:column;gap:3px;align-items:flex-end" }, el("span", {}, `${fmt(L.disk.freeKB)} з ${fmt(L.disk.totalKB)}`), mini(1 - fr, fr < .1 ? "var(--red)" : fr < .2 ? "var(--amber)" : "var(--blue)")))); }
+  const d = Math.floor(L.uptime / 86400), h = Math.floor(L.uptime % 86400 / 3600);
+  rows.push(kv("Без перезавантаження", el("span", { style: L.uptime > 4 * 86400 ? "color:var(--amber)" : "" }, `${d}д ${h}г` + (L.uptime > 4 * 86400 ? " · wired росте — час на reboot" : ""))));
+  rows.push(kv("Мережа", el("span", {}, `${L.ip}${L.wifi ? " · Wi-Fi " + L.wifi : ""}`)));
+  $("#sys").replaceChildren(...rows);
+}
+
+/* ── keyboard map ──────────────────────────────────────── */
+const MODS = [["ctrl", "⌃"], ["alt", "⌥"], ["shift", "⇧"], ["cmd", "⌘"]];
+const normMod = m => ({ control: "ctrl", "⌃": "ctrl", option: "alt", "⌥": "alt", "⇧": "shift", command: "cmd", "⌘": "cmd" }[String(m).toLowerCase()] || String(m).toLowerCase());
+const layerOf = mods => { const set = new Set((Array.isArray(mods) ? mods : Object.values(mods || {})).map(normMod)); return MODS.filter(([m]) => set.has(m)).map(([, s]) => s).join("") || "без мод."; };
+const normKey = k => { k = String(k || "").toLowerCase(); return { "return": "enter", esc: "escape", "`": "grave", pageup: "pageup" }[k] || k; };
+const ROWS = [
+  [["escape","esc"],..."f1 f2 f3 f4 f5 f6 f7 f8 f9 f10 f11 f12".split(" ").map(k => [k, k.toUpperCase()])],
+  [["grave","`"],..."1234567890".split("").map(k => [k, k]),["-","-"],["=","="],["delete","⌫","w15"]],
+  [["tab","⇥","w15"],..."qwertyuiop".split("").map(k => [k, k.toUpperCase()]),["[","["],["]","]"],["\\","\\"]],
+  [["capslock","⇪","w175"],..."asdfghjkl".split("").map(k => [k, k.toUpperCase()]),[";",";"],["'","'"],["enter","⏎","w175"]],
+  [["shift","⇧","w225"],..."zxcvbnm".split("").map(k => [k, k.toUpperCase()]),[",",","],[".","."],["/","/"],["up","↑"]],
+  [["space","space","sp"],["left","←"],["down","↓"],["right","→"]],
+];
+let layer = null;
+function renderKeyboard() {
+  if (!ST) return;
+  const keys = ST.entries.filter(e => e.kind === "key" && e.key);
+  const layers = {}; for (const e of keys) (layers[layerOf(e.mods)] ??= []).push(e);
+  const names = Object.keys(layers).sort((a, b) => layers[b].length - layers[a].length);
+  if (!layer || !layers[layer]) layer = names[0];
+  $("#layers").replaceChildren(...names.map(n => { const c = el("span", { class: "chip" + (n === layer ? " on" : "") }, `${n} · ${layers[n].length}`); c.onclick = () => { layer = n; renderKeyboard(); }; return c; }));
+  const map = {}; for (const e of layers[layer] || []) map[normKey(e.key)] = e;
+  let free = 0, total = 0;
+  $("#kb").replaceChildren(...ROWS.map(r => el("div", { class: "kr" }, ...r.map(([id, cap, w]) => {
+    const e = map[id]; total++; if (!e) free++;
+    const k = el("div", { class: "k" + (w ? " " + w : "") + (e ? " on" : "") }, el("span", {}, cap), e ? el("small", {}, e.title) : null);
+    if (e) { k.title = `${e.chord} — ${e.title}\n${e.category || ""}`; k.onclick = async () => { if (!SELF) return toast("запуск — лише з цього Mac", false); try { await post("/_hs/run", { title: e.title, source: e.source }); toast("▶ " + e.title); } catch (x) { toast(x.message, false); } }; }
+    return k;
+  }))));
+  const unknown = (layers[layer] || []).filter(e => !ROWS.flat().some(([id]) => id === normKey(e.key)));
+  $("#kbinfo").textContent = `· шар ${layer}: зайнято ${total - free}, вільно ${free}` + (unknown.length ? ` · поза схемою: ${unknown.map(e => e.chord).join(" ")}` : "");
+}
+
+/* ── hammerspoon health ────────────────────────────────── */
+function renderHealth() {
+  if (!LIVE) return;
+  const L = LIVE, max = Math.max(1, ...(L.slow || []).map(s => s.sum));
+  const items = [el("div", { class: "kv" }, el("span", {}, "Зависання HS (головний потік стояв)"), el("span", { style: L.stalls ? "color:var(--amber)" : "" }, L.stalls ? `${L.stalls} · найдовше ${(L.stallMax / 1000).toFixed(1)} с` : "немає"))];
+  if (L.slow?.length) {
+    items.push(el("div", { class: "desc", style: "margin:10px 0 6px" }, "Найповільніші колбеки (>500 мс), за сумою часу — останні 3000 записів deck-slow.log"));
+    items.push(el("div", { class: "slow" }, ...L.slow.flatMap(s => [
+      el("div", {}, el("div", { class: "site", title: s.site }, s.site), el("div", { class: "b", style: `width:${s.sum / max * 100}%` })),
+      el("div", { style: "text-align:right;font-variant-numeric:tabular-nums", title: `останній ${s.last}` }, `×${s.n} · ${(s.max / 1000).toFixed(1)}с`)])));
+  }
+  if (L.errors?.length) { items.push(el("div", { class: "desc", style: "margin:12px 0 4px" }, "Останні помилки в консолі Hammerspoon")); items.push(...L.errors.slice(-6).map(e => el("div", { class: "err" }, e))); }
+  else if (SELF) items.push(el("div", { class: "desc", style: "margin-top:10px" }, "✅ Помилок у консолі немає"));
+  $("#health").replaceChildren(...items);
+}
+
+async function loadLive() {
+  try { LIVE = await (await fetch("/_hs/live", { cache: "no-store" })).json(); renderScreens(); renderSystem(); renderHealth(); } catch (e) { $("#sys").textContent = "немає даних: " + e.message; }
+}
+/* ── data ──────────────────────────────────────────────── */
+async function loadMem() {
+  try { MEM = await (await fetch("/_hs/mem", { cache: "no-store" })).json(); renderSys(MEM.sys);
+    if (path.length) path = [MEM.groups.find(g => g.name === path[0].name) || path[0]];
+    renderTree(); $("#upd").textContent = "оновлено " + new Date().toLocaleTimeString("uk", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  } catch (e) { $("#upd").textContent = "памʼять: помилка"; }
+}
+async function loadState() {
+  try { ST = await (await fetch("/_hs/state", { cache: "no-store" })).json(); if (ST.error) throw new Error(ST.error);
+    SELF = !!ST.self; $("#ro").hidden = SELF; renderControls(); renderCmds(); renderKeyboard(); renderScreens(); renderSystem(); renderHealth();
+  } catch (e) { $("#controls").textContent = "Hammerspoon не відповідає: " + e.message; }
+}
+$("#q").oninput = renderCmds;
+$("#refresh").onclick = () => { loadMem(); loadState(); loadLive(); };
+addEventListener("keydown", e => { if (e.key === "/" && document.activeElement !== $("#q")) { e.preventDefault(); $("#q").focus(); } });
+addEventListener("resize", () => { clearTimeout(renderTree.t); renderTree.t = setTimeout(renderTree, 150); });
+loadMem(); loadState(); loadLive();
+setInterval(() => { if (!document.hidden) loadLive(); }, 10000);
+setInterval(() => { if (!document.hidden) loadMem(); }, 15000);   // topmem.py ≈ 0.4 s CPU — only while the tab is visible
+setInterval(() => { if (!document.hidden) loadState(); }, 30000);
+</script>
+</body>
+</html>
