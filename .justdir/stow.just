@@ -110,8 +110,13 @@ hammerspoon:
 hyperland:
     stow --no-folding --adopt --restow -t ~ hyperland
 
+# mise global tools (node, bun, jq, gh) → ~/.config/mise/config.toml, then install them
+mise:
+    stow --no-folding --adopt --restow -t ~ mise
+    mise install
+
 # Stow all packages
-all: claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
+all: mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
     @echo "All packages stowed"
 
 # Unstow a package: just remove <pkg>
