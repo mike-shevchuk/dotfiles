@@ -106,7 +106,7 @@ yazi:
 
 # fastfetch: default look + LAN IP, Wi-Fi, hostname
 fastfetch:
-    stow --no-folding --adopt --restow -t ~ fastfetch
+    @just --justfile "{{justfile()}}" _stow fastfetch
 
 # Todoist config
 todoist:
@@ -126,7 +126,7 @@ hyperland:
 
 # mise global tools (node, bun, jq, gh) → ~/.config/mise/config.toml, then install them
 mise:
-    stow --no-folding --adopt --restow -t ~ mise
+    @just --justfile "{{justfile()}}" _stow mise
     mise install
 
 # Stow all packages

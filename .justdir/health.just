@@ -120,7 +120,7 @@ health:
 
     # Claude Code deps
     check "bun"               bun          required  "Claude hooks runtime + opensessions"  "brew install oven-sh/bun/bun"
-    check "node"              node         optional  "npx for MCP servers (playwright)"     "brew install node"
+    check "node"              node         optional  "npx for gsd-sdk / misc node CLIs"     "brew install node"
     check "jq"                jq           required  "statusline JSON parsing"    "brew/apt/pacman install jq"
     check "gh"                gh           optional  "statusline PR info"         "brew/apt/pacman install gh"
     check "xh"                xh           required  "statusline usage API + HTTP recipes"  "brew install xh / cargo install xh"
