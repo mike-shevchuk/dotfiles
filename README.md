@@ -7,8 +7,9 @@ macOS + Linux dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow
 ```bash
 cd ~/dotfiles
 
-# Setup everything on a new machine
+# Setup everything on a new machine (asks how to install stow if it is missing)
 just setup
+VIA=mise just setup     # skip the question: no sudo (VIA=system → brew/apt/pacman)
 
 # Or stow individual packages
 just zsh

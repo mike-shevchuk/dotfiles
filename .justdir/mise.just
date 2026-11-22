@@ -26,7 +26,6 @@ mise-install:
         brew install mise
     else
         curl -fsSL https://mise.run | sh   # → ~/.local/bin/mise, no sudo
-        export PATH="$HOME/.local/bin:$PATH"
     fi
     echo "mise встановлено: $(mise --version)"
     echo ""

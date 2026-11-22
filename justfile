@@ -6,6 +6,9 @@ import '.justdir/codex.just'
 import '.justdir/sync.just'
 import '.justdir/verkada.just'
 
+# mise and stow may land in ~/.local/bin before .zshrc puts it on PATH
+export PATH := env('PATH') + ':' + env('HOME') + '/.local/bin'
+
 # Default recipe: launch the fzf-powered recipe picker (`just help`)
 default:
     @just help
@@ -66,17 +69,42 @@ migrate:
 _install-stow:
     #!/usr/bin/env bash
     set -euo pipefail
-    if command -v brew >/dev/null 2>&1; then cmd="brew install stow"
-    elif command -v apt >/dev/null 2>&1; then cmd="sudo apt install -y stow"
-    elif command -v pacman >/dev/null 2>&1; then cmd="sudo pacman -S --noconfirm stow"
-    else
-        echo "✗ stow is missing and no brew/apt/pacman found — install stow manually, then: just setup" >&2
-        exit 1
+    if command -v brew >/dev/null 2>&1; then sys="brew install stow"
+    elif command -v apt >/dev/null 2>&1; then sys="sudo apt install -y stow"
+    elif command -v pacman >/dev/null 2>&1; then sys="sudo pacman -S --noconfirm stow"
+    else sys=""; fi
+    via="${VIA:-}"
+    case "$sys" in "brew "*) via="${via:-system}" ;; esac
+    if [ -z "$via" ] && [ -n "$sys" ] && [ -t 0 ]; then
+        printf '%s\n' "stow is missing (it links the configs into ~). Install it via:" \
+            "  1) $sys  (default)" "  2) mise (no password, into ~/.local)" >&2
+        while [ -z "$via" ]; do
+            read -rp "1 or 2 [1]: " c || { echo "✗ nothing chosen" >&2; exit 1; }
+            case "$c" in ""|1) via=system ;; 2) via=mise ;; esac
+        done
     fi
+    case "${via:-system}" in
+        mise) cmd="just --justfile {{justfile()}} _stow-via-mise" ;;
+        system) cmd="$sys" ;;
+        *) echo "✗ VIA must be mise or system, got: $via" >&2; exit 1 ;;
+    esac
+    [ -n "$cmd" ] || { echo "✗ no brew/apt/pacman found — try: VIA=mise just setup" >&2; exit 1; }
     # show the command BEFORE a sudo password prompt, so it is clear what asks and why
-    echo "→ stow is missing (it links the configs into ~). Running: $cmd" >&2
+    echo "→ installing stow: $cmd" >&2
     $cmd || {
         echo "✗ could not install stow: '$cmd' failed (see the error above)." >&2
-        echo "  Nothing was linked yet. Run that command yourself, then: just setup" >&2
+        echo "  Nothing was linked yet. Retry with: VIA=mise just setup  or  VIA=system just setup" >&2
         exit 1
     }
+
+# conda-forge has stow only for x86_64 (its perl comes along); not `mise use -g`,
+# which would write into the stowed config.toml
+[private]
+_stow-via-mise: mise-install
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export MISE_EXPERIMENTAL=1
+    mise install conda:stow
+    mkdir -p ~/.local/bin
+    ln -sf "$(mise where conda:stow)/bin/stow" ~/.local/bin/stow
+    ~/.local/bin/stow --version
