@@ -104,6 +104,10 @@ _stow-via-mise: mise-install
     #!/usr/bin/env bash
     set -euo pipefail
     export MISE_EXPERIMENTAL=1
+    if ! mise backends ls | grep -x conda >/dev/null; then
+        echo "→ this mise is too old for conda packages: mise self-update" >&2
+        mise self-update -y --no-plugins
+    fi
     mise install conda:stow
     mkdir -p ~/.local/bin
     ln -sf "$(mise where conda:stow)/bin/stow" ~/.local/bin/stow
