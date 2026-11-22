@@ -126,8 +126,13 @@ hammerspoon:
 hyperland:
     @just --justfile "{{justfile()}}" _stow hyperland
 
+# A machine's own global config becomes config.local.toml: mise merges it over
+# the repo's, so tools it had (just itself, maybe) keep working.
+
 # mise global tools (node, bun, jq, gh, python) → ~/.config/mise/config.toml, then install them
 mise: mise-install
+    @cd ~/.config/mise 2>/dev/null && [ -f config.toml ] && [ ! -L config.toml ] && [ ! -e config.local.toml ] \
+        && mv config.toml config.local.toml && echo "  kept your tools: ~/.config/mise/config.local.toml" >&2 || true
     @just --justfile "{{justfile()}}" _stow mise
     mise install
 
