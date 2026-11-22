@@ -11,9 +11,11 @@ _stow pkg:
     set -euo pipefail
     cd "{{justfile_directory()}}"
     ts=$(date +%Y%m%d-%H%M%S)
-    # dry run lists conflicts as "... over existing target <rel> since ..."
+    # dry run lists conflicts as "... over existing target <rel> since ..." (a file)
+    # or "existing target is not owned by stow: <rel>" (a symlink made by hand)
     conflicts=$(stow -n --no-folding --restow -t ~ "{{pkg}}" 2>&1 \
-        | sed -n 's/.* over existing target \(.*\) since .*/\1/p' || true)
+        | sed -n -e 's/.* over existing target \(.*\) since .*/\1/p' \
+                 -e 's/.* existing target is not owned by stow: //p' || true)
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         mv "$HOME/$rel" "$HOME/$rel.pre-stow-$ts"

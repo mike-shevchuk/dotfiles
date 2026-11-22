@@ -6,8 +6,8 @@ import '.justdir/codex.just'
 import '.justdir/sync.just'
 import '.justdir/verkada.just'
 
-# mise and stow may land in ~/.local/bin before .zshrc puts it on PATH
-export PATH := env('PATH') + ':' + env('HOME') + '/.local/bin'
+# mise, stow and mise's tools (bun…) land here before .zshrc puts them on PATH
+export PATH := env('PATH') + ':' + env('HOME') + '/.local/bin:' + env('HOME') + '/.local/share/mise/shims'
 
 # Default recipe: launch the fzf-powered recipe picker (`just help`)
 default:
