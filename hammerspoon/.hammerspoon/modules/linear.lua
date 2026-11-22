@@ -5,9 +5,11 @@ local M = {}
 local env = require("modules.env")
 local API_URL = "https://api.linear.app/graphql"
 
+local warned = false
 local function getAPIKey()
   local key = env.get("LINEAR_API_KEY")
-  if not key then
+  if not key and not warned then -- once, not every refresh
+    warned = true
     hs.alert.show("Linear: add LINEAR_API_KEY to ~/.hammerspoon/.env", 5)
   end
   return key
