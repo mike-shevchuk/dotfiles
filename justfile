@@ -14,13 +14,63 @@ default:
     @just help
 
 # Setup core packages on a new system
-setup: install-deps mise claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
-    @echo "Core packages stowed successfully"
+setup: install-deps
+    @just --justfile "{{justfile()}}" _steps mise claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
+
+# Run recipes one by one: a ✓/✗ line each, only notes shown, full output in a log
+[private]
+_steps +steps:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    tty=; [ -t 1 ] && tty=1
+    g= r= y= d= b= x= tilde='~'
+    if [ -n "$tty" ] && [ -z "${NO_COLOR:-}" ]; then
+        g=$'\033[32m' r=$'\033[31m' y=$'\033[33m' d=$'\033[2m' b=$'\033[1m' x=$'\033[0m'
+    fi
+    log=$(mktemp "${TMPDIR:-/tmp}/dotfiles-setup.XXXXXX")
+    out="$log.step"
+    spin=
+    clear_spin() {
+        [ -n "$spin" ] && { kill "$spin"; wait "$spin"; } 2>/dev/null
+        spin=
+        [ -n "$tty" ] && printf '\r\033[K\033[?25h'
+        return 0
+    }
+    trap 'clear_spin; rm -f "$out"' EXIT
+    trap 'exit 130' INT TERM
+    list=({{steps}}); n=0; notes=0; SECONDS=0
+    printf '\n%sdotfiles%s %s%s steps%s\n\n' "$b" "$x" "$d" "${#list[@]}" "$x"
+    for step in "${list[@]}"; do
+        n=$((n + 1)); t0=$SECONDS
+        if [ -n "$tty" ]; then
+            printf '\033[?25l'
+            ( while :; do for c in ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏; do
+                printf '\r  %s%s%s %s %s%s/%s%s' "$y" "$c" "$x" "$step" "$d" "$n" "${#list[@]}" "$x"; sleep 0.1
+            done; done ) &
+            spin=$!
+        fi
+        rc=0; just --justfile "{{justfile()}}" "$step" >"$out" 2>&1 || rc=$?
+        clear_spin
+        { echo "=== $step (exit $rc)"; cat "$out"; } >>"$log"
+        if [ "$rc" -ne 0 ]; then
+            printf '  %s✗ %s%s  exit %s\n\n' "$r$b" "$step" "$x" "$rc"
+            tail -15 "$out" | sed "s/^/    ${r}│${x} /"
+            printf '\n  fix it and run the same command again   %slog: %s%s\n' "$d" "$log" "$x"
+            exit "$rc"
+        fi
+        took=$((SECONDS - t0)); [ "$took" -gt 0 ] && took="${took}s" || took=
+        printf '  %s✓%s %-16s %s%s%s\n' "$g" "$x" "$step" "$d" "$took" "$x"
+        while IFS= read -r line; do
+            notes=$((notes + 1)); line="${line#"${line%%[! ]*}"}"
+            printf '    %s!%s %s%s%s\n' "$y" "$x" "$d" "${line//$HOME/$tilde}" "$x"
+        done < <(grep -E '^ *(WARN:|SKIP |backed up |kept |mise (WARN|ERROR))' "$out")
+    done
+    printf '\n%s✓ done%s  %s steps, notes: %s, %ss   %slog: %s%s\n' "$g$b" "$x" "$n" "$notes" "$SECONDS" "$d" "$log" "$x"
+    printf '  open a new terminal or run: %sexec zsh%s\n\n' "$b" "$x"
 
 # Install stow if missing
 install-deps:
     @command -v stow >/dev/null 2>&1 || just _install-stow
-    @echo "Dependencies ready"
 
 # Symlink .justdir/global.just → ~/.config/just/justfile so `just -g` works everywhere
 install-global:
@@ -69,6 +119,8 @@ migrate:
 _install-stow:
     #!/usr/bin/env bash
     set -euo pipefail
+    r= y= b= x=
+    if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then r=$'\033[31m' y=$'\033[33m' b=$'\033[1m' x=$'\033[0m'; fi
     if command -v brew >/dev/null 2>&1; then sys="brew install stow"
     elif command -v apt >/dev/null 2>&1; then sys="sudo apt install -y stow"
     elif command -v pacman >/dev/null 2>&1; then sys="sudo pacman -S --noconfirm stow"
@@ -76,23 +128,23 @@ _install-stow:
     via="${VIA:-}"
     case "$sys" in "brew "*) via="${via:-system}" ;; esac
     if [ -z "$via" ] && [ -n "$sys" ] && [ -t 0 ]; then
-        printf '%s\n' "stow is missing (it links the configs into ~). Install it via:" \
-            "  1) $sys  (default)" "  2) mise (no password, into ~/.local)" >&2
+        printf '%s\n' "${b}stow is missing${x} (it links the configs into ~). Install it via:" \
+            "  ${y}1${x}) $sys  (default)" "  ${y}2${x}) mise (no password, into ~/.local)" >&2
         while [ -z "$via" ]; do
-            read -rp "1 or 2 [1]: " c || { echo "✗ nothing chosen" >&2; exit 1; }
+            read -rp "1 or 2 [1]: " c || { echo "${r}✗${x} nothing chosen" >&2; exit 1; }
             case "$c" in ""|1) via=system ;; 2) via=mise ;; esac
         done
     fi
     case "${via:-system}" in
         mise) cmd="just --justfile {{justfile()}} _stow-via-mise" ;;
         system) cmd="$sys" ;;
-        *) echo "✗ VIA must be mise or system, got: $via" >&2; exit 1 ;;
+        *) echo "${r}✗${x} VIA must be mise or system, got: $via" >&2; exit 1 ;;
     esac
-    [ -n "$cmd" ] || { echo "✗ no brew/apt/pacman found — try: VIA=mise just setup" >&2; exit 1; }
+    [ -n "$cmd" ] || { echo "${r}✗${x} no brew/apt/pacman found — try: VIA=mise just setup" >&2; exit 1; }
     # show the command BEFORE a sudo password prompt, so it is clear what asks and why
-    echo "→ installing stow: $cmd" >&2
+    echo "${y}→${x} installing stow: ${b}$cmd${x}" >&2
     $cmd || {
-        echo "✗ could not install stow: '$cmd' failed (see the error above)." >&2
+        echo "${r}✗${x} could not install stow: '$cmd' failed (see the error above)." >&2
         echo "  Nothing was linked yet. Retry with: VIA=mise just setup  or  VIA=system just setup" >&2
         exit 1
     }

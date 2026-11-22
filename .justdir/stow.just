@@ -77,8 +77,10 @@ tmux:
     # Apply local patches
     for patch in "{{justfile_directory()}}"/tmux/patches/*.patch; do
         [ -f "$patch" ] || continue
-        if ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+        if git -C "$os_dir" apply -R --check "$patch" 2>/dev/null; then
             echo "  patch already applied: $(basename "$patch")"
+        elif ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+            echo "  WARN: patch does not fit this opensessions version, skipped: $(basename "$patch")" >&2
         else
             git -C "$os_dir" apply "$patch"
             echo "  applied: $(basename "$patch")"
@@ -139,8 +141,8 @@ mise: mise-install
     mise install
 
 # Stow all packages
-all: mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
-    @echo "All packages stowed"
+all:
+    @just --justfile "{{justfile()}}" _steps mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
 
 # Unstow a package: just remove <pkg>
 remove pkg:
