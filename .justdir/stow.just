@@ -124,10 +124,10 @@ hammerspoon:
 hyperland:
     @just --justfile "{{justfile()}}" _stow hyperland
 
-# mise global tools (node, bun, jq, gh) → ~/.config/mise/config.toml, then install them
-mise:
+# mise global tools (node, bun, jq, gh, python) → ~/.config/mise/config.toml, then install them
+mise: mise-install
     @just --justfile "{{justfile()}}" _stow mise
-    mise install
+    PATH="$HOME/.local/bin:$PATH" mise install
 
 # Stow all packages
 all: mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland

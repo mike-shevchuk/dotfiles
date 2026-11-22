@@ -11,7 +11,7 @@ default:
     @just help
 
 # Setup core packages on a new system
-setup: install-deps claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
+setup: install-deps mise claude codex zsh tmux kitty lz yazi claudes-link hooks-install install-global
     @echo "Core packages stowed successfully"
 
 # Install stow if missing
@@ -66,14 +66,17 @@ migrate:
 _install-stow:
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Installing stow..."
-    if command -v brew >/dev/null 2>&1; then
-        brew install stow
-    elif command -v apt >/dev/null 2>&1; then
-        sudo apt install -y stow
-    elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --noconfirm stow
+    if command -v brew >/dev/null 2>&1; then cmd="brew install stow"
+    elif command -v apt >/dev/null 2>&1; then cmd="sudo apt install -y stow"
+    elif command -v pacman >/dev/null 2>&1; then cmd="sudo pacman -S --noconfirm stow"
     else
-        echo "Could not install stow automatically. Install it manually."
+        echo "✗ stow is missing and no brew/apt/pacman found — install stow manually, then: just setup" >&2
         exit 1
     fi
+    # show the command BEFORE a sudo password prompt, so it is clear what asks and why
+    echo "→ stow is missing (it links the configs into ~). Running: $cmd" >&2
+    $cmd || {
+        echo "✗ could not install stow: '$cmd' failed (see the error above)." >&2
+        echo "  Nothing was linked yet. Run that command yourself, then: just setup" >&2
+        exit 1
+    }
