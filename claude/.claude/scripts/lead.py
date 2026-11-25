@@ -568,8 +568,8 @@ def blocked_by(rows, extra):
         first = first.group(1).strip() if first else ""
         if re.match(r"(Mike|Майк)\b", first):  # Mike 09.11: «Чекаю на: Mike» beats a running spinner (W45:7 sat in 🔄)
             out[r["win"]] = "🙋 на ТОБІ"
-        elif r["state"] == "working":
-            out[r["win"]] = "🔄 працює"
+        elif r["state"] == "working" or re.search(r"shells? still running", sh("tmux", "capture-pane", "-p", "-t", r["win"]).replace("\n", " ")[-3000:]):
+            out[r["win"]] = "🔄 працює"  # Mike 19.11: a PRE in a background shell is work, not a 🚂 wait
         elif re.match(r"(нікого|—|-)", first):
             out[r["win"]] = "💤 вільне"
         elif re.match(r"(лід|LEAD|lead)", first) and re.search(r"\bdev\b|train|deploy|деплой", r["waiting"], re.I):

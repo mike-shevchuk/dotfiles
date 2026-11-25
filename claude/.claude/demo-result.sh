@@ -4,27 +4,36 @@
 # Every PR demo recipe (`jb2b <topic>-try`) calls `write` at its RESULT box.
 # The lead calls `check` before telling Mike a PR is merge-ready.
 #
-# Result file: ~/.claude/demo-results/pr-<N>.json
-#   {pr, branch, recipe, passed, failed, secs, operator, dev_sha, pr_head, finished}
-# On a clean pass it also stamps step `demo` in /tmp/claude/pipeline-<branch>.json
-# (anchored to the dev SHA the demo actually ran against).
+# Two records per PR (Mike 2026-09-30: DEMO = HIS approval, an agent run is only a preflight):
+#   ~/.claude/demo-results/pr-<N>.json       agent preflight (lead/teammate, yes=1 or a non-Mike tmux window)
+#   ~/.claude/demo-results/pr-<N>.mike.json  Mike's run + his explicit "approve" (gum confirm at the RESULT box)
+#   {pr, branch, recipe, passed, failed, secs, operator, approved, dev_sha, pr_head, finished, fixture_alerts_before}
+#   fixture_alerts_before = active alerts in the try org before PRE (try-doc prep exports TRY_FIXTURE_ALERTS_BEFORE); null/missing = ✗ in /pr-state for runs after 2026-11-09
+# Only Mike's approved clean run stamps step `demo` in /tmp/claude/pipeline-<branch>.json.
 #
 # Usage:
 #   demo-result.sh write <pr> <recipe> <passed> <failed> <secs>
-#   demo-result.sh check <pr>     # exit 0 = fresh pass on the PR's current head
+#   demo-result.sh check <pr>              # merge gate: Mike approved a fresh clean run
+#   demo-result.sh check <pr> --preflight  # lead gate before handing to Mike: fresh clean agent run
 #   demo-result.sh show  <pr>
+#   demo-result.sh banner <pr>             # try start-up block: when the agent preflight ran, on which dev/PR head, how many commits since (Mike 05.11)
 set -euo pipefail
 
 REPO=back2back-team/rescue-serverless
-DIR="$HOME/.claude/demo-results"
+DIR="${DEMO_RESULT_DIR:-$HOME/.claude/demo-results}"   # override = selftest only
 mkdir -p "$DIR" /tmp/claude
 cmd="${1:-}"; pr="${2:-}"
 [ -z "$cmd" ] || [ -z "$pr" ] && { sed -n '14,17p' "$0" >&2; exit 2; }
-file="$DIR/pr-$pr.json"
+agent_file="$DIR/pr-$pr.json"; mike_file="$DIR/pr-$pr.mike.json"
+# Key eng-<N> = workflow-engine PR #N (its build = the last successful engine-dev deploy); plain <N> = rescue-serverless.
+num="$pr"; LOCAL="$HOME/code/b2b/rescue-serverless"; DEPLOY_WF="0. Backend Infrastructure Deploy"
+if [[ "$pr" =~ ^eng-([0-9]+)$ ]]; then
+  num="${BASH_REMATCH[1]}"; REPO=back2back-team/workflow-engine; LOCAL="$HOME/code/b2b/workflow-engine"; DEPLOY_WF="0. Deploy Backend (dev)"
+fi
 
 # Last successful dev deploy = the build the demo really exercised.
 dev_sha() {
-  gh run list -R "$REPO" --workflow "0. Backend Infrastructure Deploy" -L 20 \
+  gh run list -R "$REPO" --workflow "$DEPLOY_WF" -L 20 \
     --json headSha,conclusion,updatedAt \
     -q '[.[]|select(.conclusion=="success")]|sort_by(.updatedAt)|last|.headSha // ""' 2>/dev/null || true
 }
@@ -32,43 +41,111 @@ dev_sha() {
 case "$cmd" in
   write)
     recipe="${3:?recipe}"; passed="${4:?passed}"; failed="${5:?failed}"; secs="${6:-0}"
-    meta=$(gh pr view "$pr" -R "$REPO" --json headRefName,headRefOid 2>/dev/null || echo '{}')
+    # jb2b <try> step=N / steps=A-B: a partial run is never a preflight nor an approval (lead 2026-10-14)
+    if [ -n "${TRY_PART_ACTIVE:-}" ]; then echo "━━━ demo-result ━━━  PR #$num · $recipe · окремі кроки (${TRY_PART_SEL:-?}) → НЕ записано: часткова проба — не апрув" >&2; exit 0; fi
+    meta=$(gh pr view "$num" -R "$REPO" --json headRefName,headRefOid 2>/dev/null || echo '{}')
     branch=$(jq -r '.headRefName // ""' <<<"$meta"); head=$(jq -r '.headRefOid // ""' <<<"$meta")
-    win=$(tmux display -p '#W' 2>/dev/null || echo "?")
-    case "$win" in *mike*) operator=mike ;; *) operator=agent ;; esac
+    # Mike = outside tmux or in his ⌨️mike window, with a terminal; yes=1 / any other window = agent.
+    operator=mike
+    if [ -n "${TMUX_PANE:-}" ]; then
+      case "$(tmux display -p -t "$TMUX_PANE" '#W' 2>/dev/null)" in *mike*) ;; *) operator=agent ;; esac
+    fi
+    [ -n "${TRY_YES:-}" ] && [ "${TRY_YES}" != 0 ] && operator=agent
+    { : </dev/tty; } 2>/dev/null || operator=agent
     operator="${DEMO_OPERATOR:-$operator}"
+    # unproven Pn "…" mike: a step only Mike can prove — an agent preflight records it apart (mike_pending), Mike's run must prove it (lead 2026-10-15)
+    mp="${TRY_MIKE_PENDING:-0}"; [ "$operator" = agent ] && [ "$mp" -gt 0 ] 2>/dev/null && failed=$(( failed > mp ? failed - mp : 0 ))
+    [ "$operator" = mike ] && mp=0
+    approved=false
+    if [ "$operator" = mike ] && [ "$failed" = "0" ]; then
+      # stray focus/ESC bytes in the tty buffer made gum cancel instantly → approved=false without Mike answering (2026-10-13)
+      perl -MPOSIX -e 'POSIX::tcflush(0, POSIX::TCIFLUSH)' </dev/tty 2>/dev/null || true
+      printf "\n  👉 Enter = Так (апрув) · n = Ні\n" >/dev/tty
+      grc=0; gum confirm --default=true --affirmative "Так (Enter)" --negative "Ні (n)" "Апрув #$pr: демо пройшло і ти перевірив — можна мерджити?" </dev/tty >/dev/tty 2>/dev/tty || grc=$?   # set -e: a bare non-zero gum exit killed the script before the write
+      if [ $grc -eq 0 ]; then approved=true
+      elif [ $grc -ne 1 ]; then   # cancelled / error, not «Ні» → ask once more, plain read
+        read -r -p "  Апрув #$pr? [Enter = так · n = ні] " ans </dev/tty >/dev/tty 2>&1 || ans=n; case "$ans" in n|N|ні|Ні) ;; *) approved=true ;; esac
+      fi
+    fi
+    file=$agent_file; [ "$operator" = mike ] && file=$mike_file
     dsha=$(dev_sha)
     jq -n --arg pr "$pr" --arg b "$branch" --arg r "$recipe" --arg p "$passed" --arg f "$failed" \
-      --arg s "$secs" --arg o "$operator" --arg d "$dsha" --arg h "$head" \
-      --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{pr:($pr|tonumber),branch:$b,recipe:$r,passed:($p|tonumber),failed:($f|tonumber),secs:($s|tonumber),
-        operator:$o,dev_sha:$d,pr_head:$h,finished:$t}' > "$file"
-    echo "━━━ demo-result ━━━  PR #$pr · $recipe · $passed passed / $failed failed · operator=$operator · dev=${dsha:0:9} → $file" >&2
-    if [ "$failed" = "0" ] && [ -n "$branch" ]; then
+      --arg s "$secs" --arg mp "${mp:-0}" --arg o "$operator" --arg d "$dsha" --arg h "$head" --arg k "${TRY_KIND:-gate}" \
+      --arg t "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson a "$approved" --argjson fa "${TRY_FIXTURE_ALERTS_BEFORE:-null}" \
+      '{fixture_alerts_before:$fa,pr:($pr|tonumber? // $pr),branch:$b,recipe:$r,passed:($p|tonumber),failed:($f|tonumber),mike_pending:($mp|tonumber),secs:($s|tonumber),
+        operator:$o,approved:$a,kind:$k,dev_sha:$d,pr_head:$h,finished:$t}' > "$file"
+    echo "━━━ demo-result ━━━  PR #$pr · $recipe · $passed passed / $failed failed$([ "${mp:-0}" -gt 0 ] && echo " · чекає Mike: $mp") · operator=$operator · dev=${dsha:0:9} → $file" >&2
+    if [ "$operator" = agent ]; then
+      echo "  ℹ preflight recorded (agent) — DEMO waits for Mike's own run + approve" >&2
+    elif [ "$approved" = true ] && [ -n "$branch" ]; then
       pf="/tmp/claude/pipeline-${branch//\//-}.json"
-      [ -f "$pf" ] || printf '{"branch":"%s","pr":%s,"updated":"","steps":{}}\n' "$branch" "$pr" > "$pf"
+      [ -f "$pf" ] || printf '{"branch":"%s","pr":%s,"updated":"","steps":{}}\n' "$branch" "$num" > "$pf"
       jq --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg src "demo:$recipe:$operator" --arg h "${dsha:0:9}" \
         '.steps.demo={done:true,ts:$ts,src:$src,head:$h} | .updated=$ts' "$pf" > "$pf.tmp" && mv "$pf.tmp" "$pf"
       echo "  ✓ stamped DEMO on $branch (head ${dsha:0:9})" >&2
     else
-      echo "  ✗ DEMO not stamped (failed=$failed)" >&2
+      echo "  ✗ DEMO not stamped (failed=$failed, approved=$approved)" >&2
     fi
     ;;
   show)
-    [ -f "$file" ] && jq . "$file" || { echo "no demo result for PR #$pr" >&2; exit 1; }
+    for f in "$agent_file" "$mike_file"; do [ -f "$f" ] && jq -c . "$f"; done
+    [ -f "$agent_file" ] || [ -f "$mike_file" ] || { echo "no demo result for PR #$pr" >&2; exit 1; }
     ;;
   check)
-    [ -f "$file" ] || { echo "✗ DEMO: no run recorded for PR #$pr — run its jb2b <topic>-try" >&2; exit 1; }
+    if [ "${3:-}" = --preflight ]; then file=$agent_file; who="preflight"; else file=$mike_file; who="DEMO (Mike)"; fi
+    [ -f "$file" ] || { echo "✗ $who: no run recorded for PR #$pr — $( [ "$file" = "$mike_file" ] && echo "Mike runs jb2b <topic>-try and approves" || echo "run <topic>-try yes=1")" >&2; exit 1; }
     failed=$(jq -r .failed "$file"); dsha=$(jq -r .dev_sha "$file")
-    [ "$failed" = "0" ] || { echo "✗ DEMO: last run failed ($failed)" >&2; exit 1; }
-    now=$(gh pr view "$pr" -R "$REPO" --json headRefOid -q .headRefOid)
+    [ "$file" = "$mike_file" ] && [ "$(jq -r '.approved // false' "$file")" != true ] && [ "$failed" = 0 ] && { echo "✗ $who: ran clean but not approved — re-run and answer «так» at the end" >&2; exit 1; }
+    [ "$failed" = "0" ] || { echo "✗ $who: last run failed ($failed)" >&2; exit 1; }
+    # gh can blip; a silent set -e exit showed as «?» on the status page and a false ⛔ for Mike
+    now=$(gh pr view "$num" -R "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || gh pr view "$num" -R "$REPO" --json headRefOid -q .headRefOid 2>/dev/null) \
+      || { echo "✗ $who: gh pr view #$num failed (network/GitHub) — re-run the check" >&2; exit 1; }
     # Fresh = no non-merge commits between the demoed build and the PR head.
-    ahead=$(gh api "repos/$REPO/compare/$dsha...$now" -q '[.commits[]|select(.parents|length==1)]|length' 2>/dev/null || echo "?")
+    # only the PR's own non-merge commits after the demoed build — commits that arrived via a main merge don't count
+    # one fetch per 2 min: a status page checking 8 PRs made 8 SSH fetches (GitHub throttles → «publickey» denials, 04.11)
+    fh="$LOCAL/.git/FETCH_HEAD"
+    if [ ! -f "$fh" ] || [ $(( $(date +%s) - $(stat -f %m "$fh") )) -gt 120 ]; then
+      git -C "$LOCAL" fetch -q origin 2>/dev/null || git -C "$LOCAL" fetch -q origin 2>/dev/null \
+        || echo "⚠ git fetch origin failed twice (GitHub intermittently denies the key) — freshness checked against the last fetched refs" >&2
+    fi
+    ahead=$(git -C "$LOCAL" rev-list --no-merges --count "$dsha..$now" --not origin/main 2>/dev/null || echo "?")
     if [ "$ahead" = "0" ]; then
-      echo "✓ DEMO: $(jq -r '"\(.passed) passed · \(.operator) · \(.finished) · dev \(.dev_sha[0:9])"' "$file")" >&2
+      echo "✓ $who: $(jq -r '"\(.passed) passed · \(.operator) · kind \(.kind // "gate")\(if (.mike_pending // 0) > 0 then " · чекає Mike: \(.mike_pending)" else "" end) · \(.finished) · dev \(.dev_sha[0:9]) · head \(.pr_head[0:9])"' "$file")" >&2
     else
-      echo "✗ DEMO stale: $ahead non-merge commit(s) after the demoed build ${dsha:0:9} — re-run the demo" >&2; exit 1
+      echo "✗ $who stale: $ahead non-merge commit(s) after the demoed build ${dsha:0:9} — re-run the demo" >&2; exit 1
     fi
     ;;
+  banner)   # stdout: 3-5 lines for the top of every <topic>-try (try-doc intro). Never fails: unknown = said so.
+    if [ -z "${NO_COLOR:-}" ] && [ -r /dev/tty ]; then G=$'\e[32m'; Y=$'\e[33m'; R=$'\e[31m'; D=$'\e[38;5;245m'; Z=$'\e[0m'; else G=""; Y=""; R=""; D=""; Z=""; fi
+    ago() { local e now m; e=$(date -j -u -f "%Y-%m-%dT%H:%M:%SZ" "$1" +%s 2>/dev/null) || { printf '?'; return; }; now=$(date +%s); m=$(( (now - e) / 60 ))
+      local hm; hm=$(date -r "$e" +%H:%M); if [ $m -lt 90 ]; then printf '%s (%s хв тому)' "$hm" "$m"; elif [ $m -lt 2880 ]; then printf '%s (%s год тому)' "$hm" "$((m / 60))"; else printf '%s (%s дн тому)' "$(date -r "$e" +%d.%m\ %H:%M)" "$((m / 1440))"; fi; }
+    if [ ! -f "$agent_file" ]; then echo "  ${R}⛔ PREFLIGHT агента: немає — проба ще не перевірена лідом${Z}"; else
+      # one fetch per 2 min, as in `check` (GitHub throttles the key)
+      fh="$LOCAL/.git/FETCH_HEAD"
+      if [ ! -f "$fh" ] || [ $(( $(date +%s) - $(stat -f %m "$fh") )) -gt 120 ]; then git -C "$LOCAL" fetch -q origin 2>/dev/null || true; fi
+      pass=$(jq -r .passed "$agent_file"); fail=$(jq -r .failed "$agent_file"); mp=$(jq -r '.mike_pending // 0' "$agent_file")
+      pdev=$(jq -r '.dev_sha // ""' "$agent_file"); phead=$(jq -r '.pr_head // ""' "$agent_file"); fin=$(jq -r '.finished // ""' "$agent_file")
+      tot=$((pass + fail)); c=$G; mark="✅"; [ "$fail" != 0 ] && { c=$R; mark="❌"; }
+      echo "  ${c}🧪 PREFLIGHT агента: $mark $pass/$tot$([ "$mp" -gt 0 ] && echo " · чекає Mike: $mp") · $(ago "$fin")${Z}"
+      # dev now: last successful dev deploy (+ its branch), cached 2 min
+      dc="/tmp/claude/dev-now-${REPO//\//_}.txt"
+      if [ ! -s "$dc" ] || [ $(( $(date +%s) - $(stat -f %m "$dc") )) -gt 120 ]; then
+        gh run list -R "$REPO" --workflow "$DEPLOY_WF" -L 20 --json headSha,headBranch,conclusion,updatedAt \
+          -q '[.[]|select(.conclusion=="success")]|sort_by(.updatedAt)|last|"\(.headSha // "") \(.headBranch // "")"' > "$dc.tmp" 2>/dev/null && mv "$dc.tmp" "$dc" || rm -f "$dc.tmp"; fi
+      read -r dnow dbr < "$dc" 2>/dev/null || { dnow=""; dbr=""; }
+      hnow=$(gh pr view "$num" -R "$REPO" --json headRefOid -q .headRefOid 2>/dev/null || true)
+      cnt() { [ -n "$1" ] && [ -n "$2" ] || { printf '?'; return; }; [ "$1" = "$2" ] && { printf 0; return; }; git -C "$LOCAL" rev-list --count "$1..$2" 2>/dev/null || printf '?'; }
+      echo "  ${D}   тестовано на: dev ${pdev:0:9} · PR head ${phead:0:9}${Z}"
+      echo "  ${D}   зараз:        dev ${dnow:0:9}${dbr:+ ($dbr)} · PR head ${hnow:0:9}${Z}"
+      for w in dev head; do
+        if [ $w = dev ]; then a=$pdev; b=$dnow; lbl="dev змінився"; else a=$phead; b=$hnow; lbl="PR head змінився"; fi
+        n=$(cnt "$a" "$b")
+        case "$n" in 0) echo "  ${G}   ✓ $w той самий${Z}" ;; '?') echo "  ${Y}   ⚠ $lbl, але скільки комітів — не вдалося порахувати (немає sha або git fetch)${Z}" ;;
+          *) cc=$Y; [ $w = head ] && cc=$R; echo "  ${cc}   ⚠ $lbl: $n комітів після preflight${Z}" ;; esac
+      done
+    fi
+    if [ -f "$mike_file" ]; then mp_=$(jq -r .passed "$mike_file"); mf=$(jq -r .failed "$mike_file"); ma=$(jq -r '.approved // false' "$mike_file")
+      echo "  ${D}👤 твій апрув: $([ "$ma" = true ] && echo "✅" || echo "ще не апрувнуто") $mp_/$((mp_ + mf)) · $(ago "$(jq -r '.finished // ""' "$mike_file")")${Z}"; fi
+    exit 0 ;;
   *) sed -n '14,17p' "$0" >&2; exit 2 ;;
 esac

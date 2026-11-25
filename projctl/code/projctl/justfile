@@ -34,7 +34,7 @@ _conf := justfile_directory() / "registry.conf"
 
 # PATH prefix so just/tmux/docker resolve under a minimal login env (Mac vs Linux)
 _path := if os() == "macos" {
-  "/opt/homebrew/bin:/usr/local/bin:" + home_dir() / ".local/bin" + ":/usr/bin:/bin"
+  "/opt/homebrew/bin:/usr/local/bin:" + home_dir() / ".local/bin" + ":/usr/bin:/bin:/usr/sbin:/sbin"
 } else {
   "/usr/local/bin:/usr/bin:/bin:" + home_dir() / ".local/bin"
 }

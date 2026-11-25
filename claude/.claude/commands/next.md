@@ -5,7 +5,7 @@ argument-hint: "[dry]  (dry = show the plan, execute nothing)"
 
 # Next: execute the next pipeline step for the current branch
 
-`/pr-state` and the statusline SHOW where the pipeline stopped (the `➜SMP` chip).
+`/pr-state` and the statusline SHOW where the pipeline stopped (the `➜PT` chip).
 `/next` is the actuator: it DOES that step, stamps it, and moves on.
 
 **Terminal language:** match Mike. **No Mermaid in terminal** — ASCII only.
@@ -18,7 +18,7 @@ what's left, so he never has to guess where he is. Format (ASCII, adapt counts):
 
 ```
 📍 STAGE 3/7 · PR track · card-zone-clamp (PR #1535)
-   ✅ CR   ✅ SMP   ➜ main   ⏳ push   ⏳ PR   ⏳ summary   ⏳ just-test
+   ✅ CR   ✅ PT   ➜ main   ⏳ push   ⏳ PR   ⏳ summary   ⏳ just-test
    ▶ now:  merge origin/main (AUTO)
    ⏳ left: push · PR · EN summary · just-test   (next GO-gate: push)
 ```
@@ -80,8 +80,8 @@ vault bridge (`gsd-zettel-sync`), not by `/next`.
 
 | # | Step          | Detect "needed" via                                              | Action                                   | Gate |
 |---|---------------|------------------------------------------------------------------|------------------------------------------|------|
-| 1 | code-review   | state `code-review` pending OR stale (commits-ago > 0)           | invoke the `code-review` skill           | AUTO |
-| 2 | simplify      | state `simplify` pending OR stale                                | invoke the `simplify` skill              | AUTO |
+| 1 | code-review   | state `code-review` pending OR stale (commits-ago > 0)           | `superpowers:requesting-code-review` (card = requirements) + `/code-review high` | AUTO |
+| 2 | ponytail      | state `ponytail` pending OR stale                                | invoke `/ponytail-review` (SMP gate dropped 11.11) | AUTO |
 | 3 | merge main    | `git fetch origin main` then `rev-list --count HEAD..origin/main` > 0 | `git merge origin/main`             | AUTO* |
 | 4 | push          | no upstream OR `rev-list --count origin/<br>..HEAD` > 0          | `git push` (+ `-u origin <br>` if new)   | **GO** |
 | 5 | PR opened     | `gh pr view` fails                                               | `gh pr create --label bugbot` (draft body first) | **GO** |
@@ -126,7 +126,7 @@ run, what is fresh-skip, and where the first GO-gate is:
 ```
 ➜ next plan for card-zone-clamp (PR #1535)
   1. CR   ✓-2 stale → RUN  code-review (2 new commits)
-  2. SMP  ✓ fresh   → skip
+  2. PT   ✓ fresh   → skip
   3. main ↓3        → RUN  merge origin/main
   4. push ↑2        → GATE push 2 commits
   5. JT   stale     → GATE hand off to /just-test
@@ -138,11 +138,18 @@ If `$ARGUMENTS` contains `dry` → **stop here.** The plan is the output.
 
 Run the AUTO steps in order, top to bottom:
 
-- **code-review** → invoke the `code-review` skill scoped to the new commits
-  (`<anchor>..HEAD` if stale, whole branch if never run). If it produces fixes,
+- **code-review** (Mike 11.11: the old CR missed 3 flow bugs on #2484 that Bugbot found) — two passes, both scoped to the new commits
+  (`<anchor>..HEAD` if stale, whole branch if never run):
+  1. `superpowers:requesting-code-review` — a fresh reviewer subagent gets the diff AND the requirements: the tiki card
+     (`~/.claude/fleet-board/w<N>/tiki-notes/<PR>.md`, «📌 План на апрув» + decisions) and must answer the flow checklist:
+     retries / SQS redelivery vs visibility timeout vs claim windows · ordering between Lambdas (who runs first, what if the
+     other is slow / cold) · swallowed exceptions and `return []` on error (silent loss) · once-only claims and their stale
+     window · cold start · partial failure between two writes · every caller of a changed function.
+  2. `/code-review high` on the same range.
+  Triage both with `superpowers:receiving-code-review` (verify each finding in code before fixing; no blind agreement). If it produces fixes,
   apply + commit them — and remember: any new commit re-stales CR, so re-run
   until clean (per the re-run-after-every-fix rule).
-- **simplify** → invoke the `simplify` skill on the branch diff.
+- **ponytail** → invoke `/ponytail-review` on the branch diff, then `pipeline-stamp.sh stamp ponytail`. (`/simplify` is no longer a gate — PT covers over-engineering.)
 - **merge main** → `git merge origin/main`. *On conflicts: STOP. Show the
   conflicting files and proposed resolutions; NEVER resolve with destructive
   git ops (`checkout --`, `restore`, `reset --hard`) without explicit approval.*
@@ -167,7 +174,7 @@ Co-Authored-By lines. New PRs get `--label bugbot`.
 End with the same ASCII pipeline bar `/pr-state` uses, showing the new state:
 
 ```
-🧭  CR ✓   SMP ✓   RPR ·   JT ✓      (was: CR ✓-2  SMP ✓  RPR ·  JT ✓-2)
+🧭  CR ✓   PT ✓   RPR ·   JT ✓      (was: CR ✓-2  PT ✓  RPR ·  JT ✓-2)
 ```
 
 plus a Summary block (3–7 bullets): what ran, what got stamped, where it

@@ -229,7 +229,11 @@ def main():
         l3 = [tryb.strip(), f"⏱ далі: {cut(eta[0], 30)} {col('c', eta[4])}" if eta else "",
               col("r", f"🙋{len(now)}") if now else "", f"📋{col('y', plans)}" if plans else "", f"🧱{col('r', stuck)}" if stuck else "",
               f"🔀{col('o', dev['open'])}" if dev.get("open") else ""]
-        lines = [l1, [devb, lockb, col("y", f"🔔{len(rem)}") if rem else "", remb], l3]
+        etab = ""
+        if os.path.exists(f"{WK}/eta-wake.on"):  # Mike 20.11: «якщо вона ввімкнена — вона має бути в статуслайні»
+            free = sh("python3", f"{HOME}/.claude/fleet-board/bin/eta-free.py", f"{WK}/tracks.tsv", f"{WK}/night-audit-state.tsv", "--short")
+            etab = col("c", "⏰ ETA ON") + (f" · {cut(free.replace(', якщо все піде за планом', ''), 48)}" if free else "")
+        lines = [l1, [devb, lockb, col("y", f"🔔{len(rem)}") if rem else "", remb], [etab] + l3 if etab else l3]
         ids = [["role", "project", "whowin", "agents"], ["dev", "lock", "remcount", "remtext"], ["mytries", "forecast", "mikeq", "plansq", "stuckq", "openprs"]]
         more += [f"нагадування {k + 1}: {x}" for k, x in enumerate(rem)] + [f"дія від тебе: {x} → вікна {', '.join(w) or '—'}" for x, w in now]
         more.append(f"dev: гілка {dev.get('branch', '?')}, PR {dev.get('pr') or '— (train або без PR)'}, {'deploy завершено' if dev.get('live') else 'deploy триває'}")

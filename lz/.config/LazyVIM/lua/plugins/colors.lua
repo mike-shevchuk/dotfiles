@@ -103,6 +103,16 @@ return {
           lualine_b = { "branch", "diff", "diagnostics" },
           lualine_c = { "filename" },
           lualine_x = {
+            -- claudecode.nvim: "review: 2 files · 1 note", empty when nothing waits
+            {
+              function()
+                return require("claudecode.review.controller").status() or ""
+              end,
+              cond = function()
+                return package.loaded["claudecode.review.controller"] ~= nil
+              end,
+              color = "ClaudeCodeReviewCount",
+            },
             "fileformat",
             "filetype",
             function()

@@ -1,0 +1,1 @@
+{ "name": "blockers", "version": "0.1.0", "description": "Side pane with Mike's blockers in detail: every teammate in the fleet lead, only this window in a teammate", "types": "./types/index.d.ts", "author": { "name": "Mike" }, "license": "UNLICENSED" }

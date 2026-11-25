@@ -44,3 +44,7 @@ projctl/code/projctl/projctl.log
 .lgtm/
 .playwright-mcp/
 hammerspoon/.hammerspoon/pal/icons/
+
+# Claude fleet runtime state + work notes (employer internals, prod details) — public repo
+claude/.claude/fleet-board/
+claude/.claude/reminders/

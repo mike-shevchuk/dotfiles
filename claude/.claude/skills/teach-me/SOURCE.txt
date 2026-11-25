@@ -1,0 +1,1 @@
+Source: https://github.com/sshah03/teach-me @ 41e7a64 (2026-10-18), MIT. Installed 2026-10-24 for /lgtm (Mike). Audited: build_page.py stdlib only, no network/exec; assets/kit.js + lint.js page-only.
