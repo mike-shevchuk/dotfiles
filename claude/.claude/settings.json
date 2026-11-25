@@ -224,7 +224,7 @@
   "autoMode": {
     "allow": [
       "$defaults",
-      "Running rescue-serverless justfile try recipes (jb2b / just --justfile justfile.v2 <name>-try, including when wrapped in tmux/env -i/zsh -c) against the DEV environment is allowed, including creating and resolving test workflows, alerts/emergencies and device state in dev orgs (Test · Fixtures, Greg & Usama Band) - Mike approved 2026-10-16. Never applies to prod."
+      "Running rescue-serverless justfile try recipes (jb2b / just --justfile justfile.v2 <name>-try, including when wrapped in tmux/env -i/zsh -c) against the DEV environment is allowed, including creating and resolving test workflows, alerts/emergencies and device state in dev orgs (Test · Fixtures, Alex & Usama Band) - Mike approved 2026-10-16. Never applies to prod."
     ]
   },
   "voiceEnabled": true

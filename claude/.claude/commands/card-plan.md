@@ -28,7 +28,7 @@ Rule of thumb: a reader who stops after block 2 understands the change; block 4 
 ## 0.1 🧒 Простими словами — right after 🌍 Загальна картина (§0.0) (Mike 11.11: «card plan мають також описувати простими словами, а не тільки для інженерів»)
 Every card opens (before 🧪 Перевірки and 📌) with `## 🧒 Простими словами`, written for someone who has not read the ticket or the code:
 - **Що це** — 1–2 sentences: who does what in the product and what they see (no file names, no HTTP codes, no field names).
-- **Навіщо** — what was wrong / missing before, with a real example (YMCA, Greg's request).
+- **Навіщо** — what was wrong / missing before, with a real example (Acme, Alex's request).
 - **Що змінюється для людей** — what admin / user / responder notices after merge; «нічого не змінюється» when it is tests or internals.
 - **Наскільки безпечно** — what it touches (тільки тести / одна сторінка / шлях 911…), what breaks if it is wrong, how we checked.
 - a tiny ASCII picture «до → після» when it helps.
@@ -36,7 +36,7 @@ Domain terms stay English (rule 17); everything else in plain Ukrainian. The P-r
 
 ## 0.2 🖥 Що треба на вебі (FE) — mandatory section, right after 🧪 Перевірки (Mike 12.11: «card-plan мають мати розділ, що треба зробити з вебом, що треба додати»)
 Every card has `## 🖥 Що треба на вебі (FE)` — even when the answer is «нічого» (then one line why: tests only / backend-only guard / no new field).
-- **Хто і де:** the FE ticket (PUN-xxxx, owner Danylo / Oleksii) or «треба створити тікет» + which portal (Admin `/` · Manage `/admin/*` · Enterprise `/enterprise/*` · Partner `/partner/*`) and the exact page.
+- **Хто і де:** the FE ticket (PUN-xxxx, owner FE dev / BE dev) or «треба створити тікет» + which portal (Admin `/` · Manage `/admin/*` · Enterprise `/enterprise/*` · Partner `/partner/*`) and the exact page.
 - **Що додати / змінити на екрані:** a table `екран · що з'являється / змінюється · коли (стан) · текст для людини` — new buttons, fields, columns, confirm dialogs, toasts for new errors (409/422 with the `detail` text), empty states.
 - **Контракт для FE:** each endpoint the screen calls — method + path, new/changed request & response fields (type, nullable), new error codes → what the UI shows; link the just-fe PR comment if posted.
 - **До → після:** a small ASCII mock of the screen when something visible changes.
@@ -45,7 +45,7 @@ Same block in the Visual plan (plain words + mock, no syntax). Check before «re
 
 ## 0.3 🖥↔⚙ FE ↔ BE storyboard — every time the frontend fetches or sends data (Mike 18.11: «зроби кращу візуалізацію коли фронтенд дістає дані чи відправляє»)
 For EVERY FE call the plan adds or changes, the Visual plan gets one storyboard frame (same style as the backend frames), left → right:
-1. **Screen** — which portal / page / button (Admin · Enterprise · Mobile), what the user does («Greg натискає Release»). A tiny wireframe or the real screenshot (moli) if the screen exists.
+1. **Screen** — which portal / page / button (Admin · Enterprise · Mobile), what the user does («Alex натискає Release»). A tiny wireframe or the real screenshot (moli) if the screen exists.
 2. **Request** — method + full path + headers that matter (role, `X-Organization-Id`) + the exact JSON body copied from the REAL request model (`file:line` of the Pydantic class — never invented), new/changed fields highlighted, and every field marked visually **required** / *optional (default)* (Mike 18.11: «краще показувати request/response and optional field and required»).
 3. **BE** — which route (`file:line`), validation (what returns 4xx, e.g. «2× call911=true → 422»), and the DB step with pk / sk / GSI (§2.1).
 4. **Response** — status + the exact JSON the FE gets (camelCase), new fields highlighted.
@@ -65,8 +65,8 @@ Arrows FE → BE → DB → BE → FE are drawn, numbered in time order. The car
 
 ## 1.1 Every diagram readable at three levels — who does what, which request, why (Mike 19.11: «дуже мало опису візуального, не зрозуміло які реквести шле юзер і для чого» · «щоб візуалізація була зрозуміліша і краще описана на всіх рівнях складності»)
 Every picture answers «who → does what on which screen → which request → why → what is stored → what the other person sees». One idea, three depths — never a bare box-and-arrow:
-- **L0 · 🧒 / 🌍 (anyone):** real roles by name (Greg = enterprise admin, Sarah = org admin Dowd, responder), the action in plain words («вантажить PDF», «відкриває emergency screen»), what changes for them. No endpoints.
-- **L1 · Visual plan (decide):** each arrow = `action → METHOD short-path → why` (e.g. «Greg вантажить PDF → POST /enterprise/plans/upload-url → отримати посилання для S3»). Never an abstract label like «plans page» or «same writer». Records shown by name (`Enterprise plan`, `Org attachment`) with one line what they hold.
+- **L0 · 🧒 / 🌍 (anyone):** real roles by name (Alex = enterprise admin, Sam = org admin Dowd, responder), the action in plain words («вантажить PDF», «відкриває emergency screen»), what changes for them. No endpoints.
+- **L1 · Visual plan (decide):** each arrow = `action → METHOD short-path → why` (e.g. «Alex вантажить PDF → POST /enterprise/plans/upload-url → отримати посилання для S3»). Never an abstract label like «plans page» or «same writer». Records shown by name (`Enterprise plan`, `Org attachment`) with one line what they hold.
 - **L2 · Card (engineer):** full `METHOD /api/v1/…` · body fields with required/optional (from the real Pydantic model, file:line) · response · who may call it (authz per role) · DynamoDB `pk/sk/GSI` (§2.1) · error codes.
 Mandatory with every plan that adds or changes requests:
 1. **One sequenceDiagram per user scenario** (not one diagram for everything): happy path + the main refusal (e.g. 422) — real roles, numbered steps.
@@ -79,9 +79,9 @@ Check before «ready»: every `<pre class=mermaid>` / ```mermaid fence in the VP
 
 ## 1.2 Standard Visual plan for a feature with requests — the agreed set (Mike 19.11 «склад: B3(+B1 згорнуто) · B4+B5 · G5+Swagger · J — ок»)
 Reference: `rescue-serverless/w46/visual-plan/pun-2117-emergency-plans.html` (generators `bin/vp-gen/pun2117_build.py`, `bin/vp-gen/endpoints_g5.py`; variants Mike compared: `…/pun-2117-diagram-variants.html`, `…-diagram-B-variants.html`, `…-endpoints-G5.html`).
-1. **Загальна картина = B3** — ONE sequenceDiagram, `autonumber`, real roles (Greg / Sarah / Tom), coloured `rect` phase blocks («Phase 1 · …»). Arrow labels SHORT (2–4 words); the full request lives in the hover.
+1. **Загальна картина = B3** — ONE sequenceDiagram, `autonumber`, real roles (Alex / Sam / Tom), coloured `rect` phase blocks («Phase 1 · …»). Arrow labels SHORT (2–4 words); the full request lives in the hover.
 2. **Кожен сценарій окремо (B1)** — the per-scenario sequences (happy path + refusals in a red rect, Note «навіщо») go right under B3 inside `<details>` **collapsed by default**.
-3. **Що відповідає Rescue (B4 + B5 merged)** — plain-words messages («покажи plan Greg-а на моїй category») with `alt / else` for EVERY outcome (200 / 403 / 422 …); the exact request and code in the hover.
+3. **Що відповідає Rescue (B4 + B5 merged)** — plain-words messages («покажи plan Alex-а на моїй category») with `alt / else` for EVERY outcome (200 / 403 / 422 …); the exact request and code in the hover.
 4. **Timeline одного об'єкта (J)** — mermaid `timeline` of one record/file from creation to the moment a person sees it.
 5. **Карта endpoints (G5 + Swagger)** — an HTML grid, NOT mermaid (Mike 19.11 «сторінка вийшла завеликою… місця дуже багато»): portal columns side by side (`bin/vp-gen/g5_grid.py` builds it from the Swagger panels), border colour = CRUD (🟢 create · 🔵 read · 🟠 update · 🔴 delete), node = METHOD short-path + 2–4-word «що робить»; hover = full path · plain explanation · body fields · roles. Click → a Swagger-style panel (`<details>`, collapsed): coloured METHOD bar + path · «хто може» chips · Parameters (name · in · type · required) · Request body (schema + example JSON) · Responses (code · when · example) · **До → після** (DynamoDB record + screen; CHG endpoint = response до PR → після PR).
 6. **Keep the FE ↔ BE storyboard** (§0.3) — Mike 19.11: «це треба лишити, це супер корисно».
@@ -91,7 +91,7 @@ Verify before «ready»: agent-browser — every mermaid → svg, 0 «Syntax err
 ## 2. Every mechanism you add or reuse (flag, claim, record, queue, index, dedup, TTL…) gets the 5-block «engineer box»
 1. **Where it lives** — the REAL record before → after as a ```diff of the item (pk/sk + neighbours that already exist), say «new field on an existing item» vs «new record» vs «new table». New record / GSI / TTL / history → run `/model-entity` first and paste its chosen keys + priced alternatives here (box 4 cites it).
 2. **Exact request** — the literal call (UpdateItem/Query/Publish…) with Condition/Key and EVERY outcome (success / condition failed / throttle) → what the code does for each.
-3. **Worked example on a timeline** — a real client (YMCA), real times, every actor, a table «time · who · sees · request result · action» + a sequenceDiagram. Include retry and the «later» events (release, notice, resolve).
+3. **Worked example on a timeline** — a real client (Acme), real times, every actor, a table «time · who · sees · request result · action» + a sequenceDiagram. Include retry and the «later» events (release, notice, resolve).
 4. **Alternatives considered** — table: option · the criteria that matter here (atomic? survives > N min? new record/TTL? cost?) · **precedent in code (file:line)** · verdict. The chosen one must win on the table, not by assertion. Reuse-first: name the existing mechanism you follow.
 5. **Weak spot** — the failure mode left (crash between steps, TTL expiry, eventual read…), how likely, the fix you propose or the `ponytail:` ceiling + upgrade path.
 
@@ -151,7 +151,7 @@ Plain Ukrainian: what changed (card + Visual plan), the one-paragraph answer to 
 **Rule:** the moment Mike corrects a card / Visual plan / question (chat, lead relay or modal «Other»), add ONE line here in the same turn: date · what he said (short quote) · the rule. Then apply it to the current card and Visual plan before replying.
 | # | Date | Mike said | Rule |
 |---|---|---|---|
-| 1 | 09.11 | «tiki — наше все», «потрібен приклад» | the card IS the explanation; every card has a real-client worked example (YMCA) |
+| 1 | 09.11 | «tiki — наше все», «потрібен приклад» | the card IS the explanation; every card has a real-client worked example (Acme) |
 | 2 | 10.11 | «а де visual plan — ану створи» | every plan going to Mike has a Visual plan (missions/visual-plan-standard.md) |
 | 3 | 10.11 | «а де приклад, як буде виглядати email» | every message the feature sends → a mock from the REAL template (§3) |
 | 4 | 10.11 | «старайся багато візуалізовувати», «інженерний підхід, все візуалізуй» | ≥3 diagrams; one diagram per viz-catalog dimension the ticket touches |

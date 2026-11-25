@@ -337,7 +337,7 @@ For each task use this exact format:
 
 Шкала важливості 🔥 (1–10):
 - 10 = продакшн зламаний або блокує реліз
-- 8–9 = Urgent від Greg/Chandon, клієнти чекають
+- 8–9 = Urgent від Alex/Jordan, клієнти чекають
 - 6–7 = High — помітно впливає на UX або інші задачі залежать
 - 4–5 = Medium — треба зробити але є час
 - 1–3 = Nice to have, backlog
