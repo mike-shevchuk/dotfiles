@@ -68,6 +68,12 @@ without it, a grid/flex card cannot hold or save a dragged width. Collapse keeps
 `.ecard.pchrome .ehd{padding-right:116px}`. The burger's **Reset layout & sizes**
 also reopens closed panels and clears their remembered state.
 
+**Side panels (slide-in drawer from the right — card detail, preview, inspector) carry size modes at the top** (Mike 11.11):
+a button row `S · M · L · XL · ⛶` next to `✕` = 480px · 760px · 60% · 80% · 100% of the window; the active mode is highlighted,
+mode + width persist in `localStorage`, the left-edge drag handle still works (a drag clears the mode = custom width, dblclick = reset),
+buttons hidden under 760px (the drawer is full-width there). Reference implementation: `~/.claude/fleet-board/bin/board-html.py`
+(`SZ`, `sizeMode()`, `markSz()`, `#side .szm`).
+
 ## Step 3 — the section contract
 
 Numbered `N · Title` sections, in this order. Skip one only when the
@@ -285,7 +291,7 @@ the hub root IS the URL path:
 
 ```bash
 REL="${OUT%/}/<file>"; REL="${REL#*/zettelkasten/claude_code/}"   # path relative to the hub root
-URL="http://$(ipconfig getifaddr en0):8890/$REL"
+URL="http://mac.local:8890/$REL"
 echo "━━━ xh ━━━  xh -h HEAD $URL" >&2
 xh -h HEAD "$URL" | head -1        # expect: HTTP/1.1 200 OK
 ```
@@ -299,7 +305,7 @@ is **no horizontal page scroll** (`document.documentElement.scrollWidth >
 clientWidth` must be `false`; wide tables scroll inside their own
 `.tl-wrap`/`.lam-wrap`, never the page).
 
-Report the hub URL: `http://$(ipconfig getifaddr en0):8890/$REL`. The hub is
+Report the hub URL: `http://mac.local:8890/$REL`. The hub is
 persistent (bun in tmux session `hub`); the report file is permanent under the hub
 root, and if a link ever 404s, `just -g hub-fix` brings the hub back — a later
 "it doesn't work" means a stopped hub, not a lost report.

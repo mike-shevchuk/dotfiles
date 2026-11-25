@@ -308,6 +308,11 @@ omni-test() {
     print -r -- "$body" | jq . >&2 2>/dev/null || print -r -- "$body" >&2
     return 1
   fi
+  if ! print -r -- "$body" | jq -e '.choices[0].message.tool_calls[]? | select(.function.name == "diagnostic_ping") | .function.arguments | fromjson | select(.value == "OK")' >/dev/null 2>&1; then
+    print -r -- "  FAIL: HTTP succeeded, but the model did not return the expected tool call. Response:" >&2
+    print -r -- "$body" | jq . >&2 2>/dev/null || print -r -- "$body" >&2
+    return 1
+  fi
   print -r -- "$body" | jq -r '"  OK: tool calling | response model: \(.model // "unknown") | finish: \(.choices[0].finish_reason // "unknown") | usage: \(.usage // {} | tojson)"' >&2
 }
 
@@ -1048,8 +1053,17 @@ fi
 # Added by Antigravity IDE (macOS-only app; guard so the /Users path isn't a dead
 # PATH entry on the Orange Pi, which shares this file via stow)
 [[ "$OSTYPE" == darwin* ]] && export PATH="$HOME/.antigravity-ide/antigravity-ide/bin:$PATH"
-
 [[ -r ~/.lan.env ]] && source ~/.lan.env
+
+# Cardputer (esp-deck/cardputer Term app, 40–48 columns, small font): plain prompt instead of agnoster.
+# Term starts zsh with CARDPUTER=1 (components/app_term hosts.txt); nothing else in this file changes.
+if [[ -n $CARDPUTER ]]; then
+  autoload -Uz add-zsh-hook
+  add-zsh-hook -d precmd prompt_agnoster_precmd 2>/dev/null
+  PROMPT='%F{cyan}%1~%f %(?..%F{red}%?%f )%# '
+  RPROMPT=''
+fi
+
 # the Pi: the Mac's current IP, pushed by `just -g lan` on the Mac to a dir every user reads
 for f in ~/.mac_ip.env /opt/toolchains/lan/mac_ip.env; do [[ ! -r $f ]] || source $f; done; unset f
 [[ -z ${MAC_IP:-} ]] || export MAC_IP

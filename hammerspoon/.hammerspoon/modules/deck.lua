@@ -1,5 +1,6 @@
 -- ESP32 deck: HTTP API for the Waveshare ESP32-C5 touch board (firmware + web simulator: ~/code/esp-deck)
--- GET  /state               → dashboard, tmux sessions, recipes, voice state (JSON)
+-- GET  /state[?s=1]         → dashboard, recipes, voice state (JSON); s=1: no tmux sessions, their version `sv` instead
+-- GET  /sessions            → {sessions} with its own ETag (the board asks when sv moves or a sessions view is on screen)
 -- GET  /pane?t=@ID[&m=clean] → last lines of that tmux window (clean: no Claude chrome, turns marked \1u / \1a)
 -- POST /send?t=@ID&enter=1  → request body typed into the window (then Enter)
 -- POST /key?t=@ID&k=Enter   → one whitelisted tmux key (Escape to a Claude window also marks it done)
@@ -19,6 +20,7 @@
 -- POST /panel[?set=vol|bright|dark|awake|mic|sleep&v=N] → control-panel state / toggles
 -- POST /mac                 → now playing (Spotify / Music) + files selected in Finder + last conversion
 -- POST /media?k=play|next|prev|volup|voldown → media keys (also drive YouTube in the browser)
+-- POST /type?k=enter|esc|tab|bs|paste|up|down → that key in the window in front · no k: the body typed there (?v=1: a 🎤 take, helper/dictate.py cleans it first)
 -- POST /convert?f=jpg|png|heic|gif|pdf|mp4|mp3|m4a → convert the Finder selection, results land next to the originals
 -- /state.fw = sha256 of a firmware `just ota` is serving on :7778 (hs.httpserver can't stream big binaries)
 -- Every request needs "X-Deck-Token: $DECK_TOKEN" (~/.hammerspoon/.env); CORS is open for the simulator.
@@ -89,6 +91,14 @@ local function task(cmd, args, cb)
   t:start()
   return t
 end
+-- a refresh a poll kicks off: skipped while its last run still works (Finder once took 42 s to answer an osascript,
+-- and the board asks every ~2 s)
+local running = {}
+local function taskOnce(key, cmd, args, cb)
+  if running[key] then return end
+  running[key] = true
+  task(cmd, args, function(out, code) running[key] = nil; if cb then cb(out, code) end end)
+end
 
 local function readFile(path)
   local f = io.open(path, "rb")
@@ -105,7 +115,7 @@ local function writeFile(path, data) -- false on any failure, the close that flu
 end
 
 -- ── slow sources, refreshed in the background ──
-local limits, rem = {}, {}
+local rem = {}
 local slowTick = 0
 local HUB_DIR = HOME .. "/zettelkasten/claude_code"
 local HUB_URL = "http://localhost:8890/"
@@ -183,23 +193,41 @@ end
 K.PORT_NAMES = { [7777] = "Hammerspoon · плата", [7778] = "прошивка для плати (just ota)", [8893] = "сайт здоров'я",
   [8894] = "сайт мітингів", [8890] = "hub", [8069] = "stt-host (whisper)" }
 local ports = {}
+-- a Claude Code process renames itself to its version ("2.1.322") and listens on a random local port (its IDE link):
+-- name it by the tmux window it runs in, walking up the parent pids to a pane (Mike 12.11: «що це за порти»)
+function K.portWho(cmd, pid, parent, pane)
+  if not (cmd or ""):match("^%d+%.%d+%.%d+$") then return cmd end
+  local p, hops = tonumber(pid), 0
+  while p and p > 1 and hops < 8 do
+    if pane[p] then return "Claude · " .. pane[p] end
+    p, hops = parent[p], hops + 1
+  end
+  return "Claude Code (не в tmux)"
+end
 local function refreshPorts()
   task("/usr/sbin/lsof", { "-nP", "-iTCP", "-sTCP:LISTEN", "-F", "pcn" }, function(out)
-    local seen, list, pid, cmd = {}, {}, nil, nil
-    for l in (out or ""):gmatch("[^\n]+") do
-      local k, v = l:sub(1, 1), l:sub(2)
-      if k == "p" then pid = v elseif k == "c" then cmd = v
-      elseif k == "n" then
-        local port = tonumber(v:match(":(%d+)$"))
-        if port and not seen[port] then
-          seen[port] = true
-          local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
-          table.insert(list, { port, (K.PORT_NAMES[port] or cmd or "?") .. loc })
+    task("/bin/ps", { "-axo", "pid=,ppid=" }, function(psout)
+      task(TMUX, { "list-panes", "-a", "-F", "#{pane_pid} #{session_name}:#{window_index} #{window_name}" }, function(tout)
+        local parent, pane = {}, {}
+        for a, b in (psout or ""):gmatch("(%d+)%s+(%d+)") do parent[tonumber(a)] = tonumber(b) end
+        for a, w in (tout or ""):gmatch("(%d+) ([^\n]+)") do pane[tonumber(a)] = w end
+        local seen, list, pid, cmd = {}, {}, nil, nil
+        for l in (out or ""):gmatch("[^\n]+") do
+          local k, v = l:sub(1, 1), l:sub(2)
+          if k == "p" then pid = v elseif k == "c" then cmd = v
+          elseif k == "n" then
+            local port = tonumber(v:match(":(%d+)$"))
+            if port and not seen[port] then
+              seen[port] = true
+              local loc = (v:match("^127%.") or v:match("^%[::1%]")) and " · лише локально" or ""
+              table.insert(list, { port, (K.PORT_NAMES[port] or K.portWho(cmd, pid, parent, pane) or "?") .. loc })
+            end
+          end
         end
-      end
-    end
-    table.sort(list, function(a, b) return a[1] < b[1] end)
-    ports = list
+        table.sort(list, function(a, b) return a[1] < b[1] end)
+        ports = list
+      end)
+    end)
   end)
 end
 
@@ -209,19 +237,8 @@ local function refreshSlow()
   if slowTick % 2 == 1 then -- calendar every ~2 min: DeckHelper writes CAL_FILE, state() reads it
     task("/usr/bin/open", { "-g", "-n", "-a", HELPER_APP, "--args", "calendar", CAL_FILE })
   end
-  -- the statusline itself renders "⏱ 5h ○○… 3% 62k ~0.04x ⚡0.10x @22:50 | 📅 7d …" — reuse it verbatim
-  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. K.STATUSLINE }, function(out)
-    out = out:gsub("\27%[[%d;]*m", "")
-    for line in out:gmatch("[^\n]+") do
-      if line:find(" 5h ") then
-        local l = {}
-        for part in line:gmatch("[^|]+") do
-          if part:find(" 5h ") or part:find(" 7d ") then l[#l + 1] = clean(part) end
-        end
-        limits = l
-      end
-    end
-  end)
+  -- run for its side effect: it refreshes K.USAGE_CACHE / K.TOKENS_CACHE, which limitGauges reads (the board's `lim`)
+  task("/bin/bash", { "-c", "echo '{\"workspace\":{\"current_dir\":\"/tmp\"}}' | bash " .. K.STATUSLINE })
   task(K.REMINDERS, { "list" }, function(out)
     local r = {}
     for line in out:gmatch("[^\n]+") do
@@ -273,7 +290,7 @@ local jobPick = (function()
   if f then f:close() end
   return ok and type(t) == "table" and t or {}
 end)()
-local function savePick(id, tr)
+local function savePick(id, tr) -- tr nil: forget that window's pick
   jobPick[id] = tr
   local f = io.open(JOBPICK_FILE, "w")
   if f then f:write(hs.json.encode(jobPick)); f:close() end
@@ -388,6 +405,11 @@ local function parseSessions(out)
                             descs = strList(descs, 80), head = safeClean(head, 40), ctx = safeClean(ctx, 600) }
       end
     end
+  end
+  -- a closed window's pick would keep its transcript "taken" for good (no bg row for that job), and tmux reuses
+  -- window ids after a restart; an empty list = tmux said nothing, which proves no window gone
+  if next(seen) then
+    for wid in pairs(jobPick) do if not seen[wid] then savePick(wid, nil) end end
   end
   local rank = { permission = 1, choice = 2 }
   table.sort(asks, function(a, b) -- permission, then choice, then the rest; oldest first within each
@@ -508,6 +530,7 @@ local function micBoardUp(rate, lang)
   local f = io.open(PCM_FILE, "rb")
   local pcm = f and f:read("a") or ""
   if f then f:close() end
+  os.remove(PCM_FILE) -- a take is heard once: a lost /mic?down=1 must not replay the previous take (sent 5 times on 3.11)
   if #pcm < rate then voice = { state = "done", text = "", journal = voice.journal }; return end -- under ½ s: nothing said
   local w = io.open(WAV_FILE, "wb")
   w:write(string.pack("<c4I4c4c4I4I2I2I4I4I2I2c4I4", "RIFF", 36 + #pcm, "WAVE", "fmt ", 16, 1, 1, rate, rate * 2, 2, 16,
@@ -691,7 +714,7 @@ local function wrap(segs, width, out)
 end
 
 -- a capture-pane → the board's text; clean = paneclean's view, its first line of a turn starts "\1u" / "\1a"
-local function render(out, colors, width, clean)
+local function render(out, colors, width, clean, keep) -- keep: at most that many lines, from the end (60 when not said)
   out = out:gsub("\27%]8;[^\27]*\27\\", "") -- OSC 8 hyperlinks
   local items = {}
   for line in (out .. "\n"):gmatch("(.-)\n") do items[#items + 1] = { s = (line:gsub("%s+$", "")) } end
@@ -716,27 +739,46 @@ local function render(out, colors, width, clean)
     end
     blank = empty
   end
-  while #lines > 60 do table.remove(lines, 1) end -- the board re-renders all of it every second: keep it light
+  -- 60 was the limit whatever the device asked for (2026-11-17: «дуже мала історія») — /pane?n= never reached past
+  -- it. Now the device says how much it wants: little at the live end, more as its view nears the top
+  keep = keep or 60
+  if #lines > keep then lines = table.move(lines, #lines - keep + 1, #lines, 1, {}) end
   return table.concat(lines, "\n")
 end
 
 -- /pane answers from a cache at once; the capture runs async (a sync hs.execute stalled all of HS for up to 1 s),
 -- at most every 0.4 s per window+view, and a view nobody asked for in 60 s is dropped
 local paneCache = {}
-local function pane(id, colors, width, clean)
+K.panehist = require("modules.panehist")
+K.paneKeyed = {} -- window → { k, at }: the last key the device sent it (/key): which side a page with no row in common is on
+local function pane(id, colors, width, clean, lines)
   width = width and width >= 20 and width or 1000 -- old firmware sends no w: no wrapping here
-  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean) }, "|")
+  lines = math.max(120, math.min(lines or 120, 3000)) -- the device asks for more as its view nears the top (phone: up to 3000)
+  local now, key = hs.timer.secondsSinceEpoch(), table.concat({ id, tostring(colors), width, tostring(clean), lines }, "|")
   for k, e in pairs(paneCache) do if now - e.asked > 60 then paneCache[k] = nil end end
   local e = paneCache[key] or { fetched = 0 }
   paneCache[key], e.asked = e, now
   if not e.busy and now - e.fetched >= 0.4 then
     e.busy, e.fetched = true, now
-    task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-120", "-t", id }, function(out)
-      local ok, text = pcall(render, out, colors, width, clean)
-      if ok then e.data = { t = id, text = text } end
-      e.busy = false
+    -- a full-screen program (Claude Code: the alternate screen) has no history in tmux: the device scrolls it by that
+    -- program's own PageUp / PageDown (/key), and the screens it pages through are joined into one text (panehist)
+    task(TMUX, { "display-message", "-p", "-t", id, "#{alternate_on}" }, function(alt)
+      e.alt = (alt or ""):match("1") ~= nil
+      task(TMUX, { "capture-pane", "-p", "-e", "-J", "-S", "-" .. lines, "-t", id }, function(out)
+        if out ~= e.raw then -- rendered again only when the pane changed (render runs on Hammerspoon's thread)
+          local src, k = out, K.paneKeyed[id]
+          if e.alt then
+            local okh, joined = pcall(K.panehist.feed, id, out, isRule, k and now - k.at < 4 and k.k or nil, now)
+            if okh then src = joined end
+          end
+          local ok, text = pcall(render, src, colors, width, clean, lines)
+          if ok then e.raw, e.data = out, { t = id, text = text } end
+        end
+        e.busy = false
+      end)
     end)
   end
+  if e.data then e.data.alt = e.alt or false end
   return e.data or { t = id, text = "", wait = true }
 end
 
@@ -747,28 +789,25 @@ K.NP = {
 }
 -- AppleScript runs in /usr/bin/osascript tasks (never on Hammerspoon's thread: an Automation prompt or a busy
 -- app would stall the whole deck server); /mac answers from these caches and kicks off a refresh
-local macNP, macFiles = nil, {}
+local macNP, macFiles, macFound = nil, {}, {} -- macFound: app → its now playing (false = nothing)
 local function osa(script, cb) task("/usr/bin/osascript", { "-e", script }, cb) end
 
 local function refreshMac()
-  local found = {}
   for _, app in ipairs({ "Spotify", "Music" }) do
-    osa(K.NP[app], function(out)
+    taskOnce("np:" .. app, "/usr/bin/osascript", { "-e", K.NP[app] }, function(out)
       local st, title, artist, pos, dur = out:gsub("%s+$", ""):match("^(%w+)|(.-)|(.-)|(%d+)|(%d+)$")
-      found[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
-                            pos = tonumber(pos), dur = tonumber(dur) } or false
-      if found.Spotify ~= nil and found.Music ~= nil then
-        local sp, mu = found.Spotify, found.Music
-        macNP = (sp and sp.playing and sp) or (mu and mu.playing and mu) or sp or mu or nil
-      end
+      macFound[app] = st and { app = app, playing = st == "playing", t = clean(title), a = clean(artist),
+                               pos = tonumber(pos), dur = tonumber(dur) } or false
+      local sp, mu = macFound.Spotify, macFound.Music
+      macNP = (sp and sp.playing and sp) or (mu and mu.playing and mu) or sp or mu or nil
     end)
   end
-  osa([[tell application "Finder" to set s to selection as alias list
+  taskOnce("finder", "/usr/bin/osascript", { "-e", [[tell application "Finder" to set s to selection as alias list
 set out to ""
 repeat with f in s
   set out to out & POSIX path of f & linefeed
 end repeat
-return out]], function(out)
+return out]] }, function(out)
     local files = {}
     for path in out:gmatch("[^\n]+") do
       if not path:match("/$") then files[#files + 1] = path end -- folders: no
@@ -869,7 +908,7 @@ end
 -- lead.py runs async: the board gets the last result (its long-press refresh brings the fresh one)
 local fleetRaw
 local function refreshFleet()
-  task("/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
+  taskOnce("fleet", "/bin/sh", { "-c", "PATH=$PATH:$HOME/.pyenv/shims python3 $HOME/.claude/scripts/lead.py blockers --json 2>/dev/null" },
        function(out) fleetRaw = out end)
 end
 local function fleetText(width)
@@ -1030,7 +1069,8 @@ local function chat(id, n, force, job)
       end)
     end
     local jid = id:match("^job:(%w+)$") -- a background session's row: its own transcript, no window behind it
-    if jid then return withPath(jobs.tr[jid] or "") end
+    -- not `return withPath(...)`: that left chat() returning nil → /chat 503 for every job: row (Cardputer 17.11)
+    if jid then withPath(jobs.tr[jid] or ""); return e.data or { msgs = {}, wait = true } end
     -- no hook-kept transcript (the hook never ran there): the newest one no other window claims, from the
     -- window's own project folder. A dead one = a `claude agents` client: the background job it most likely
     -- shows (the latest active one), kept for that window until ↻ — never a teammate's transcript.
@@ -1063,6 +1103,62 @@ local function chat(id, n, force, job)
           done({ msgs = {}, err = "pick", jobs = jobs.active }) -- the board asks which session this window shows
         end)
       end
+      -- a `claude agents` window (no transcript of its own): the background session that is alive right now — the
+      -- newest-written transcript of the active jobs — not a guess from the window's project folder, which showed
+      -- an old chat while the terminal was current (Mike 17.11). The board's pick (?job=) still wins
+      if job and jobs.tr[job] then return withPath(jobs.tr[job]) end
+      if #jobs.active > 0 then
+        return task("/bin/sh", { "-c", "ps -o args= -p \"$(pgrep -P $(" .. TMUX .. " display -p -t " .. id ..
+          " '#{pane_pid}') | tr '\\n' ,)\" 2>/dev/null" }, function(ps)
+          if not (ps or ""):find("claude agents", 1, true) then return K.chatByDir(id, cwd, withPath) end
+          -- the session the window shows = the one whose latest words are on its screen now; the newest-written job
+          -- was wrong when several run (esp:1 showed the W46 lead's chat, 18.11). Newest-written only as a fallback
+          task(TMUX, { "capture-pane", "-p", "-J", "-S", "-80", "-t", id }, function(screen)
+            local best = K.jobOnScreen(screen or "")
+            if not best then
+              local bestM
+              for _, j in ipairs(jobs.active) do
+                local t = jobs.tr[j.id]
+                local m = t and hs.fs.attributes(t, "modification")
+                if m and (not bestM or m > bestM) then best, bestM = t, m end
+              end
+            end
+            if best then return withPath(best) end
+            K.chatByDir(id, cwd, withPath)
+          end)
+        end)
+      end
+      K.chatByDir(id, cwd, withPath)
+    end)
+  end
+  return e.data or { msgs = {}, wait = true }
+end
+-- which active background job's transcript has its latest assistant words on this screen (whitespace-insensitive)
+function K.jobOnScreen(screen)
+  local flat = screen:gsub("%s+", "")
+  local best, bestLen
+  for _, j in ipairs(jobs.active) do
+    local t = jobs.tr[j.id]
+    local f = t and io.open(t, "rb")
+    if f then
+      local size = f:seek("end")
+      f:seek("set", math.max(0, size - 200000))
+      local tail = f:read("a") or ""
+      f:close()
+      for txt in tail:gmatch('"type":"text","text":"(.-)"[,}]') do
+        local w = txt:gsub("\\n", " "):gsub("\\u%x%x%x%x", ""):gsub("\\.", ""):gsub("[%*`#>|_]", ""):gsub("%s+", "")
+        -- a 24-byte piece from the middle of a reply: long enough to be unique, short enough to sit on one screen
+        if #w >= 32 then
+          local piece = w:sub(math.floor(#w / 2) - 12, math.floor(#w / 2) + 11)
+          if flat:find(piece, 1, true) and (not bestLen or #w > bestLen) then best, bestLen = t, #w end
+        end
+      end
+    end
+  end
+  return best
+end
+-- a window with no transcript tag: the newest transcript of its project folder that no other window claims
+function K.chatByDir(id, cwd, withPath)
       local dir = cwd ~= "" and HOME .. "/.claude/projects/" .. cwd:gsub("[/.]", "-") or ""
       if not hs.fs.attributes(dir) then return withPath("") end
       task("/bin/sh", { "-c", TMUX .. " list-windows -a -F '#{@agent_transcript}'; echo --; ls -t " .. dir .. "/*.jsonl | head -20" }, function(o)
@@ -1074,9 +1170,6 @@ local function chat(id, n, force, job)
         end
         withPath("")
       end)
-    end)
-  end
-  return e.data or { msgs = {}, wait = true }
 end
 
 local function query(qs)
@@ -1213,19 +1306,43 @@ do
   if ok and type(t) == "table" then flexFav = t end
 end
 
-local function flexCtx(app, title)
+local CHROMIUM = { ["Brave Browser"] = 1, ["Google Chrome"] = 1, Thorium = 1 }
+local urlSeen = {}
+local function frontUrl(app, title) -- the active tab's URL via osascript, asked again only when the title changes.
+  -- Async: macOS asks Mike once for Automation (Hammerspoon → that browser) and a sync call would freeze HS meanwhile.
+  -- Until it answers, or without the permission, the URL is "" and the title decides
+  if not CHROMIUM[app] then return "" end
+  if (urlSeen.app ~= app or urlSeen.title ~= title) and not running.url then
+    local seen = { app = app, title = title, url = "" }
+    urlSeen = seen
+    taskOnce("url", "/usr/bin/osascript", { "-e", 'tell application "' .. app .. '" to return URL of active tab of front window' },
+      function(out, code) if code == 0 then seen.url = out:gsub("%s+$", "") end end)
+  end
+  return urlSeen.title == title and urlSeen.url or ""
+end
+
+local function flexCtx(app, title) -- a browser: deck.json flex.urls by the tab's URL first, then flex.sites by its title
   local f = deckCfg.flex or {}
   if not K.BROWSERS[app] then return app end
+  local url = frontUrl(app, title)
+  for frag, site in pairs(f.urls or {}) do
+    if url:find(frag, 1, true) then return site end
+  end
   for site in pairs(f.sites or {}) do
     if title:find(site, 1, true) then return site end
   end
   return "Browser"
 end
 
+local active = { at = -1 }
 local function tmuxActive() -- the client Mike touched last: list-clients order says nothing about that
-  local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
-  local client, session = out:match("%S+%s+(%S+)%s+(%S+)")
-  return client, session
+  -- sync (~0.1 s on HS's thread) and /flexfav looks it up 3 times: one answer per second is enough
+  local now = hs.timer.secondsSinceEpoch()
+  if now - active.at >= 1 then
+    local out = hs.execute(TMUX .. " list-clients -F '#{client_activity} #{client_name} #{client_session}' | sort -rn | head -1")
+    active.at, active.client, active.session = now, out:match("%S+%s+(%S+)%s+(%S+)")
+  end
+  return active.client, active.session
 end
 
 local function menuWalk(items, path, out) -- every enabled item with a shortcut, under its menu path
@@ -1311,9 +1428,10 @@ local function flexReply(ctx, g)
     local fav = false
     for _, f in ipairs(flexFav[ctx] or {}) do fav = fav or flexSame(f, b) end
     btns[i] = { label = clean(b.label or ""), icon = b.icon, key = b.key and clean(b.key) or nil, fav = fav or nil,
-                color = b.color or cur.color }
+                color = b.color or cur.color, confirm = b.confirm or nil }
   end
-  return { ctx = ctx, g = g, groups = names, buttons = btns }
+  -- style "round": the group's first 4 are the Raven-style round toggles; confirm: a second tap runs it (Вийти)
+  return { ctx = ctx, g = g, groups = names, buttons = btns, style = cur and cur.style or nil }
 end
 
 local function flexToggleFav(ctx, g, f) -- returns the group to stay on: Обране appearing shifts every index by one
@@ -1344,6 +1462,25 @@ function flex.state(app, title, ver) -- `v` changes whenever the board has to re
 end
 end
 
+-- quiet usage log (Mike 12.11, 2–3 days): which context is in front and which board buttons get tapped, so the
+-- flex sets follow real use → ~/.local/share/esp-deck/front.jsonl, local only. Never a window title, URL or typed text:
+-- the context name (an app, or a site from deck.json, else "Browser"), a button label, a key name. Read: `just front-top`
+K.FRONT_LOG = HOME .. "/.local/share/esp-deck/front.jsonl"
+function K.frontLog(rec)
+  rec.t = os.time()
+  local f = io.open(K.FRONT_LOG, "a")
+  if f then f:write(hs.json.encode(rec), "\n"); f:close() end
+end
+function K.frontTick() -- every 5 s; a line only when the context changes; 5 min without input = "idle"
+  local fa, fw = hs.application.frontmostApplication(), hs.window.focusedWindow()
+  local app = fa and fa:name() or ""
+  local ctx = hs.host.idleTime() > 300 and "idle" or flex.ctx(app, fw and fw:title() or "")
+  if ctx ~= K.frontLast then
+    K.frontLast = ctx
+    K.frontLog({ app = ctx == "idle" and "" or app, ctx = ctx })
+  end
+end
+
 local function strip(buttons) -- what the board needs: no actions
   local out = {}
   for i, b in ipairs(buttons or {}) do out[i] = { label = clean(b.label or ""), icon = b.icon, color = b.color } end
@@ -1351,6 +1488,9 @@ local function strip(buttons) -- what the board needs: no actions
 end
 
 local MODS = { cmd = "cmd", command = "cmd", shift = "shift", alt = "alt", option = "alt", opt = "alt", ctrl = "ctrl", control = "ctrl", fn = "fn" }
+K.DICTATE_PY = HOME .. "/code/esp-deck/helper/dictate.py"
+K.TYPE_KEYS = { enter = { {}, "return" }, esc = { {}, "escape" }, tab = { {}, "tab" }, bs = { {}, "delete" },
+  paste = { { "cmd" }, "v" }, up = { {}, "up" }, down = { {}, "down" } }
 local SYSKEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN", mute = "MUTE" }
 
 local function runAction(a, label)
@@ -1390,7 +1530,7 @@ local NO_KILL = { kernel_task = 1, WindowServer = 1, launchd = 1, loginwindow = 
 local topPids, memRaw = {}, ""
 local function memoryState()
   local raw = memRaw -- async below: three sync hs.execute here ran on every panel poll
-  task("/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
+  taskOnce("mem", "/bin/sh", { "-c", "/bin/ps -axo pid=,rss=,comm= -m | /usr/bin/head -40; echo '\1'; "
     .. "/usr/sbin/sysctl -n kern.memorystatus_vm_pressure_level; /bin/df -g / | /usr/bin/awk 'NR==2{print $4}'" },
     function(out) memRaw = out end)
   local ps, rest = raw:match("^(.-)\1\n(.*)$")
@@ -1489,7 +1629,7 @@ end
 
 -- 📝 voice journal: "я зараз іду гуляти" → one JSON line with the time and what Garmin said at that moment,
 -- for the teammate's patterns/advice (helper/health_metrics.py reads it); the board shows the last 3
-local health -- (the composite metrics, filled below; the journal notes the question it answers)
+local health, healthLinks -- (the composite metrics, filled below; the journal notes the question it answers; links: /open?h=, never sent)
 local JOURNAL = HOME .. "/.local/share/esp-deck/journal.jsonl"
 local journalTail = {}
 journalAdd = function(text, lang, at) -- at: said back then (a note from the outbox), so today's Garmin and question don't fit
@@ -1519,6 +1659,21 @@ end
 local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
 local meet = { state = "idle", last = {} }
 local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
+-- a board 📷 by where the board said: front = its path typed into the tmux pane in focus (the Claude window you're in),
+-- clip = the image on the clipboard (⌘V anywhere), meet = into the live meeting's <id>_clips (meeting.py puts it at its
+-- moment); anything else (the open window's pane) = kept for 📎
+function K.shotTo(t, png)
+  if t == "clip" then hs.pasteboard.writeObjects(hs.image.imageFromPath(png))
+  elseif t == "meet" and meetId then
+    hs.fs.mkdir(MEET_DIR .. "/" .. meetId .. "_clips")
+    hs.image.imageFromPath(png):saveToFile(MEET_DIR .. "/" .. meetId .. "_clips/" .. os.time() .. ".png")
+  elseif t == "front" then
+    task(TMUX, { "display-message", "-p", "#{pane_id}" }, function(out, code)
+      local pane = out:match("%%%d+")
+      if code == 0 and pane then task(TMUX, { "send-keys", "-t", pane, "-l", png .. " " }) end
+    end)
+  else lastShot = png end
+end
 -- names sent to meeting.py: a repeated stop (the board retries until a 200) is a no-op; their received length (the
 -- .pcm is deleted by then) and board id (archive() moves <id>.bid and <id>.stage away, index.jsonl keeps both)
 local meetDone = {}
@@ -1526,6 +1681,8 @@ meet.len, meet.bids, meet.unsynced, meet.indexed = {}, {}, {}, {} -- (fields of 
 meet.MAX = 4294967295 -- the contract's uint32
 function meet.addLast(e) -- AC-24: the board's 5 are meetings; a voice note never takes a place
   if e.kind == "note" then return end
+  -- a redo (`just meet speakers`) appends a newer line for the same id: it replaces the old one, never a second place
+  for i = #meet.last, 1, -1 do if meet.last[i].id == e.id then table.remove(meet.last, i) end end
   table.insert(meet.last, 1, e); meet.last[6] = nil
 end
 function meet.noteBid(bid, name) -- the newest capture of an unsynced id, so a reload keeps its chunks together
@@ -1549,22 +1706,16 @@ do
   end
 end
 meet.STUCK = 3600 -- a .stage untouched this long: meeting.py died unseen (a reload, a reboot), no longer "processing"
-function meet.actions(a) -- the board's /state buffer is fixed (48 KB) and 5 meetings share it
-  local r = {}
-  for i = 1, math.min(#a, 8) do r[i] = safeClean(a[i], 120) end
-  return r
-end
 local function meetState()
   if meet.proc and (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") then
     local st = readFile(MEET_DIR .. "/" .. meet.proc .. ".stage")
     if st == "spk" or st == "sum" then meet.state = st end
   end
-  local last = {} -- the full summary (body) only for the newest: /state stays small
-  for i, e in ipairs(meet.last) do
-    -- '#' is a colour code on the board's label: markdown headings become plain lines there
-    last[i] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title, summary = e.summary,
-      actions = meet.actions(e.actions or {}), body = i == 1 and e.body and e.body:gsub("#+ ?", "") or nil }
-  end
+  -- only the newest, no actions: the board reads last[0] alone (owner 2026-11-10, AC-24); the Mac keeps 5
+  local e, last = meet.last[1], {}
+  -- '#' is a colour code on the board's label: markdown headings become plain lines there
+  if e then last[1] = { id = e.id, bid = e.bid, kind = e.kind or "meet", past = e.past or false, at = e.at, title = e.title,
+    summary = e.summary, body = e.body and e.body:gsub("#+ ?", "") or nil } end
   local pending = {} -- <id>.stage files with a <id>.bid: captures the Mac is still processing
   local ok, it, d = pcall(hs.fs.dir, MEET_DIR)
   for f in (ok and it or function() end), d do
@@ -1577,7 +1728,8 @@ local function meetState()
       and os.time() - (hs.fs.attributes(MEET_DIR .. "/" .. f, "modification") or 0) < meet.STUCK then pending[#pending + 1] = { bid = bid:match("%S+"), stage = stage } end
   end
   table.sort(pending, function(a, b) return a.bid < b.bid end)
-  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd }
+  return { state = meet.state, note = meet.note, last = last, pending = pending, cmd = meetCmd,
+    screen = meet.rec and os.time() - meet.rec.t0 or nil } -- ⏺ seconds, absent = not recording
 end
 -- the board names a meeting by its start (unix, the board's clock): the same name however late its parts arrive
 -- a board before SNTP sends a small id: named once by the Mac's clock, so its chunks land in one capture; the same id
@@ -1668,6 +1820,7 @@ local function meetStop(id, rate, fmt, len, x)
   local have = fsize(MEET_DIR .. "/" .. id .. ".pcm")
   if not (writeFile(MEET_DIR .. "/" .. id .. ".len", have .. " " .. rate .. " " .. (fmt or "pcm")) and writeFile(MEET_DIR .. "/" .. id .. ".stage", "stt")) then return false end
   meetDone[id], meet.len[id] = true, have
+  if meetId == id then meet.screenStop() end -- ⏺ still on: close the .mov now, meetStopNow waits for it
   if meetBackup and meetId == id then -- let ffmpeg close the backup file first, then process both
     local b = meetBackup
     b:setCallback(function() meetBackup = nil; meetStopNow(id, rate, fmt, len, x) end)
@@ -1679,6 +1832,7 @@ local function meetStop(id, rate, fmt, len, x)
 end
 -- x (a capture from the outbox): {past, kind, t0, lang, target, close = path of the CaptureClose json (marks, gaps)}
 meetStopNow = function(id, rate, fmt, len, x)
+  if meet.rec then meet.rec.after = function() meetStopNow(id, rate, fmt, len, x) end; return end -- rec_frames reads the .mov
   local live = meetId == id
   if live then meetId = nil end
   local t0, lang = x and x.t0 or meet.t0, x and x.lang or meet.lang
@@ -1761,14 +1915,40 @@ local function meetMd(id)
   return MEET_DIR .. "/" .. id .. ".md"
 end
 
+-- processing progress for the 🎙 menu: meeting.py's .stage + whisper's own % (<id>.prog, whisper -pp); the speakers and
+-- the summary give no %, so they sit at a fixed share of the bar and show how long the step has run
+local MEET_STEPS = { stt = { 0, 70, "розшифровка" }, spk = { 70, 20, "мовці" }, sum = { 90, 10, "самері" } }
+function meet.progress()
+  if not meet.proc then return nil end
+  local base = MEET_DIR .. "/" .. meet.proc
+  local st = MEET_STEPS[(readFile(base .. ".stage") or ""):match("%a+") or ""]
+  if not st then return nil end
+  local w = tonumber(((readFile(base .. ".prog") or ""):match(".*progress%s*=%s*(%d+)%%"))) or 0
+  local pct = st[1] + (st[3] == "розшифровка" and st[2] * w // 100 or 0)
+  local m = hs.fs.attributes(base .. ".stage", "modification")
+  return pct, st[3], m and (os.time() - m) // 60 or 0
+end
+function meet.bar(pct) -- 10 cells: ▰ done, ▱ left
+  local n = math.floor(pct / 10 + 0.5)
+  return string.rep("▰", n) .. string.rep("▱", 10 - n)
+end
+
 local function meetMenu()
   local items = {}
+  local pct, step, mins = meet.progress()
+  if pct then
+    table.insert(items, { title = string.format("⏳ Обробка %s %d%% · %s (%d хв)", meet.bar(pct), pct, step, mins), disabled = true })
+    table.insert(items, { title = "   розшифровка → мовці → самері → папка", disabled = true })
+    table.insert(items, { title = "-" })
+  end
   if meet.state == "rec" and meetMac then
     table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
   elseif meet.state == "rec" then
-    table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
-    if meet.note then -- the board is away: process what arrived so far (whatever it sends later is ignored)
-      table.insert(items, { title = "Обробити те, що вже прийшло", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    if meet.note then -- the board is away (dead battery): a stop sent to it never arrives, so stop here and process
+      -- what arrived + the Mac backup (whatever the board sends later is ignored)
+      table.insert(items, { title = "■ Зупинити й обробити (плата не на зв'язку)", fn = function() meetStop(meetId, 16000, "ulaw") end })
+    else
+      table.insert(items, { title = "■ Зупинити запис", fn = function() meetCmd = { n = meetCmd.n + 1, act = "stop" } end })
     end
   else
     for _, l in ipairs({ { "uk", "UA" }, { "en", "EN" } }) do
@@ -1816,6 +1996,52 @@ local function meetClips()
     end
   end
 end
+-- 📷 / ⏺ on the board mid-meeting: the Mac's screen into the places meeting.py already reads — a shot into
+-- <id>_clips/ (shots()), a recording into the screencapture folder (rec_frames(), by the file's birth time)
+K.REC_MAX = 10800 -- knob: a forgotten ⏺ stops itself after 3 h
+K.SCREEN_DEV = "1" -- knob: avfoundation's «Capture screen 0» (ffmpeg -f avfoundation -list_devices true -i "")
+function meet.recDir()
+  local loc = (hs.execute("/usr/bin/defaults read com.apple.screencapture location 2>/dev/null") or ""):match("^%s*(.-)%s*$")
+  return loc ~= "" and loc:gsub("^~", HOME) or HOME .. "/Desktop"
+end
+-- ffmpeg, not `screencapture -v`: without a terminal screencapture throws the file away on any stop (stdin key,
+-- SIGINT, SIGTERM — tested 10.11, two takes lost); ffmpeg finishes the .mp4 on SIGINT at once
+function meet.screenStop()
+  local r = meet.rec
+  if not r or r.stopping then return end
+  r.stopping = true
+  r.task:interrupt()
+end
+function meet.screen(act, on)
+  if act == "shot" then
+    local d = meetId and MEET_DIR .. "/" .. meetId .. "_clips" or SHOT_DIR
+    hs.fs.mkdir(d)
+    task("/usr/sbin/screencapture", { "-x", d .. "/" .. os.time() .. ".png" })
+  elseif on and not meet.rec then
+    if not hs.screenRecordingState() then -- no permission: screencapture fails at once (Mike 10.11 lost a demo silently)
+      hs.notify.new({ title = "⏺ Запис екрана не почався",
+        informativeText = "Hammerspoon не має дозволу на запис екрана: System Settings → Privacy & Security → Screen Recording" }):send()
+      hs.screenRecordingState(true) -- asks macOS to show its permission prompt
+      return
+    end
+    local r = {}
+    r.t0, r.task = os.time(), hs.task.new(FFMPEG, function(code, _, err)
+      if code ~= 0 and not r.stopping then -- 255 = stopped by SIGINT, the file is complete
+        print("deck: screen recording failed (" .. tostring(code) .. "): " .. tostring(err))
+        hs.notify.new({ title = "⏺ Запис екрана зупинився з помилкою", informativeText = tostring(err) }):send()
+      end
+      if meet.rec == r then meet.rec = nil end
+      if r.after then r.after() end
+    end, { "-hide_banner", "-loglevel", "error", "-f", "avfoundation", "-capture_cursor", "1", "-pixel_format", "nv12",
+      "-framerate", "10", "-i", K.SCREEN_DEV .. ":none", "-t", tostring(K.REC_MAX), "-vf", "scale=1280:-2",
+      "-c:v", "h264_videotoolbox", "-b:v", "1500k", "-y",
+      -- mid-meeting: next to it, so it moves into the meeting's folder with the summary (Mike 10.11), else the Desktop
+      meetId and MEET_DIR .. "/" .. meetId .. "_screen-" .. os.date("%H%M%S") .. ".mp4"
+        or meet.recDir() .. "/Screen Recording " .. os.date("%Y-%m-%d at %H.%M.%S") .. ".mp4" })
+    meet.rec = r
+    r.task:start()
+  elseif not on then meet.screenStop() end
+end
 local function meetBar()
   meetClips()
   -- the board went quiet mid-meeting: it keeps recording into its flash and sends it all when it's back
@@ -1824,7 +2050,9 @@ local function meetBar()
     and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
   if not M.meetBar then return end
   local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
+  local pct = meet.progress()
   M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
+    or pct and string.format("🎙 %s %d%%", meet.bar(pct), pct)
     or (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "🎙…" or "🎙")
 end
 
@@ -1835,14 +2063,15 @@ local function refreshHealth()
   task(UV, { "run", "--quiet", "--with", "garminconnect", "python", HM_PY }, function(out)
     local ok, d = pcall(hs.json.decode, (out or ""):match("([^\n]+)%s*$") or "")
     if not ok or type(d) ~= "table" or type(d.board) ~= "table" then return end
+    healthLinks = d.board.links
     local alerts = {}
     for i, a in ipairs(d.alerts or {}) do if i <= 3 then alerts[i] = { a[1], a[3] } end end
-    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress, tip = d.tip,
-               alerts = alerts, synced = d.synced, streak = (d.records or {}).streak,
-               move_goal = d.move_goal, exercise_goal = d.exercise_goal, exercise_min = d.exercise_min,
+    health = { metrics = d.board.metrics, advice = d.board.advice, progress = d.board.progress,
+               alerts = alerts, streak = (d.records or {}).streak, -- tip/synced/exercise_min: the board never read them
+               move_goal = d.move_goal, exercise_goal = d.exercise_goal,
                steps_goal = d.steps_goal, kg = (d.plan and d.plan.kg) or nil, bmi = d.bmi, weight = d.kg, ask = d.board.ask, bb = d.board.bb,
                stress = d.board.stress, stress_now = d.stress and d.stress.now, score = d.board.score, sleep_q = d.board.sleep,
-               links = d.board.links, body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
+               body = d.board.body, goals = d.board.goals, review = d.board.review, tone = d.board.tone, focus = d.board.focus,
                load = d.load and { status = d.load.status_ua, acute = d.load.acute, tunnel = d.load.tunnel,
                                    focus = d.load.focus, readiness = d.load.readiness and d.load.readiness.score,
                                    zones = d.load.zones and d.load.zones.week, text = d.board.load } or nil }
@@ -1858,6 +2087,12 @@ end
 local function safe(fn, dflt) local ok, v = pcall(fn); if ok then return v end; return dflt end -- one bad source must not kill /state
 local function state()
   if voice.state == "rec" then voice.text = clean(readFile(VOICE_FILE .. ".partial") or "") end
+  -- a finished take is offered for 90 s, then forgotten: a device opening its chat later picked up an old take (a test's
+  -- «Привід. Це перевірка…» landed in esp:1 at 00:0x, 17.11, an hour after it was said)
+  if voice.state == "done" then
+    voice.at = voice.at or os.time()
+    if os.time() - voice.at > 90 then voice = { state = "idle", text = "" } end
+  end
   local fa = hs.application.frontmostApplication()
   local fn = fa and fa:name()
   frontName = type(fn) == "string" and fn or ""
@@ -1871,11 +2106,12 @@ local function state()
   end
   local recipes = {}
   for i, r in ipairs(RECIPES) do recipes[i] = r[1] end
+  local sha = readFile(K.FW_SHA)
   return {
     time = os.date("%H:%M"), date = os.date("%a %d %b"),
     limits = limits, lim = safe(limitGauges, {}), cpu = safe(cpuPct, 0), ram = sysmonitor.ramPct(),
     net = netTrace.cfg(), rem = rem, todo = todo, cal = calendarLines(), sessions = sessions(), asks = asks(),
-    recipes = recipes, slash = K.SLASH, voice = voice, fw = readFile(K.FW_SHA), fw_sig = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.sig"), fw_notes = readFile(K.FW_SHA) and readFile("/tmp/deck-ota.notes"),
+    recipes = recipes, slash = K.SLASH, voice = voice, fw = sha, fw_sig = sha and readFile("/tmp/deck-ota.sig"), fw_notes = sha and readFile("/tmp/deck-ota.notes"),
     front = frontName, ring = strip((ringFor(frontName))), flex = flex.state(frontName, fw and fw:title() or "", deckVer), deckv = deckVer, board = M.boardVer,
     clip = (clipImage() and "img") or (lastShot and "shot") or nil, -- 📎 on the board: something to paste
     notes = notesState(),
@@ -1925,17 +2161,29 @@ local function noAge(list)
   end
   return r
 end
+local function fnv(key)
+  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
+  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
+  return string.format("%016x", h64)
+end
 local function stateEtag(st)
   local k = {}
   for f, v in pairs(st) do if not MOVING[f] then k[f] = v end end
   k.sessions, k.asks = noAge(st.sessions), noAge(st.asks)
-  local key = hs.json.encode(k) .. os.time() // 60
-  local h64 = 0xcbf29ce484222325 -- FNV-1a 64
-  for i = 1, #key do h64 = (h64 ~ key:byte(i)) * 0x100000001b3 end
-  return string.format('"%016x"', h64)
+  return '"' .. fnv(hs.json.encode(k) .. os.time() // 60) .. '"'
+end
+-- /state.sv: moves only when a window comes or goes or its state does — what a dark board needs (✓ toasts, the hero
+-- count); doing/ctx/age/order reach it through GET /sessions while a sessions view is on screen (owner 2026-11-10)
+local function sessVer(list)
+  local k = {}
+  for i, s in ipairs(list) do k[i] = (s.id or "") .. "=" .. (s.state or "") .. "/" .. (s.st or "") end
+  table.sort(k)
+  return fnv(table.concat(k, ";")):sub(1, 8)
 end
 M._stateEtag = stateEtag -- test hook (deck_state_test.lua)
+M._sessVer = sessVer -- test hook (deck_state_test.lua)
 M._parseSessions = parseSessions -- test hook (deck_meet_test.lua)
+M._meet = meet -- test hook (deck_meet_test.lua: the 🎙 progress bar)
 
 local function handle(method, path, headers, body)
   if method == "OPTIONS" then return reply("", 204) end
@@ -1947,15 +2195,17 @@ local function handle(method, path, headers, body)
   local p = query(qs)
   local id = p.t and p.t:match("^@%d+$")
 
-  if method == "GET" and route == "/state" then
-    local st = state()
+  if method == "GET" and (route == "/state" or route == "/sessions") then
+    local st = route == "/state" and state() or { sessions = sessions() }
+    -- ?s=1: a board that asks GET /sessions itself; plain /state keeps them for older firmware (remove once flashed)
+    if route == "/state" and p.s == "1" then st.sv, st.sessions = sessVer(st.sessions), nil end
     local out, code, h = reply(st, 200, true)
     h.ETag = stateEtag(st)
     if headers["If-None-Match"] == h.ETag then return "", 304, h end
     return out, code, h
   end
   if method == "GET" and route == "/netlog" then return reply({ log = netTrace.log }, 200, true) end
-  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean"), 200, true) end
+  if method == "GET" and route == "/pane" and id then return reply(pane(id, p.c == "1", tonumber(p.w), p.m == "clean", tonumber(p.n)), 200, true) end
   if method == "POST" and route == "/send" and id then
     meet.typeInto(id, body or "", p.enter == "1")
     return reply("ok", 200)
@@ -1969,6 +2219,7 @@ local function handle(method, path, headers, body)
     return reply({ r = r, top = top }, 200, true)
   end
   if method == "POST" and route == "/key" and id and validKey(p.k) then
+    K.paneKeyed[id] = { k = p.k, at = hs.timer.secondsSinceEpoch() }
     task(TMUX, { "send-keys", "-t", id, p.k })
     -- Escape interrupts Claude (the board's "Ні" too) and an interrupt fires no Stop hook: without this the window
     -- would keep its answered ask / "working" for good. agent-state.sh done drops them (the hook wants $TMUX)
@@ -2025,6 +2276,24 @@ local function handle(method, path, headers, body)
     if not w or (w.tr or "") == "" then return reply({ blocks = {} }, 200, true) end
     return reply(fleetData.get("grill:" .. id, 20, { "grill", w.tr, w.idx }), 200, true)
   end
+  -- tiki fleet (~/.claude/fleet-board/*/tiki): ?b= the board (week number / crc, 0 = newest), the list + every board, one card,
+  -- Mike's answer into its `reply` (tiki-replies.sh relays it)
+  local tid, tb = p.id and p.id:match("^[%w%-]+$"), p.b and p.b:match("^%d+$") or "0"
+  if method == "POST" and route == "/tiki" then
+    if tid then return reply(fleetData.get("tiki:" .. tb .. ":" .. tid, 10, { "tiki", tb, tid }), 200, true) end
+    return reply(fleetData.get("tiki:" .. tb, 20, { "tiki", tb }), 200, true)
+  end
+  if method == "POST" and route == "/tikireply" and tid and (body or ""):match("%S") then
+    task("/bin/sh", { "-c", 'PATH=$PATH:$HOME/.pyenv/shims exec python3 "$@"', "sh", fleetData.py, "tiki-reply", tb, tid, body },
+      function(out)
+        local ok, d = pcall(hs.json.decode, out)
+        for k in pairs(fleetData.cache) do if k:find("^tiki:") then fleetData.cache[k] = nil end end -- every board's counts
+        if not (ok and d and d.ok) then
+          hs.notify.new({ title = "tiki: відповідь не записано в " .. tid, informativeText = ok and d and d.error or out }):send()
+        end
+      end)
+    return reply({ ok = true, id = tid }, 200, true)
+  end
   if method == "POST" and route == "/askother" and id then
     local ok = (body or "") ~= "" and fleetData.other(id, body)
     return reply({ ok = ok }, 200, true)
@@ -2048,6 +2317,7 @@ local function handle(method, path, headers, body)
       b = g and g.buttons[tonumber(p.f) or 0]
     end
     if not b then return reply("no such button", 404) end
+    K.frontLog({ tap = b.label, ctx = p.f and p.ctx or p.app or "deck" })
     local t = runAction(b.action, b.label)
     return reply({ t = t or "" }, 200, true)
   end
@@ -2067,10 +2337,22 @@ local function handle(method, path, headers, body)
     end
     return reply({ np = macNP, files = names, conv = clean(conversion) }, 200, true)
   end
-  local MEDIA_KEY = { play = "PLAY", next = "NEXT", prev = "PREVIOUS", volup = "SOUND_UP", voldown = "SOUND_DOWN" }
-  if method == "POST" and route == "/media" and MEDIA_KEY[p.k] then
-    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], true):post()
-    hs.eventtap.event.newSystemKeyEvent(MEDIA_KEY[p.k], false):post()
+  if method == "POST" and route == "/type" then -- the flex tab's key bar / ⌨ / 🎤: into the window in front, never a shell
+    local k = K.TYPE_KEYS[p.k]
+    K.frontLog({ tap = p.k and ("key " .. p.k) or "type", ctx = K.frontLast }) -- the key's name, never the text
+    if k then hs.eventtap.keyStroke(k[1], k[2], 0)
+    elseif not (body or ""):match("%S") then return reply("bad key", 400)
+    elseif p.v == "1" then -- 🎤: whisper's outros and fillers out (helper/dictate.py, Claude for a chat/mail), then typed
+      task("/usr/bin/python3", { K.DICTATE_PY, K.frontLast or "", body }, function(out, code)
+        out = code == 0 and out:gsub("%s+$", "") or body
+        if out:match("%S") then hs.eventtap.keyStrokes(out) end
+      end)
+    else hs.eventtap.keyStrokes(body) end
+    return reply("ok", 200)
+  end
+  if method == "POST" and route == "/media" and SYSKEY[p.k] then
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[p.k], true):post()
+    hs.eventtap.event.newSystemKeyEvent(SYSKEY[p.k], false):post()
     return reply("ok", 200)
   end
   if method == "POST" and route == "/convert" and (SIPS_FMT[p.f] or FFMPEG_FMT[p.f]) then
@@ -2087,7 +2369,7 @@ local function handle(method, path, headers, body)
     -- the health site at the board's tab (↗ on the board, after its own yes); only the local dashboard
     -- a meeting's summary (.md) in the default app; the id is ours (date_time), nothing else opens
     if p.meet and p.meet:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%d%d%d%d$") then task("/usr/bin/open", { meetMd(p.meet) }) end
-    local hu = p.h and health and health.links and health.links[p.h]
+    local hu = p.h and healthLinks and healthLinks[p.h]
     if type(hu) == "string" and hu:match("^http://127%.0%.0%.1:8893/") then task("/usr/bin/open", { hu }) end
     return reply("ok", 200)
   end
@@ -2136,7 +2418,10 @@ local function handle(method, path, headers, body)
     end
     for _, r in ipairs(rows) do
       if r[1] > last then
-        okw = f:write(os.date("%H:%M:%S ", r[2]), r[3], "\n") and f:flush()
+        -- at 0 = the board's clock was unset: unknown; else the time first (just wifi parses it), the date last
+        -- when it is not today (a batch of the same day reads like the live log)
+        okw = f:write(r[2] > 0 and os.date("%H:%M:%S ", r[2]) or "??:??:?? ", r[3],
+          r[2] > 0 and os.date("%F", r[2]) ~= os.date("%F") and os.date(" [%F]", r[2]) or "", "\n") and f:flush()
         if not okw then break end
         last = r[1]
       end
@@ -2164,12 +2449,12 @@ local function handle(method, path, headers, body)
     if f then f:write(body or ""); f:close() end
     return reply("ok", 200)
   end
-  if method == "POST" and route == "/shot" then -- saved, not typed: 📎 on the board pastes it where you want
+  if method == "POST" and route == "/shot" then -- t=front|clip|meet: the shade's / remote's 📷 says where it goes; else (t = the open window) saved, 📎 pastes it
     hs.fs.mkdir(SHOT_DIR)
     local png = SHOT_DIR .. "/" .. os.date("%Y%m%d-%H%M%S") .. ".png"
     local w, h = tonumber(p.w) or 320, tonumber(p.h) or 480
     task("/usr/bin/python3", { "-c", K.SHOT_PY, "/tmp/deck-shot.raw", tostring(w), tostring(h), png }, function()
-      if hs.fs.attributes(png) then lastShot = png end
+      if hs.fs.attributes(png) then K.shotTo(p.t, png) end
     end)
     return reply("ok", 200)
   end
@@ -2192,6 +2477,11 @@ local function handle(method, path, headers, body)
   -- start / pcm at a byte offset / stop are all idempotent
   -- 1029-20xxxx firmware wrote NVS from a PSRAM-stack task after a 200 here → int-wdt reboot loop; answering 503
   -- to that one stuck meeting keeps its uploader retrying (no NVS write) so the fixed firmware can be flashed
+  if method == "POST" and route == "/meet/screen" then -- 📷 act=shot · ⏺ act=rec&on=1|0 (idempotent: the board retries)
+    if p.act ~= "shot" and p.act ~= "rec" then return reply({ code = "meet.damaged", message = "act = shot | rec" }, 422, true) end
+    meet.screen(p.act, p.on == "1")
+    return reply({ screen = meet.rec and os.time() - meet.rec.t0 or nil }, 200, true)
+  end
   if method == "POST" and (route == "/meet" or route == "/meet/pcm") and p.id == "1793298707" then
     return reply({ code = "meet.busy", message = "Busy, retry later" }, 503, true)
   end
@@ -2348,6 +2638,7 @@ end
 function M.start()
   refreshPorts()
   M.portsTimer = hs.timer.doEvery(60, refreshPorts)
+  M.frontTimer = hs.timer.doEvery(5, K.frontTick)
   M.meetBar = hs.menubar.new():setMenu(meetMenu)
   M.meetTimer = hs.timer.doEvery(1, meetBar)
   meetBar()

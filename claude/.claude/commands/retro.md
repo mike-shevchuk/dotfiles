@@ -177,7 +177,7 @@ both themes and all three download buttons. Wide tables must scroll inside their
 own `.tl-wrap`, never the page — a bare `<table class="tl">` will drag the whole
 page sideways.
 
-Report the hub URL: `http://$(ipconfig getifaddr en0):8890/${OUT#*/zettelkasten/claude_code/}<file>` (persistent; `just -g hub-fix` revives it).
+Report the hub URL: `http://mac.local:8890/${OUT#*/zettelkasten/claude_code/}<file>` (persistent; `just -g hub-fix` revives it).
 
 ## Style rules
 

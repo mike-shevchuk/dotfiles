@@ -576,7 +576,7 @@ fi
 # (~/.claude/pipeline-stamp.sh). Each stamp carries an anchor commit (`head`);
 # we show how many commits landed AFTER the check ran (staleness).
 # Glyph per step: green ✓ = done & fresh, yellow ✓-N = done N commits ago,
-# dim · = pending. Order: CR SMP RPR JT FE DEMO (FE/DEMO appended, existing order unchanged).
+# dim · = pending. Order: CR PT RPR JT FE DEMO (FE/DEMO appended, existing order unchanged).
 # Skipped in GSD mode (_gsd_mode=1) — the 🛠 GSD slot above takes the slot instead.
 if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
   # Durable state (survives reboot); /tmp is the legacy mirror.
@@ -588,11 +588,11 @@ if [ -n "$local_branch" ] && [ -z "$_gsd_mode" ]; then
   if [ -f "$_pl_file" ]; then
     # One line per badge step: "<done 1/0> <anchor-sha or ->"
     _pl_steps=$(jq -r '
-      ["code-review","simplify","review-pr","just-test","just-fe","demo"][] as $k
+      ["code-review","ponytail","review-pr","just-test","just-fe","demo"][] as $k
       | [ (if .steps[$k].done == true then "1" else "0" end),
           (.steps[$k].head // "-") ] | join(" ")' "$_pl_file" 2>/dev/null)
     _pl=""
-    _pl_labels=(CR SMP RPR JT FE DEMO)
+    _pl_labels=(CR PT RPR JT FE DEMO)
     _pl_i=0
     _pl_next=""   # first step needing attention (stale or pending) = next action
     while read -r _pf _ph; do
@@ -737,8 +737,14 @@ record_usage_snapshot() {
 
 # ===== Usage data (cached) =====
 cache_file="/tmp/claude/statusline-usage-cache.json"
+backoff_file="/tmp/claude/statusline-usage.backoff"
 cache_max_age=180
 mkdir -p /tmp/claude
+
+# A cached window whose reset time has passed belongs to the previous window: never show it
+cache_is_current() {
+  ! is_reset_past "$(echo "$1" | jq -r '.five_hour.resets_at // empty')"
+}
 
 needs_refresh=true
 usage_data=""
@@ -748,27 +754,27 @@ if [ -f "$cache_file" ]; then
   cache_age=$((now_epoch - cache_mtime))
   if [ "$cache_age" -lt "$cache_max_age" ]; then
     cached_candidate=$(cat "$cache_file" 2>/dev/null)
-    # Only use cache if it is valid JSON without an error field
-    if echo "$cached_candidate" | jq -e 'has("error") | not' >/dev/null 2>&1; then
-      # Invalidate if 5h reset time has passed (window rolled over, data is stale)
-      _cached_reset=$(echo "$cached_candidate" | jq -r '.five_hour.resets_at // empty')
-      if is_reset_past "$_cached_reset"; then
-        needs_refresh=true
-      else
-        needs_refresh=false
-        usage_data="$cached_candidate"
-        # Record snapshot from cache for recent pace (dedup handles repeated values)
-        _snap_five=$(echo "$cached_candidate" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
-        _snap_seven=$(echo "$cached_candidate" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
-        record_usage_snapshot "$_snap_five" "$_snap_seven"
-      fi
+    # Only use cache if it is valid JSON without an error field and its window has not rolled over
+    if echo "$cached_candidate" | jq -e 'has("error") | not' >/dev/null 2>&1 && cache_is_current "$cached_candidate"; then
+      needs_refresh=false
+      usage_data="$cached_candidate"
+      # Record snapshot from cache for recent pace (dedup handles repeated values)
+      _snap_five=$(echo "$cached_candidate" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
+      _snap_seven=$(echo "$cached_candidate" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
+      record_usage_snapshot "$_snap_five" "$_snap_seven"
     fi
   fi
 fi
 
-if $needs_refresh; then
+# Shared backoff across all panes: one stamp file holds "retry not before" (epoch).
+# 429s came from ~20 panes each refetching; a claim (+60s) stops parallel fetches, a failure waits 5 min.
+backoff_until=$(cat "$backoff_file" 2>/dev/null)
+backoff_until=${backoff_until:-0}
+
+if $needs_refresh && [ "$now_epoch" -ge "$backoff_until" ]; then
   token=$(get_oauth_token)
   if [ -n "$token" ] && [ "$token" != "null" ]; then
+    echo $((now_epoch + 60)) >"$backoff_file"
     response=$(xh -b --ignore-stdin --timeout 10 GET "https://api.anthropic.com/api/oauth/usage" \
       Accept:application/json \
       Content-Type:application/json \
@@ -776,24 +782,21 @@ if $needs_refresh; then
       anthropic-beta:oauth-2025-04-20 \
       User-Agent:claude-code/2.1.34 \
       2>/dev/null)
-    # Only accept the response if it is valid JSON and does NOT contain an error field
+    # Only accept the response if it is valid JSON and does NOT contain an error field (429 included)
     if [ -n "$response" ] && echo "$response" | jq -e 'has("error") | not' >/dev/null 2>&1; then
       usage_data="$response"
       echo "$response" >"$cache_file"
+      rm -f "$backoff_file"
       # Record snapshot for recent pace calculation
       _snap_five=$(echo "$response" | jq -r '.five_hour.utilization // 0' | awk '{printf "%.0f", $1}')
       _snap_seven=$(echo "$response" | jq -r '.seven_day.utilization // 0' | awk '{printf "%.0f", $1}')
       record_usage_snapshot "$_snap_five" "$_snap_seven"
-    fi
-  fi
-  if [ -z "$usage_data" ] && [ -f "$cache_file" ]; then
-    # Discard a stale cache that is itself an error response
-    cached=$(cat "$cache_file" 2>/dev/null)
-    if echo "$cached" | jq -e 'has("error") | not' >/dev/null 2>&1; then
-      usage_data="$cached"
+    else
+      echo $((now_epoch + 300)) >"$backoff_file"
     fi
   fi
 fi
+# No fallback to an expired or failed cache: the stdin rate_limits branch below takes over.
 
 
 format_reset_time() {
@@ -999,6 +1002,8 @@ if [ -n "$usage_data" ] && echo "$usage_data" | jq -e 'has("five_hour") or has("
   use_oauth=true
 else
   # Check if stdin JSON has rate_limits data
+  # One-time sample of the stdin contract, to verify rate_limits is present in real renders
+  [ -f /tmp/claude/statusline-stdin-sample.json ] || printf '%s\n' "$input" >/tmp/claude/statusline-stdin-sample.json
   stdin_five_pct=$(echo "$input" | jq -r '.rate_limits.five_hour.used_percentage // empty')
   stdin_seven_pct=$(echo "$input" | jq -r '.rate_limits.seven_day.used_percentage // empty')
   if [ -n "$stdin_five_pct" ] || [ -n "$stdin_seven_pct" ]; then
@@ -1157,6 +1162,56 @@ line1+="$kanban_seg"
 if [ -x "$HOME/.claude/reminders.sh" ]; then
   rem_badge=$("$HOME/.claude/reminders.sh" badge 2>/dev/null || true)
   [ -n "$rem_badge" ] && line1+=" ${dim}·${reset} ${yellow}${rem_badge}${reset}"
+fi
+
+# ---- /monitor-tiki indicator (Mike 06.11) ----
+# The lead's 10-minute fleet monitor: until when it runs and how long is left.
+mt_state="$HOME/.claude/fleet-board/monitor-tiki.json"
+if [ -f "$mt_state" ]; then
+  mt_until=$(jq -r '.until // empty' "$mt_state" 2>/dev/null)
+  mt_end=$(date -j -f "%H:%M" "$mt_until" +%s 2>/dev/null || echo 0)
+  mt_left=$(( (mt_end - $(date +%s)) / 60 ))
+  if [ "$mt_left" -gt 0 ]; then
+    line1+=" ${dim}·${reset} ${green}🛰 tiki${reset} ${dim}до${reset} ${cyan}${mt_until}${reset} ${dim}(ще $((mt_left / 60))г$((mt_left % 60))хв · /monitor-tiki off)${reset}"
+  else
+    line1+=" ${dim}· 🛰 tiki off${reset}"
+  fi
+fi
+
+# ---- fleet badge (Mike 17.11): teammates working / blocked / asking the lead — lead window only ----
+# the lead may run as a background session (claude agents) with no TMUX env → also match its session name
+fl_name=$(printf %s "$input" | jq -r '.session_name // empty' 2>/dev/null)
+if { [ -n "${TMUX_PANE:-}" ] && [ "$(tmux display -p -t "$TMUX_PANE" '#I' 2>/dev/null)" = "1" ]; } || printf %s "$fl_name" | grep -qi 'lead'; then
+  fl_badge=$(python3 "$HOME/.claude/scripts/lead.py" badge 2>/dev/null || true)
+  [ -n "$fl_badge" ] && line2+=" ${dim}·${reset} ${fl_badge}"
+fi
+
+# ---- role lines (Mike 19.11): a fleet window shows its role instead of the shared checkout ----
+# statusline_role.py prints the role's own lines (lead · PR/plan teammate · guru · service) or NOTHING for any session
+# outside the fleet → the default three lines below stay as they are. The last line is shared by every role.
+role_lines=""
+if printf %s "$fl_name" | grep -qi 'lead'; then
+  role_lines=$(python3 "$HOME/.claude/scripts/statusline_role.py" --lead "$cwd" 2>/dev/null || true)
+elif [ -n "${TMUX_PANE:-}" ]; then
+  role_lines=$(python3 "$HOME/.claude/scripts/statusline_role.py" "$cwd" 2>/dev/null || true)
+fi
+if [ -n "$role_lines" ]; then
+  _ctx_pct=$(( size > 0 ? current * 100 / size : 0 ))
+  # just the percent, coloured (Mike 19.11: no «/handoff» text): cyan <50 · yellow 50–79 · red ≥80
+  if [ "$_ctx_pct" -ge 80 ]; then _ctx_seg="${red}${_ctx_pct}%${reset}"; elif [ "$_ctx_pct" -ge 50 ]; then _ctx_seg="${yellow}${_ctx_pct}%${reset}"; else _ctx_seg="${cyan}${_ctx_pct}%${reset}"; fi
+  line4="${line2%%"${sep}"*} ${dim}·${reset} 🪙 ${orange}${used_tokens}/${total_tokens}${reset} ${_ctx_seg}"
+  line3="${line3#"${sep}"}"   # no 5h segment yet → line3 starts with a separator
+  [ -n "$line3" ] && line4+="${sep}${line3}"
+  _cost=$(printf %s "$input" | jq -r '.cost.total_cost_usd // empty' 2>/dev/null)
+  [ -n "$_cost" ] && line4+=" ${dim}·${reset} 💵 ${orange}\$$(awk "BEGIN {printf \"%.2f\", $_cost}")${reset}"
+  _dur=$(printf %s "$input" | jq -r '.cost.total_duration_ms // empty' 2>/dev/null)
+  if [ -n "$_dur" ]; then
+    _dm=$(( ${_dur%.*} / 60000 ))
+    if [ "$_dm" -ge 60 ]; then line4+=" ${dim}·${reset} ⏲ ${dim}$(( _dm / 60 ))г${reset}"; else line4+=" ${dim}·${reset} ⏲ ${dim}${_dm}хв${reset}"; fi
+  fi
+  printf '%s\n' "$role_lines"
+  printf "%b" "$line4"
+  exit 0
 fi
 
 # Output three lines

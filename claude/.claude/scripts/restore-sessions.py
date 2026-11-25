@@ -34,12 +34,13 @@ def window_name(title: str, cwd: str) -> str:
 
 
 def saved_place(sid: str, cwd: str, title: str) -> tuple:
-    """(tmux session, window): what agent-state.sh saved for this session, else guessed from its directory and title."""
+    """(tmux session, window[, index]): what agent-state.sh saved («S|W|I»), else guessed from its directory and title."""
     try:
         with open(f"{HOME}/.claude/window-names/{sid}") as f:
-            t, _, w = f.read().strip().partition("|")
+            t, _, rest = f.read().strip().partition("|")
+        w, _, i = rest.rpartition("|") if re.search(r"\|\d+$", rest) else (rest, "", "")
         if t and w:
-            return t, w
+            return (t, w, i) if i else (t, w)
     except OSError:
         pass
     return tmux_session(cwd), window_name(title, cwd)
@@ -94,13 +95,22 @@ def run(argv: list, **kw) -> subprocess.CompletedProcess:
 
 
 def restore(s: dict) -> None:
-    t, name = saved_place(s["id"], s["cwd"], s["title"])
+    t, name, *idx = saved_place(s["id"], s["cwd"], s["title"])
     if run(["tmux", "has-session", "-t", f"={t}"]).returncode:
         run(["tmux", "new-session", "-d", "-s", t, "-c", s["cwd"]])
     cmd = f"claude --resume {s['id']}; exec zsh"
-    print(f"━━━ tmux ━━━  tmux new-window -d -t {t} -n '{name}' -c {s['cwd']} '{cmd}'", flush=True)
-    run(["tmux", "new-window", "-d", "-t", f"{t}:", "-n", name, "-c", s["cwd"], cmd])
-    run(["tmux", "set-window-option", "-t", f"{t}:{name}", "automatic-rename", "off"])
+    # same window number as before the reboot, so fleet files keyed by it (progress/<N>.md, WIN0NN cards) stay right (Mike 19.11)
+    used = set(run(["tmux", "list-windows", "-t", f"={t}", "-F", "#I"]).stdout.split())
+    tgt = f"{t}:{idx[0]}" if idx and idx[0] not in used else f"{t}:"
+    print(f"━━━ tmux ━━━  tmux new-window -d -t {tgt} -n '{name}' -c {s['cwd']} '{cmd}'", flush=True)
+    wid = run(["tmux", "new-window", "-d", "-P", "-F", "#{window_id}", "-t", tgt, "-n", name, "-c", s["cwd"], cmd]).stdout.strip()
+    wid = wid or f"{t}:{name}"
+    run(["tmux", "set-window-option", "-t", wid, "automatic-rename", "off"])
+    # the board/phone «Чат» reads @agent_transcript; the hook sets it only on the window's next prompt, so a restored
+    # idle window showed some other, old transcript (Mike 17.11: «термінал актуальний, а чат дуже старий»)
+    tr = glob.glob(f"{HOME}/.claude/projects/*/{s['id']}.jsonl")
+    if tr:
+        run(["tmux", "set-option", "-w", "-t", wid, "@agent_transcript", max(tr, key=os.path.getmtime)])
 
 
 def selftest() -> None:
@@ -112,6 +122,12 @@ def selftest() -> None:
           dict(base, id="b2b", cwd=f"{HOME}/code/b2b"), dict(base, id="gone", cwd="/no/such/dir"), dict(base, id="fresh", at=4900.0), dict(base, id="run", helper=True)]
     assert [s["id"] for s in pick(ss, {"live"}, 500, 5000, False)] == ["ok"]
     assert saved_place("no-such-session", f"{HOME}/code/asja", "Назва") == ("asja", "Назва")
+    os.makedirs(f"{HOME}/.claude/window-names", exist_ok=True)
+    for body, want in (("W46|🫡 deputy|7", ("W46", "🫡 deputy", "7")), ("W46|🫡 deputy", ("W46", "🫡 deputy"))):
+        with open(f"{HOME}/.claude/window-names/selftest-sid", "w") as f:
+            f.write(body)
+        assert saved_place("selftest-sid", "/x", "t") == want, saved_place("selftest-sid", "/x", "t")
+    os.remove(f"{HOME}/.claude/window-names/selftest-sid")
     print("restore-sessions ok")
 
 
@@ -144,6 +160,11 @@ def main() -> None:
         restore(s)
         time.sleep(1)
     print(f"  OK ({len(found)} restored)")
+    # a sprint session's board loop is not a Claude session, so it never comes back by itself (Mike 19.11 «дошка завжди має бути актуальна»)
+    loop = f"{HOME}/.claude/fleet-board/bin/board-loop.sh"
+    for wk in sorted({m[1] for s in found if (m := re.match(r"W(\d+)$", saved_place(s["id"], s["cwd"], s["title"])[0]))}):
+        print(f"━━━ board ━━━  {loop} {wk}", flush=True)
+        run([loop, wk])
 
 
 if __name__ == "__main__":

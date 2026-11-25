@@ -26,13 +26,13 @@ hand over dev, answer) — the report must not describe a teammate waiting on th
 
 ## Step 2 — progress per PR (deterministic)
 
-Stages, in order: `CR · SMP · dev · JT · DEMO · merge`. Done = `cr`, `smp`, (JT or DEMO done ⇒ dev done), `jt`, `demo_ok`, merged.
+Stages, in order: `CR · PT · dev · JT · DEMO · merge`. Done = `cr`, `pt`, (JT or DEMO done ⇒ dev done), `jt`, `demo_ok`, merged.
 Bar = 16 cells, `█` per done share, `░` rest: `round(16 × done/6)`.
 Mark the current stage ▶ when its window is `busy`, ⏳ when it waits on a deploy (`last_deploy` in_progress
 for its branch), ⛔ when it waits on Mike (draft without ticket, new-PR approval), 🙋 when only merge is left.
 
 ```
-#2205 PUN-1680  [████████████░░░░]  75%  CR ✅ SMP ✅ dev ✅ │ JT ▶ │ DEMO · │ merge ·
+#2205 PUN-1680  [████████████░░░░]  75%  CR ✅ PT ✅ dev ✅ │ JT ▶ │ DEMO · │ merge ·
 Fleet           [████████████░░░░]  3/6 ready to merge · N teammates busy
 ```
 Items without a PR yet (local branches from windows) get their own row: `код ✅ │ PR ⛔`.

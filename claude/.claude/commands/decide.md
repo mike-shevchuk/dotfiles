@@ -22,7 +22,7 @@ Everything comes from LIVE sources, never from memory of earlier turns.
 ```
 ### N. W40:<win> — <ticket/PR> · <short name>: <what to answer>
 **Що це.** problem in 2–4 plain lines, one real example if available
-**Що зроблено.** sha, files, tests, CR/simplify state — local or pushed
+**Що зроблено.** sha, files, tests, CR/PT state — local or pushed
 **Питання.** the exact options and what each one triggers
 **Раджу: <option>.** one-line why
 ```

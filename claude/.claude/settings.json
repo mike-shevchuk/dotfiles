@@ -1,6 +1,12 @@
 {
   "env": {
-    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1"
+    "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/blockers:~/.claude/mods/panes"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(just --justfile justfile.v2 *-try*)"
+    ]
   },
   "model": "opus",
   "hooks": {
@@ -10,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ~/.claude/hooks/danger-guard.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/danger-guard.ts || exec npx tsx ~/.claude/hooks/danger-guard.ts"
           }
         ]
       },
@@ -30,11 +36,15 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ~/.claude/hooks/notification.ts --notify"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/notification.ts --notify || exec npx tsx ~/.claude/hooks/notification.ts --notify"
           },
           {
             "type": "command",
             "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh waiting || true"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/.claude/fleet-board/bin/tiki-live.sh ] && ~/.claude/fleet-board/bin/tiki-live.sh waiting || true"
           }
         ]
       }
@@ -45,15 +55,23 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ~/.claude/hooks/stop.ts --chat"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/stop.ts --chat || exec npx tsx ~/.claude/hooks/stop.ts --chat"
           },
           {
             "type": "command",
-            "command": "bun ~/.claude/hooks/cost-logger.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/cost-logger.ts || exec npx tsx ~/.claude/hooks/cost-logger.ts"
           },
           {
             "type": "command",
             "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh done || true"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/.claude/fleet-board/bin/tiki-live.sh ] && ~/.claude/fleet-board/bin/tiki-live.sh done || true"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/.claude/fleet-board/bin/hook-tiki-sync.sh ] && ~/.claude/fleet-board/bin/hook-tiki-sync.sh || true"
           }
         ]
       }
@@ -64,7 +82,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bun ~/.claude/hooks/subagent_stop.ts"
+            "command": "command -v bun >/dev/null && exec bun ~/.claude/hooks/subagent_stop.ts || exec npx tsx ~/.claude/hooks/subagent_stop.ts"
           }
         ]
       }
@@ -90,6 +108,16 @@
             "timeout": 10
           }
         ]
+      },
+      {
+        "matcher": "clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "~/.claude/scripts/handoff-inject.sh",
+            "timeout": 10
+          }
+        ]
       }
     ],
     "UserPromptSubmit": [
@@ -99,6 +127,10 @@
           {
             "type": "command",
             "command": "[ -x ~/dotfiles/tmux/scripts/agent-state.sh ] && ~/dotfiles/tmux/scripts/agent-state.sh working || true"
+          },
+          {
+            "type": "command",
+            "command": "[ -x ~/.claude/fleet-board/bin/tiki-live.sh ] && ~/.claude/fleet-board/bin/tiki-live.sh working || true"
           }
         ]
       }
@@ -126,8 +158,12 @@
     "hookify@claude-plugins-official": true,
     "agent-sdk-dev@claude-plugins-official": true,
     "pyright-lsp@claude-plugins-official": true,
-    "aws-serverless@claude-plugins-official": true,
-    "task-observer@one-skill-to-rule-them-all": true
+    "aws-serverless@claude-plugins-official": false,
+    "task-observer@one-skill-to-rule-them-all": true,
+    "arena-skill@arena-skill": true,
+    "inline-images@claude-inline-images": true,
+    "sdd@sdd": true,
+    "show-your-work@iamumeransari": true
   },
   "extraKnownMarketplaces": {
     "ralph-marketplace": {
@@ -147,12 +183,49 @@
         "source": "github",
         "repo": "rebelytics/one-skill-to-rule-them-all"
       }
+    },
+    "arena-skill": {
+      "source": {
+        "source": "github",
+        "repo": "Jakeschincariol/arena-skill"
+      }
+    },
+    "claude-inline-images": {
+      "source": {
+        "source": "github",
+        "repo": "kbrianps/claude-inline-images"
+      }
+    },
+    "sdd": {
+      "source": {
+        "source": "github",
+        "repo": "genkovich/sdd"
+      }
+    },
+    "iamumeransari": {
+      "source": {
+        "source": "git",
+        "url": "https://github.com/iamumeransari/claude-show-your-work.git",
+        "ref": "releases"
+      }
     }
   },
   "effortLevel": "high",
+  "modelSettings": {
+    "claude-opus-5-5": {
+      "effortLevel": "high"
+    }
+  },
   "tui": "fullscreen",
   "theme": "dark",
+  "switchModelsOnFlag": false,
   "teammateMode": "tmux",
   "agentPushNotifEnabled": true,
+  "autoMode": {
+    "allow": [
+      "$defaults",
+      "Running rescue-serverless justfile try recipes (jb2b / just --justfile justfile.v2 <name>-try, including when wrapped in tmux/env -i/zsh -c) against the DEV environment is allowed, including creating and resolving test workflows, alerts/emergencies and device state in dev orgs (Test · Fixtures, Greg & Usama Band) - Mike approved 2026-10-16. Never applies to prod."
+    ]
+  },
   "voiceEnabled": true
 }

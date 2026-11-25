@@ -20,10 +20,10 @@ Chat: Ukrainian. Read-only (never push, merge, post or stamp). Box tables, no Me
 3. Sprint PRs with no try: every open or merged-this-sprint PR whose try is `no-try`.
 
 ## Print
-1. **Open** — the fleet table (CR SMP JT FE · behind · CI · TRY pre/mike · mergeable · train).
+1. **Open** — the fleet table (CR PT JT FE · behind · CI · TRY pre/mike · mergeable · train).
 2. **Merged this sprint** — box table: `PR | Linear | що (1 рядок) | merged (Kyiv) | try | pre | Mike | JT`.
    Merged without Mike's ✓ → mark ⚠ «змерджено без твого прогону» (run it now on main: `jb2b <try>`).
-3. **Gaps** — one line each, most urgent first: no-try · CR/SMP stale (✓-N) · behind main >0 · no JT · preflight ✗ ·
+3. **Gaps** — one line each, most urgent first: no-try · CR/PT stale (✓-N) · behind main >0 · no JT · preflight ✗ ·
    Mike ✗ on a PR that is otherwise ready → `jb2b sprint-try` → «так» →
    `gh pr merge <N> -R back2back-team/rescue-serverless --merge --delete-branch=false`.
 4. Progress bar: PRs fully done (merged + Mike ✓) / all sprint PRs, then ✅ МОЖНА / ⏳ ЧЕКАЙ for Mike.

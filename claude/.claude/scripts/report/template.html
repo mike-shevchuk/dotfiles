@@ -161,7 +161,7 @@ h2.collapsed{opacity:.82;border-bottom-style:dashed}
 /* "resize any block" — standout blocks get a drag handle too */
 .hero,.verdict,.callout,.flow,.tl-wrap,.lam-wrap,pre.raw,pre.diff{resize:vertical;overflow:auto}
 /* --- per-block icon toolbar (JS adds .pbar to every panel; state remembered) --- */
-.pchrome{position:relative}
+.pchrome{position:relative;padding-top:34px!important} /* toolbar = own row, never over text (Mike 27.10) */
 .pbar{position:absolute;top:6px;right:6px;display:flex;gap:3px;z-index:7;opacity:.4;transition:opacity .12s}
 .pchrome:hover>.pbar,.pbar:hover,.pbar:focus-within,.pmax>.pbar{opacity:1}
 .pbar button{width:23px;height:23px;display:flex;align-items:center;justify-content:center;background:var(--panel2);color:var(--mut);border:1px solid var(--bd);border-radius:6px;cursor:pointer;font:12px/1 ui-monospace,monospace;padding:0}

@@ -1,0 +1,1 @@
+{ "name": "panes", "version": "0.1.0", "description": "/pane <view>: side panes with the fleet's script-only views (pr-state gates, mine, fleet, stuck, idle, devnow, tokens, trylog, board, footer, sprint-pr) — verbatim output, no model tokens, auto-refresh", "types": "./types/index.d.ts", "author": { "name": "Mike" }, "license": "UNLICENSED" }

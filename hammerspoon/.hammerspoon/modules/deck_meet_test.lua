@@ -155,6 +155,15 @@ c, j = post("/log?from=5&to=4", "x")
 check("to < from → 422", c == 422)
 c = post("/log", "live line")
 check("live /log without from/to still 200", c == 200 and (rd(LOG) or ""):find("live line", 1, true) ~= nil)
+-- T20 review: at 0 (the board's clock unset) is unknown, not a made-up 03:00; an away line can be days old → its date
+c = post("/log?from=5&to=6", "5 0 clock unknown\n6 1767261600 dated")
+lg = rd(LOG) or ""
+check("at 0 → ??:??:??", c == 200 and lg:find("\n??:??:?? clock unknown\n", 1, true) ~= nil)
+check("an away line carries its date", lg:find(os.date("%H:%M:%S dated [%Y-%m-%d]\n", 1767261600), 1, true) ~= nil)
+-- T20 fix round: a batch line of today reads like a live one, no date
+local now = os.time()
+c = post("/log?from=7&to=7", "7 " .. now .. " today")
+check("a line of today has no date", c == 200 and (rd(LOG) or ""):find(os.date("%H:%M:%S today\n", now), 1, true) ~= nil)
 
 local function start(id, q) return post("/meet?start=1&id=" .. id .. (q or "")) end
 local function stop(id, n, body) return post("/meet?stop=1&id=" .. id .. "&len=" .. n .. "&rate=16000&fmt=ulaw", body or "") end
@@ -450,6 +459,12 @@ check("a finished note does not enter meet.last", not lastHas(M4))
 local f4 = assert(io.open(MD .. "/index.jsonl", "a")); f4:write(enc({ id = "n-loaded", title = "Нотатка", kind = "note", len = 3 }), "\n"); f4:close()
 reload()
 check("nor after a reload", not lastHas("n-loaded"))
+f4 = assert(io.open(MD .. "/index.jsonl", "a"))
+f4:write(enc({ id = "m-redo", title = "old", kind = "meet" }), "\n", enc({ id = "m-redo", title = "new", kind = "meet" }), "\n"); f4:close()
+reload()
+local redo = {}
+for _, e in ipairs(meetState().last) do if e.id == "m-redo" then redo[#redo + 1] = e.title end end
+check("a redone meeting (two index lines) takes one place, the newer", #redo == 1 and redo[1] == "new")
 c, j = post("/meet?stop=1&id=" .. DONE_AT .. "-1&len=15&rate=16000&fmt=ulaw", "")
 check("the index still knows what's done", c == 200 and j.delivered == true)
 
@@ -519,7 +534,7 @@ c, j = post("/log?from=10&to=10", "10 1767261600 ten")
 io.open = realopen
 check("disk full on the seq → 507, boardlog.seq intact", c == 507 and rd(SEQF) == seq1)
 c, j = post("/log?from=10&to=10", "10 1767261600 ten")
-check("the retry confirms, the line once", c == 200 and j.confirmed == 10 and select(2, (rd(LOG) or ""):gsub(" ten\n", "")) == 1)
+check("the retry confirms, the line once", c == 200 and j.confirmed == 10 and select(2, (rd(LOG) or ""):gsub(" ten %[", "")) == 1)
 local wrote = 0
 io.open = function(p, m)
   if p == LOG then local f = realopen(p, m); return setmetatable({ write = function(_, ...) wrote = wrote + 1; if wrote > 1 then return nil, "No space left" end; f:write(...); return true end,
@@ -531,7 +546,7 @@ io.open = realopen
 check("disk full mid-batch → 507", c == 507 and j.confirmed == nil)
 c, j = post("/log?from=11&to=12", "11 1767261600 eleven\n12 1767261600 twelve")
 lg = rd(LOG) or ""
-check("the retry adds only what's missing", c == 200 and j.confirmed == 12 and select(2, lg:gsub(" eleven\n", "")) == 1 and select(2, lg:gsub(" twelve\n", "")) == 1)
+check("the retry adds only what's missing", c == 200 and j.confirmed == 12 and select(2, lg:gsub(" eleven %[", "")) == 1 and select(2, lg:gsub(" twelve %[", "")) == 1)
 
 print("→ an unsynced id survives a reload (M9)")
 os.execute("sleep 1.1") -- not in the same second as id 57's capture: one name, two owners
@@ -545,6 +560,44 @@ check("stop → delivered there", c == 200 and j.delivered == true and j.id == u
 tasks[#tasks].cb(); os.execute("sleep 1.1"); reload()
 c, j = post("/meet?stop=1&id=58&len=6&rate=16000&fmt=ulaw")
 check("repeated stop after another reload → still that capture", c == 200 and j.id == us and j.have == 6)
+
+-- the 🎙 menu's processing bar: whisper's % fills 0–70, speakers sit at 70, the summary at 90, no stage → no bar
+local mt = deck._meet
+mt.proc = "p1"
+local function put(f, s) local h = io.open(MD .. "/p1." .. f, "w"); h:write(s); h:close() end
+put("stage", "stt"); put("prog", "x: progress =  5%\nx: progress = 50%\n")
+check("stt 50% → 35", mt.progress() == 35 and mt.bar(35) == "▰▰▰▰▱▱▱▱▱▱")
+put("stage", "spk")
+local pct, step = mt.progress()
+check("spk → 70 · мовці", pct == 70 and step == "мовці")
+os.remove(MD .. "/p1.stage")
+check("archived → no bar", mt.progress() == nil)
+
+print("→ 📷/⏺ the Mac's screen from the board mid-meeting (meet-screen)")
+local SAT = 1767290000
+c = post("/meet?start=1&id=" .. SAT .. "-1&lang=uk") -- live: the Mac's backup ffmpeg starts too
+check("live meeting started", c == 200)
+local function last() return spawned[#spawned] or "" end
+c = post("/meet/screen?act=shot")
+check("shot → 200, screencapture into <id>_clips/ (meeting.py attaches it)", c == 200
+  and last():find("screencapture -x " .. MD .. "/" .. name(SAT) .. "_clips/", 1, true) ~= nil)
+c, j = post("/meet/screen?act=rec&on=1")
+local rec = tasks[#tasks]
+check("rec on → 200 {screen=0}, ffmpeg grabs the screen into an .mp4", c == 200 and j.screen == 0
+  and last():find("ffmpeg", 1, true) ~= nil and last():find("avfoundation", 1, true) ~= nil and last():find(MD .. "/" .. name(SAT) .. "_screen-", 1, true) ~= nil and last():find("%.mp4$") ~= nil)
+rec.interrupt = function(self) self.stopped = true; return self end
+nsp = #spawned
+c, j = post("/meet/screen?act=rec&on=1")
+check("rec on again → still the one recording", c == 200 and j.screen == 0 and #spawned == nsp)
+c = post("/meet?stop=1&id=" .. SAT .. "-1&len=0&rate=16000&fmt=ulaw")
+check("meeting stop → the screen recording gets SIGINT (ffmpeg closes the file), meeting.py waits", c == 200 and rawget(rec, "stopped") and #spawned == nsp)
+rec.cb(0)
+for k = #tasks, 1, -1 do if tasks[k] ~= rec and spawned[k]:find("ffmpeg", 1, true) then tasks[k].cb(); break end end -- the backup closes
+check("…the .mp4 closed → meeting.py runs (it reads the recording)", last():find("meeting.py", 1, true) ~= nil)
+c, j = post("/meet/screen?act=rec&on=0")
+check("rec off with nothing recording → 200, no screen", c == 200 and j.screen == nil)
+c = post("/meet/screen?act=nope")
+check("bad act → 422", c == 422)
 
 os.execute("rm -rf '" .. home .. "'")
 print(fails == 0 and "PASS" or ("FAIL " .. fails))
