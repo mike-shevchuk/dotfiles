@@ -957,6 +957,9 @@ function y() {
     rm -f -- "$tmp"
 }
 
+# yazi with two tabs: here + home on mac.local (sftp://mac from ~/.config/yazi/vfs.toml)
+alias ym='yazi . sftp://mac//Users/mikeshevchuk'
+
 # =============================================================================
 # SYSTEM MANAGEMENT
 # =============================================================================

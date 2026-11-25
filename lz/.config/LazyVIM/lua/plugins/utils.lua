@@ -105,7 +105,7 @@ local other = {
   },
 
   {
-    "phaazon/hop.nvim",
+    "smoka7/hop.nvim", -- phaazon/hop.nvim was deleted; smoka7 is the maintained fork
     enable = true,
     keys = {
       { "<C-f>", "<cmd>HopChar1<cr>", desc = "Find char 1" },

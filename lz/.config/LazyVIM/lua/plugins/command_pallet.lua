@@ -676,7 +676,7 @@ local legendary = {
     end
 
     -- Demo Lua functions — discoverable via `:Legendary functions`.
-    leg.func(legendary_demo_funcs)
+    leg.funcs(legendary_demo_funcs) -- a list: leg.func() takes ONE item and wraps it again
   end,
 }
 

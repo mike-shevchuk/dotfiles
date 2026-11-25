@@ -50,12 +50,14 @@ edit = [
 
 [open]
 prepend_rules = [
+  # remote (sftp) file not downloaded yet → offer download first, or the url rules below would open nvim on it
+  { mime = "vfs/{absent,stale}", use = "download" },
   { mime = "text/*", use = "edit" },
-  { name = "*.py", use = "edit" },
-  { name = "*.toml", use = "edit" },
-  { name = "*.yaml", use = "edit" },
-  { name = "*.yml", use = "edit" },
-  { name = "*.md", use = "edit" }
+  { url = "*.py", use = "edit" },
+  { url = "*.toml", use = "edit" },
+  { url = "*.yaml", use = "edit" },
+  { url = "*.yml", use = "edit" },
+  { url = "*.md", use = "edit" }
 ]
 
 [keymap]
