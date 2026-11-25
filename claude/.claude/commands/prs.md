@@ -1,5 +1,5 @@
 ---
-description: "Overview of ALL my open PRs — one row each: PR#(+mirror), CI, open Bugbot findings, pipeline badges (CR/SMP/RPR/JT/REV with commits-ago), worktree, merge readiness"
+description: "Overview of ALL my open PRs — one row each: PR#(+mirror), CI, open Bugbot findings, pipeline badges (CR/PT/RPR/JT/REV with commits-ago), worktree, merge readiness"
 argument-hint: "(no args — always scans all open PRs authored by me)"
 ---
 
@@ -46,7 +46,7 @@ For each PR:
    ```
    Show `🐛N` when >0, `—` when clean or no mirror.
 3. **Pipeline badges** — read `~/.claude/pipeline-state/pipeline-<branch>.json` (durable; `/tmp/claude/` is only a mirror) (branch with
-   `/`→`-`). Render `CR✓ SMP✓-2 RPR· JT✓ REV✓` (✓-N = done N commits ago via
+   `/`→`-`). Render `CR✓ PT✓-2 RPR· JT✓ REV✓` (✓-N = done N commits ago via
    the stamp's `head` anchor + `git rev-list --count`, computable only if the
    branch exists locally). No state file → `(no state — run /pr-state there)`.
 4. **Worktree** — match the branch against `git worktree list` to show WHERE
@@ -63,7 +63,7 @@ PR fleet · 3 open · 1 needs attention
 ┌──────────────┬──────────────────────┬────┬────┬──────────────────────────┬─────────────┬───────┐
 │ PR           │ branch               │ CI │ 🐛 │ pipeline                 │ worktree    │ ready │
 ├──────────────┼──────────────────────┼────┼────┼──────────────────────────┼─────────────┼───────┤
-│ #1535(+1536) │ card-zone-clamp      │ ✅ │ —  │ CR✓ SMP✓-2 RPR· JT✓ REV✓ │ wt:card-…   │ CLEAN │
+│ #1535(+1536) │ card-zone-clamp      │ ✅ │ —  │ CR✓ PT✓-2 RPR· JT✓ REV✓ │ wt:card-…   │ CLEAN │
 └──────────────┴──────────────────────┴────┴────┴──────────────────────────┴─────────────┴───────┘
 ```
 

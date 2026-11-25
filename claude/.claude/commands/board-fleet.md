@@ -1,5 +1,5 @@
 ---
-description: "Fleet board — overview of ALL Mike's open PRs + sessions: status legend (busy/idle/stalled/waiting/blocked/paused/done), pr-state (CR/SMP/RPR/JT/REV), CI, pull-main (behind), just-test presence, then a per-PR detail card (desc, plan, pros/cons), a BLOCKERS table, a dependencies/conflict map, an incident log, value delivered, and the human/morning queue. Manage pause list."
+description: "Fleet board — overview of ALL Mike's open PRs + sessions: status legend (busy/idle/stalled/waiting/blocked/paused/done), pr-state (CR/PT/RPR/JT/REV), CI, pull-main (behind), just-test presence, then a per-PR detail card (desc, plan, pros/cons), a BLOCKERS table, a dependencies/conflict map, an incident log, value delivered, and the human/morning queue. Manage pause list."
 argument-hint: "[pause <PR> | unpause <PR> | <PR>]  (no args = full board; <PR> = just that card)"
 ---
 
@@ -13,7 +13,7 @@ and [[feedback_describe_tmux_windows_before_killing]].
 
 ## Status model (rules)
 - **🟢 working by default.** A session is non-working ONLY if explicitly **⏸ PAUSED** (persisted in `~/.claude/fleet-board/state.json` → `.paused[]`). ListAgents "idle" ≠ done.
-- A PR is **✅ done** only with: current **/just-test** comment + full **/pr-state** (CR·SMP·RPR·JT·REV) + **up-to-date with origin/main** (behind==0). Else show the exact GAP.
+- A PR is **✅ done** only with: current **/just-test** comment + full **/pr-state** (CR·PT·RPR·JT·REV) + **up-to-date with origin/main** (behind==0). Else show the exact GAP.
 - Always **render the STATUS LEGEND first**, use those exact emoji everywhere, and end with a **progress bar** of the fleet (done vs total, per [[feedback_show_progress_bars_after_each_task]]).
 
 ## STATUS LEGEND (render this block first, every time)
@@ -27,7 +27,7 @@ and [[feedback_describe_tmux_windows_before_killing]].
 - ✅ **DONE** — task finished, pane free.
 - 💤 **OFFLINE** — Remote Control / cloud session not active in this session.
 
-**PR pipeline badge** (CR·SMP·RPR·JT·REV): ✅ done · ⬜ pending · ⏭ n/a · ✓⁻ᴺ stale (N commits since it ran).
+**PR pipeline badge** (CR·PT·RPR·JT·REV): ✅ done · ⬜ pending · ⏭ n/a · ✓⁻ᴺ stale (N commits since it ran).
 **PR merge/CI:** 🟩 CLEAN · 🟥 CONFLICT · 🟧 DIRTY · 🎯 code-ready · 🏁 MERGED.
 
 ## Argument modes
@@ -50,13 +50,13 @@ The old step list below is the reference for what the recipe covers.
 3. **Per PR:**
    - CI: `gh pr view <n> --json statusCheckRollup` → pass/FAIL/running.
    - **pull-main (behind):** `git rev-list --count origin/<branch>..origin/main` (0 = up-to-date).
-   - **pr-state stamps:** `/tmp/claude/pipeline-<sanitized-branch>.json` (sanitize `/`→`-`) → which of CR/SMP/RPR/JT/REV are done.
+   - **pr-state stamps:** `/tmp/claude/pipeline-<sanitized-branch>.json` (sanitize `/`→`-`) → which of CR/PT/RPR/JT/REV are done.
    - **just-test:** `gh pr view <n> --json comments` → any body matching `end-to-end smoke trace|just-test`.
    - size: `additions/deletions/changedFiles`.
 4. **tmux (optional):** `tmux list-panes -a` to map windows→worktrees (for cleanup; describe before killing — never kill first).
 5. **Environment / blockers:** `df -h /` (disk headroom — ENOSPC has repeatedly blocked the whole fleet; flag if <1Gi). Note any active cross-cutting blocker: auto-mode gate on dev-API mutations, shared dev last-deploy-wins, a running deploy, a stalled/unresponsive pane.
 6. **Conflicts / dependencies:** for big-behind PRs, `git diff --name-only origin/main...origin/<branch>` (scope) and mergeable=CONFLICTING to spot which PRs collide with main or each other; note ordering constraints (e.g. two PRs touching the same file must merge in sequence).
-7. **SDD / dev-lifecycle phase** (Mike asked to show /sdd-state here): for each active worktree, show its dev-lifecycle phase — 💭 brainstorm → 📋 plan → 🔨 execute → 🔍 review (CR·SMP·RPR) → 🧪 just-test → 🚀 ship. Derive it from the SDD ledger (`<worktree>/.superpowers/sdd/*/progress.md` per-task status, or `.planning/` if GSD) + the teammate's reported state. This is a COMPACT per-PR phase for the board; the full per-task drill-down is `/sdd-state <slug>` (run it standalone when Mike wants task-level detail). Never fabricate a phase — derive from the ledger/git/teammate report.
+7. **SDD / dev-lifecycle phase** (Mike asked to show /sdd-state here): for each active worktree, show its dev-lifecycle phase — 💭 brainstorm → 📋 plan → 🔨 execute → 🔍 review (CR·PT·RPR) → 🧪 just-test → 🚀 ship. Derive it from the SDD ledger (`<worktree>/.superpowers/sdd/*/progress.md` per-task status, or `.planning/` if GSD) + the teammate's reported state. This is a COMPACT per-PR phase for the board; the full per-task drill-down is `/sdd-state <slug>` (run it standalone when Mike wants task-level detail). Never fabricate a phase — derive from the ledger/git/teammate report.
 8. **⏱ TIME-PREDICT (from /sdd-state) + ⏭ /next** — Mike wants both on the board, per active PR:
    - **⏱ ETA:** the MEASURED elapsed (first→last commit on the branch, or since-spawn if no commit) PLUS a clearly-labelled `~forecast` of the remaining time to the next milestone (extrapolated from the SDD ledger's measured per-task avg × tasks-left). Measured is stated as fact; the remainder is always tagged `~` and "forecast" — never present an estimate as measured (the /sdd-state rule). If there is no basis, say "no basis" rather than invent a number.
    - **⏭ /next:** the single next concrete action for that PR (the `/next`-style next-stage banner) — e.g. "run /just-test in terminal", "brainstorm → design options to lead", "push (Mike)". End the board with a consolidated "NEXT ACTIONS" list (one line per active PR) mirroring `/next`.
@@ -64,7 +64,7 @@ The old step list below is the reference for what the recipe covers.
 ## Render — TWO layers
 
 ### Layer 1 — OVERVIEW (one framed table)
-Columns: `PR | Task | pr-state(CR SMP RPR JT REV) | JT-comment | behind-main | CI | mergeable | 🟢/⏸ status`.
+Columns: `PR | Task | pr-state(CR PT RPR JT REV) | JT-comment | behind-main | CI | mergeable | 🟢/⏸ status`.
 Header line: any cross-cutting blocker (e.g. shared dev broken) + dev deploy state.
 
 ### Layer 2 — PER-PR CARD (one block each, skip paused unless asked)

@@ -83,6 +83,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
     import { readdir, stat, readFile, writeFile, rename } from "node:fs/promises";
     import { networkInterfaces } from "node:os";
     import { join, extname, relative } from "node:path";
+    import { timingSafeEqual } from "node:crypto";
 
     const PORT = Number("{{port}}");
     const HOME = process.env.HOME!;
@@ -100,14 +101,24 @@ hub port="8890" root="~/zettelkasten/claude_code":
     }
 
     // "state" = only the hub state file changed (archive/tags/pins) — the index re-renders itself, pages don't reload
-    const RELOAD = `<script>new EventSource("/__reload").onmessage=e=>{if(e.data!=="state")location.reload()}</script>`;
+    // Mike 19.11 «чому ця сторінка так часто мигає»: a file page reloads only when ITS file changed (the fleet board loop
+    // rewrites another page every 2 min); directory listings still reload on any change, since they list files.
+    const RELOAD = `<script>(()=>{const me=decodeURIComponent(location.pathname).replace(/^\\//,"").replace(/\\/$|^$/,m=>m+"index.html");new EventSource("/__reload").onmessage=e=>{if(e.data==="change:"+me)location.reload()}})()</script>`;
+    const RELOAD_ANY = `<script>new EventSource("/__reload").onmessage=e=>{if(e.data.startsWith("change"))location.reload()}</script>`;
     // every page links back to the hub index by LAN IP (Mike 16.10), so a link opened on the phone/another machine still works
     // LAN IP re-read per request: DHCP moves it (.15 → .182 → .85), a value cached at start went stale
     const curIP = () => Object.values(networkInterfaces()).flat().find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
-    const HOME_LINK = () => `<a href="http://${curIP()}:${PORT}/" title="hub" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:18px;padding:5px 12px;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 2px 8px #0006">🏠 Hub</a>`;
+    const HOME_LINK = () => `<a href="http://mac.local:${PORT}/" title="hub" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:18px;padding:5px 12px;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 2px 8px #0006">🏠 Hub</a>`;
     const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
     const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
 
+    // /_links ▶ ■ ↻: projects with a running `just -g proj …` (one action per project at a time)
+    const ctlBusy = new Map<string, string>();
+    // who may press them: this Mac, or a LAN browser that sends the deck's own token (Mike 22.11: he sits at the MacBook).
+    // The page keeps it in localStorage (per port, unlike a cookie, which every service on mac.local would receive).
+    const isSelf = (ip: string) => /^(127\.|::1$|::ffff:127\.)/.test(ip) || ip.replace(/^::ffff:/, "") === curIP();
+    const deckTok = async () => ((await readFile(join(HOME, ".hammerspoon/.env"), "utf8").catch(() => "")).match(/^DECK_TOKEN=([0-9a-f]{16,})\s*$/im) ?? [])[1] ?? "";
+    const keyOk = async (req: Request) => { const a = Buffer.from(req.headers.get("x-hub-key") ?? ""), b = Buffer.from(await deckTok()); return b.length > 0 && a.length === b.length && timingSafeEqual(a, b); };
     const clients = new Set<ReadableStreamDefaultController>();
     const push = (ev: string) => { for (const c of clients) { try { c.enqueue(`data: ${ev}\n\n`); } catch {} } };
     // A new/edited article re-runs _hub.py (debounced) so the index lists it without a restart.
@@ -118,7 +129,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
         const name = String(f ?? "");
         if (name.endsWith(STATE_NAME) || name.endsWith(".tmp")) return push("state");
         if (/\.html?$/i.test(name) && name !== "index.html") regen();
-        push("change");
+        push("change:" + name.split("\\").join("/"));
       });
     } catch {}
 
@@ -204,7 +215,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
       const files = (await walk(dir)).sort();
       const items = files.map(f => `<li><a href="/${relative(ROOT, f)}">${relative(ROOT, f)}</a></li>`).join("\n");
       const label = relative(ROOT, dir) || "all files";
-      return `<!doctype html><meta charset=utf-8><title>hub — ${label}</title>${DARK}${RELOAD}<h1>🗂️ ${label} <span class=d>${files.length} files · ${ROOT.replace(HOME, "~")}</span></h1><ul>${items}</ul>`;
+      return `<!doctype html><meta charset=utf-8><title>hub — ${label}</title>${DARK}${RELOAD_ANY}<h1>🗂️ ${label} <span class=d>${files.length} files · ${ROOT.replace(HOME, "~")}</span></h1><ul>${items}</ul>`;
     }
 
     console.error(`→ serving ${ROOT.replace(HOME, "~")} on 0.0.0.0:${PORT} (bun, live-reload)`);
@@ -226,6 +237,74 @@ hub port="8890" root="~/zettelkasten/claude_code":
           if (res instanceof Response) return res;
           console.error(`  state ← ${b.op} from ${ip}`);
           return json(res);
+        }
+        if (p === "/_fleet/prio") {   // Mike 18.11: «дозволь на html board міняти пріоритет» → card prio + w<N>/priorities.tsv
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          let w: unknown, id: unknown, prio: unknown;
+          try { ({ w, id, prio } = JSON.parse(await req.text())); } catch { return bad("invalid JSON"); }
+          if (typeof w !== "string" || !/^\d{1,3}$/.test(w) || typeof id !== "string" || !/^(PR|WIN)\d{1,6}$/.test(id) || typeof prio !== "number" || !Number.isInteger(prio) || prio < 0 || prio > 100) return bad("w: week, id: PR<n>|WIN<n>, prio: 0–100");
+          const dir = join(HOME, ".claude/fleet-board", `w${w}`), tdir = join(dir, "tiki");
+          let file = "", text = "";
+          try { for (const f of await readdir(tdir)) if (f.endsWith(".md")) { const t = await readFile(join(tdir, f), "utf8"); if (t.startsWith(`---\nid: ${id}\n`)) { file = join(tdir, f); text = t; break; } } } catch {}
+          if (!file) return new Response("no such card", { status: 404 });
+          const title = (text.match(/^title: "?(.*?)"?$/m) ?? [])[1] ?? "";
+          const pun = (title.match(/PUN-\d+/) ?? [""])[0];
+          await writeFile(file, /^prio: \d+$/m.test(text) ? text.replace(/^prio: \d+$/m, `prio: ${prio}`) : text.replace(/^(id: .*)$/m, `$1\nprio: ${prio}`));
+          const now = new Date(); const pad = (n: number) => String(n).padStart(2, "0");
+          const at = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+          if (pun) { const pf = join(dir, "priorities.tsv"); let old = ""; try { old = await readFile(pf, "utf8"); } catch {} await writeFile(pf, old + `${pun}\tprio ${prio}\tMike ${at}: змінив на борді\t${at}\n`); }
+          const run = Bun.spawnSync(["python3", join(HOME, ".claude/fleet-board/bin/board-html.py"), w], { stderr: "pipe", stdout: "pipe" });
+          console.error(`  fleet prio ← ${id} ${pun} = ${prio} from ${ip} (board exit ${run.exitCode})`);
+          return json({ ok: true, id, pun, prio, at });
+        }
+        if (p === "/_fleet/read") {   // Mike 18.11: checkbox on a board card «прочитав картку / Visual plan» → w<N>/card-reads.tsv (gate for «план так»)
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          let w: unknown, id: unknown, kind: unknown;
+          try { ({ w, id, kind } = JSON.parse(await req.text())); } catch { return bad("invalid JSON"); }
+          if (typeof w !== "string" || !/^\d{1,3}$/.test(w) || typeof id !== "string" || !/^(PR|WIN)\d{1,6}$/.test(id) || (kind !== "card" && kind !== "vp")) return bad("w: week, id: PR<n>|WIN<n>, kind: card|vp");
+          const dir = join(HOME, ".claude/fleet-board", `w${w}`);
+          let title = "";
+          try { for (const f of await readdir(join(dir, "tiki"))) if (f.endsWith(".md")) { const t = await readFile(join(dir, "tiki", f), "utf8"); if (t.startsWith(`---\nid: ${id}\n`)) { title = (t.match(/^title: "?(.*?)"?$/m) ?? [])[1] ?? ""; break; } } } catch {}
+          if (!title) return new Response("no such card", { status: 404 });
+          const pun = (title.match(/PUN-\d+/) ?? [""])[0];
+          const now = new Date(); const pad = (n: number) => String(n).padStart(2, "0");
+          const at = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+          const f = join(dir, "card-reads.tsv"); let old = ""; try { old = await readFile(f, "utf8"); } catch {}
+          await writeFile(f, old + `${pun}\t${id}\t${at}\t${kind}\n`);
+          const run = Bun.spawnSync(["python3", join(HOME, ".claude/fleet-board/bin/board-html.py"), w], { stderr: "pipe", stdout: "pipe" });
+          console.error(`  fleet read ← ${id} ${pun} ${kind} from ${ip} (board exit ${run.exitCode})`);
+          return json({ ok: true, id, pun, kind, at });
+        }
+        if (p === "/_fleet/reply") {   // fleet web board «Відповісти» → the tiki card's `reply` field (W<N>:11 relays it)
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          let w: unknown, id: unknown, reply: unknown;
+          if (req.method === "GET") { const q = new URL(req.url).searchParams; w = q.get("w"); id = q.get("id"); }
+          else if (req.method === "POST") {
+            const body = await req.text(); if (body.length > 4096) return new Response("too large", { status: 413 });
+            try { ({ w, id, reply } = JSON.parse(body)); } catch { return bad("invalid JSON"); }
+          } else return new Response("method not allowed", { status: 405 });
+          if (typeof w !== "string" || !/^\d{1,3}$/.test(w) || typeof id !== "string" || !/^(PR|WIN)\d{1,6}$/.test(id)) return bad("w: week number, id: PR<n>|WIN<n>");
+          const dir = join(HOME, ".claude/fleet-board", `w${w}`, "tiki");
+          let card = "";
+          try { for (const f of await readdir(dir)) if (f.endsWith(".md")) { const t = await readFile(join(dir, f), "utf8"); if (t.startsWith(`---\nid: ${id}\n`)) { card = t; break; } } } catch {}
+          if (!card) return new Response("no such card", { status: 404 });
+          const field = (k: string) => (card.match(new RegExp(`^${k}: "?(.*?)"?$`, "m")) ?? [])[1] ?? "";
+          if (req.method === "GET") return json({ id, reply: field("reply"), reply_done: field("reply_done") });
+          // one line, no quotes/backslashes: the value sits inside tiki's "…" query string (args list, no shell)
+          const r = typeof reply === "string" ? reply.replace(/[\u0000-\u001f\u007f\\]/g, " ").replace(/"/g, "'").trim() : "";
+          if (!r || r.length > 300) return bad("reply: 1–300 chars");
+          const run = Bun.spawnSync(["tiki", "exec", `update where id = "${id}" set reply="${r}"`], { cwd: dir, stderr: "pipe", stdout: "pipe" });
+          console.error(`  fleet reply ← ${id} from ${ip}: ${r.slice(0, 80)} (tiki exit ${run.exitCode})`);
+          if (!run.success) return new Response("tiki failed: " + run.stderr.toString().slice(0, 300), { status: 500 });
+          return json({ ok: true, id, reply: r });
         }
         // ── /_hs: Hammerspoon + memory dashboard (page: .justdir/hub-hs.html). Reads from anyone on the LAN;
         //    anything that changes the Mac (run, toggle, kill) only from the Mac itself.
@@ -343,6 +422,113 @@ hub port="8890" root="~/zettelkasten/claude_code":
           }
           return new Response("not found", { status: 404 });
         }
+        // ── /_links: one page with every link Mike has (Mike 18.11). Data = .justdir/hub-links.yaml + projctl registry.conf;
+        //    ●/○ = a TCP connect to the port (or the path exists) done HERE, not in the browser. LAN only, no secrets in it.
+        //    /_esp/… = the esp briefs/reports in ~/.claude/fleet-board/esp (.md rendered, .html/images as they are).
+        // POST /_links/ctl {id, action}: `just -g proj up|down|restart <id>` from a card (Mike 22.11). From this Mac or with the
+        // key (X-Hub-Key), only names in registry.conf; Host + Origin checked so another site open in the browser can't press the button.
+        if (p === "/_links/ctl") {
+          const json = (o: unknown, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          const ip = server.requestIP(req)?.address ?? "", u = new URL(req.url);
+          if (!isLan(ip) || !(isSelf(ip) || await keyOk(req))) return json({ error: "потрібен ключ: відкрий /_links#k=… ще раз" }, 403);
+          if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
+          if (!["mac.local", "localhost", "127.0.0.1", curIP()].includes(u.hostname) || req.headers.get("origin") !== u.origin) return json({ error: "чужий Host або Origin" }, 403);
+          const body = await req.text(); if (body.length > 1024) return new Response("too large", { status: 413 });
+          let q: any; try { q = JSON.parse(body); } catch { return bad("invalid JSON"); }
+          const id = q?.id, act = q?.action;
+          if (!["up", "down", "restart"].includes(act)) return bad("action: up|down|restart");
+          const names = (await readFile(join(HOME, "code/projctl/registry.conf"), "utf8")).split("\n").filter(l => l.trim() && !l.startsWith("#")).map(l => l.split("|")[0].trim());
+          if (typeof id !== "string" || !names.includes(id)) return json({ error: "немає в registry.conf" }, 404);
+          if (id === "hub") return json({ error: "hub не зупиняє сам себе: just -g proj restart hub" }, 409);
+          if (ctlBusy.has(id)) return json({ error: `уже виконується: ${ctlBusy.get(id)}` }, 409);
+          ctlBusy.set(id, act);
+          try {
+            console.error(`━━━ just ━━━  just -g proj ${act} ${id}   ← ${ip}`);
+            // output to a file, not a pipe: a service the recipe leaves behind would keep a pipe open forever
+            const log = join(HOME, `Library/Logs/hub-proj-${id}.log`);
+            const r = Bun.spawn(["sh", "-c", `exec just -g proj "$1" "$2" >"$3" 2>&1 </dev/null`, "sh", act, id, log], { timeout: 180000 });
+            const code = await r.exited;
+            const out = (await readFile(log, "utf8").catch(() => "")).replace(/\x1b\[[0-9;]*m/g, "").slice(-4000);
+            console.error(`  ${code === 0 ? "OK" : "FAIL"} (${act} ${id}, exit ${code})`);
+            return json({ ok: code === 0, code, out });
+          } catch (e) { return json({ ok: false, error: String(e) }, 500);
+          } finally { ctlBusy.delete(id); }
+        }
+        // GET /_links/phone[/next/] → the phone app (:8072). The app keeps its token per address, so a plain link to mac.local opens
+        // «невірний токен» (Mike 22.11). On this Mac the redirect carries #token (a fragment: never sent to a server, not in
+        // /_links/data); any other device gets the plain address.
+        if (p === "/_links/phone" || p === "/_links/phone/next/") {
+          const ip = server.requestIP(req)?.address ?? "", h = new URL(req.url).hostname;
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          const tok = isSelf(ip) && ["mac.local", "localhost", "127.0.0.1", curIP()].includes(h) ? await deckTok() : "";
+          return new Response(null, { status: 302, headers: { location: `https://mac.local:8072/${p.endsWith("/next/") ? "next/" : ""}${tok ? "#token=" + tok : ""}`, "cache-control": "no-store" } });
+        }
+        if (p === "/_links" || p === "/_links/data" || p === "/_esp" || p.startsWith("/_esp/")) {
+          const ip = server.requestIP(req)?.address ?? "";
+          if (!isLan(ip)) return new Response("LAN only", { status: 403 });
+          if (p === "/_links") return html(await readFile(join(HOME, "dotfiles/.justdir/hub-links.html"), "utf8"));
+          if (p === "/_links/data") {
+            // links by name, not IP: the Mac's IP changes (Mike 18.11)
+            const h0 = new URL(req.url).hostname, IP = /^(127\.|localhost$|\d+\.\d+\.\d+\.\d+$)/.test(h0) ? "mac.local" : h0, now = new Date(), jan = new Date(now.getFullYear(), 0, 1);
+            const fm = new Date(now.getFullYear(), 0, 1 + (8 - jan.getDay()) % 7);   // W1 = week of the first Monday (not ISO)
+            const W = Math.floor((+now - +fm) / 864e5 / 7) + 1;
+            const fill = (s: unknown) => String(s ?? "").replaceAll("{HUB}", `http://${IP}:${PORT}`).replaceAll("{IP}", IP).replaceAll("{W}", String(W));
+            let cfg: any = {};
+            try { cfg = Bun.YAML.parse(await readFile(join(HOME, "dotfiles/.justdir/hub-links.yaml"), "utf8")) ?? {}; } catch (e) { cfg = { error: "hub-links.yaml: " + String(e).slice(0, 200) }; }
+            const projects: any[] = (cfg.projects ?? []).map((x: any) => ({ ...x }));
+            const tmuxOf: Record<string, string> = {};
+            const tmuxLive = new Set(Bun.spawnSync(["tmux", "ls", "-F", "#S"], { stdout: "pipe", stderr: "ignore" }).stdout.toString().split("\n"));
+            try {   // registry projects missing from the yaml show up by themselves
+              for (const l of (await readFile(join(HOME, "code/projctl/registry.conf"), "utf8")).split("\n")) {
+                if (!l.trim() || l.startsWith("#")) continue;
+                const [name, , sess = "", port = "", , on] = l.split("|").map(s => s.trim());
+                tmuxOf[name] = sess;
+                const ports = port.split(/\s+/).filter(Boolean), known = projects.find(x => x.id === name);
+                if (known) { known.reg = true; known.check ??= ports[0] ? Number(ports[0]) : undefined; continue; }
+                projects.push({ id: name, reg: true, name, icon: "▫️", group: "projctl", about: "з registry.conf" + (on === "0" ? " · вручну" : ""),
+                  url: ports[0] ? `http://{IP}:${ports[0]}/` : "", check: ports[0] ? Number(ports[0]) : undefined,
+                  links: ports.slice(1).map(q => [`:${q}`, `http://{IP}:${q}/`]) });
+              }
+            } catch {}
+            const alive = (c: unknown): Promise<boolean | null> => typeof c === "number"
+              ? new Promise(res => {
+                  const done = (v: boolean) => { clearTimeout(t); res(v); }, t = setTimeout(() => res(false), 700);
+                  Bun.connect({ hostname: "127.0.0.1", port: c, socket: { open(s) { s.end(); done(true); }, connectError() { done(false); }, data() {} } }).catch(() => done(false));
+                })
+              : Promise.resolve(typeof c === "string" ? existsSync(c.replace(/^~/, HOME)) : null);
+            // 127.0.0.1 links (the board simulator) only make sense on the Mac itself; a dead card's own ports are greyed (off),
+            // links to the hub / files stay clickable (Mike 18.11: «я натискаю на неіснуючі посилання»)
+            const self = isSelf(ip), ctl = self || await keyOk(req);
+            const host = (u: string) => { try { return new URL(u); } catch { return null; } };
+            const local = (u: string) => /^(127\.0\.0\.1|localhost)$/.test(host(u)?.hostname ?? "");
+            const probes = new Map<number, Promise<boolean | null>>();   // one TCP probe per port per request
+            const off = async (u: string) => { const h = host(u); if (!h || ![IP, curIP(), "mac.local", "127.0.0.1", "localhost"].includes(h.hostname)) return false;
+              const port = Number(h.port || (h.protocol === "https:" ? 443 : 80)); if (port === PORT) return false;
+              if (!probes.has(port)) probes.set(port, alive(port)); return !(await probes.get(port)); };
+            const phone = (s: string) => self ? s.replace(/^https:\/\/[^/]+:8072\/(next\/)?$/, (_, n) => "/_links/phone" + (n ? "/next/" : "")) : s;
+            const out = await Promise.all(projects.map(async x => { const sess = !!tmuxOf[x.id] && tmuxLive.has(tmuxOf[x.id]);
+              const up = x.reg && x.check === undefined ? sess : await alive(x.check), url = fill(x.url);   // no port → its tmux session
+              const links = (x.links ?? []).map((l: any) => ({ t: fill(l[0]), u: fill(l[1]) })).filter((l: any) => self || !local(l.u));
+              return { id: String(x.id ?? x.name), name: fill(x.name), icon: x.icon ?? "", group: x.group ?? "projctl",
+                about: fill(x.about), url: phone(url), off: await off(url), up, reg: !!x.reg, sess, busy: ctlBusy.get(x.id) ?? null, port: typeof x.check === "number" ? x.check : null,
+                links: await Promise.all(links.map(async (l: any) => ({ ...l, u: phone(l.u), off: await off(l.u) }))) }; }));
+            return new Response(JSON.stringify({ groups: cfg.groups ?? [], projects: out, self, ctl, ip: IP, week: W, error: cfg.error }),
+              { headers: { "content-type": "application/json", "cache-control": "no-store" } });
+          }
+          const ESP = join(HOME, ".claude/fleet-board/esp"), r = decodeURIComponent(p.slice(5)).replace(/^\/+/, ""), f = join(ESP, r);
+          if ((f !== ESP && !f.startsWith(ESP + "/")) || r.split("/").includes("..")) return new Response("forbidden", { status: 403 });
+          let fst; try { fst = await stat(f); } catch { return new Response("not found", { status: 404 }); }
+          if (fst.isDirectory()) {
+            if (existsSync(join(f, "index.html"))) return html(await readFile(join(f, "index.html"), "utf8") + HOME_LINK());
+            const items = (await walk(f)).sort().map(x => `<li><a href="/_esp/${relative(ESP, x)}">${esc(relative(ESP, x))}</a></li>`).join("\n");
+            return html(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1"><title>esp — briefs</title>${DARK}${HOME_LINK()}<h1>🎛 esp <span class=d>~/.claude/fleet-board/esp</span></h1><ul>${items}</ul>`);
+          }
+          const e = extname(f).toLowerCase();
+          if (e === ".md") return html(`<!doctype html><meta charset=utf-8><meta name=viewport content="width=device-width,initial-scale=1">${DARK}${HOME_LINK()}` + md(await readFile(f, "utf8")));
+          if (e === ".html") return html(await readFile(f, "utf8") + HOME_LINK());
+          if ([".png", ".jpg", ".jpeg", ".webp", ".svg"].includes(e)) return new Response(Bun.file(f));
+          return new Response("not found", { status: 404 });
+        }
         if (p === "/__reload") {
           let self: ReadableStreamDefaultController;
           return new Response(new ReadableStream({ start(c) { self = c; clients.add(c); }, cancel() { clients.delete(self); } }),
@@ -361,7 +547,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
         }
         const ext = extname(path).toLowerCase();
         if (ext === ".md") return html(`<!doctype html><meta charset=utf-8>${DARK}${RELOAD}${HOME_LINK()}` + md(await Bun.file(path).text()));
-        if (ext === ".html" || ext === ".htm") return html((await Bun.file(path).text()) + RELOAD + HOME_LINK());
+        if (ext === ".html" || ext === ".htm") { const t = await Bun.file(path).text(); return html(t + (t.includes('<meta name="hub-noreload">') ? "" : RELOAD) + HOME_LINK()); }
         return new Response(Bun.file(path));
       },
     });
@@ -688,6 +874,19 @@ proj *args:
     set -uo pipefail
     echo "━━━ projctl ━━━  cd ~/code/projctl && just ${*:-tui}" >&2
     cd ~/code/projctl && exec just "$@"
+
+# lampac — devices ⇄ shared account (fzf + gum) and the rest of its justfile:
+#   just -g lampac                → pick devices, link/unlink them to the shared account
+#   just -g lampac users list     → just the table
+#   just -g lampac status|logs|restart
+# lampac: devices ⇄ shared account (fzf + gum); other args go to its justfile
+[group('projects')]
+lampac *args:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    [ $# -gt 0 ] || set -- users
+    echo "━━━ just ━━━  cd ~/code/prj/new_lampac/lampac && just $*" >&2
+    cd ~/code/prj/new_lampac/lampac && exec just "$@"
 
 # --- Reddit daily digest ----------------------------------------------------
 

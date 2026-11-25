@@ -13,14 +13,14 @@
 #                "simplify":    {"done": true, "ts": "<iso>", "src": "commit:abc", "head": "abc"},
 #                ... } }
 #
-# Known steps (badge order on the statusline): code-review simplify review-pr just-test
+# Known steps (badge order on the statusline): code-review simplify ponytail review-pr just-test
 # just-fe demo  (+ brainstorm pr-summary merged, not shown as badges)
 #
 # Usage:
 #   pipeline-stamp.sh stamp <step> [src] [pr]   # mark step done = now
 #   pipeline-stamp.sh unstamp <step>            # clear a step
 #   pipeline-stamp.sh set-pr <pr>               # record the PR number
-#   pipeline-stamp.sh detect                    # stamp code-review/simplify from commit subjects (src=heuristic)
+#   pipeline-stamp.sh detect                    # stamp code-review from commit subjects (src=heuristic)
 #   pipeline-stamp.sh gates [only=N]            # /pr-state all: ONE table, one verdict per PR, 10 gates (scripts/pr-gates.py)
 #   pipeline-stamp.sh fleet [days=3]            # one row per open PR of mine (both repos) + recent local-only branches
 #   pipeline-stamp.sh refresh-pr                # force-refresh the statusline PR/bugbot cache (no TTL)
@@ -28,8 +28,8 @@
 #   pipeline-stamp.sh path | show | branch
 #
 # Teammate one-liners (run in the PR worktree):
-#   after /code-review:  ~/.claude/pipeline-stamp.sh stamp code-review commit:$(git rev-parse --short HEAD)
-#   after /simplify:     ~/.claude/pipeline-stamp.sh stamp simplify commit:$(git rev-parse --short HEAD)
+#   after CR (superpowers:requesting-code-review + /code-review high, Mike 11.11): ~/.claude/pipeline-stamp.sh stamp code-review commit:$(git rev-parse --short HEAD)
+#   after /ponytail-review (Mike 04.11: ponytail = a pr-state step): ~/.claude/pipeline-stamp.sh stamp ponytail commit:$(git rev-parse --short HEAD)
 #
 # `src` is a free-text provenance tag (marker | commit:<sha> | pr-comment | heuristic).
 set -euo pipefail
@@ -155,7 +155,7 @@ _fleet_rows() {
   local repos="back2back-team/rescue-serverless back2back-team/workflow-engine"
   local seen=" "
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-    "PR" "LINEAR" "CR SMP JT FE" "BEHIND" "CI" "TRY pre/mike" "MERGEABLE" "DEPLOY" "TRAIN" "LOCAL+"
+    "PR" "LINEAR" "CR PT JT FE" "BEHIND" "CI" "TRY pre/mike" "MERGEABLE" "DEPLOY" "TRAIN" "LOCAL+"
   for repo in $repos; do
     local root; root=$(repo_root "$repo")
     [ -d "$root" ] || { echo "  (no local clone for $repo — skipped)" >&2; continue; }
@@ -181,8 +181,8 @@ _fleet_rows() {
       seen+="$br "
       mergeable=$(mergeable_retry "$repo" "$num" "$mergeable")
       local f; f=$(state_file "$br" "${repo##*/}")
-      local cr smp jtb feb
-      cr=$(badge "$f" code-review CR "$root" "$head"); smp=$(badge "$f" simplify SMP "$root" "$head")
+      local cr pt jtb feb
+      cr=$(badge "$f" code-review CR "$root" "$head"); pt=$(badge "$f" ponytail PT "$root" "$head")
       jtb=$(badge "$f" just-test JT "$root" "$head"); feb=$(badge "$f" just-fe FE "$root" "$head")
       # A posted JT / FE comment counts even when nobody stamped it.
       case "$jtb" in JT·) [ "$jt" -gt 0 ] && jtb="JT✓c" ;; esac
@@ -201,7 +201,7 @@ _fleet_rows() {
       local wt local_ahead="·"; wt=$(worktree_of "$root" "$br")
       [ -n "$wt" ] && local_ahead=$(git -C "$wt" rev-list --count "origin/${br}..HEAD" 2>/dev/null || echo "?")
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "#$num ${repo##*/}" "$(linear_id "$title" "$br")" "$cr $smp $jtb $feb" "$behind" "$ci" "$demo" \
+        "#$num ${repo##*/}" "$(linear_id "$title" "$br")" "$cr $pt $jtb $feb" "$behind" "$ci" "$demo" \
         "${mergeable:-?}" "$deploy" "$train" "$local_ahead"
     done 3< <(jq -r '.[] | [
         .number, .title, .headRefName, .headRefOid, (.mergeable // "?"),
@@ -230,13 +230,13 @@ _fleet_rows() {
       local ahead; ahead=$(git -C "$wt" rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
       [ "$ahead" -eq 0 ] && continue
       local head f; head=$(git -C "$wt" rev-parse HEAD); f=$(state_file "$wbr" "${repo##*/}")
-      local cr smp jtb feb behind upstream
-      cr=$(badge "$f" code-review CR "$root" "$head"); smp=$(badge "$f" simplify SMP "$root" "$head")
+      local cr pt jtb feb behind upstream
+      cr=$(badge "$f" code-review CR "$root" "$head"); pt=$(badge "$f" ponytail PT "$root" "$head")
       jtb=$(badge "$f" just-test JT "$root" "$head"); feb=$(badge "$f" just-fe FE "$root" "$head")
       behind=$(git -C "$wt" rev-list --count HEAD..origin/main 2>/dev/null || echo "?")
       upstream=$(git -C "$wt" rev-list --count "origin/${wbr}..HEAD" 2>/dev/null || echo "$ahead (no origin)")
       printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-        "— ${repo##*/}" "$(linear_id "" "$wbr")" "$cr $smp $jtb $feb" "$behind" "no PR" "-" "-" "·" "·" "$upstream  ($wbr)"
+        "— ${repo##*/}" "$(linear_id "" "$wbr")" "$cr $pt $jtb $feb" "$behind" "no PR" "-" "-" "·" "·" "$upstream  ($wbr)"
     done < <(git -C "$root" worktree list --porcelain 2>/dev/null | awk '/^worktree /{p=substr($0,10)} /^branch /{sub("refs/heads/","",$2); print p, $2}')
   done
 }
@@ -323,7 +323,7 @@ case "$cmd" in
     [ "$c_mrg" = CONFLICTING ] && todo+=("conflict with main → merge origin/main, resolve, re-run checks")
     case "$c_ci" in *"✗0"*) ;; *) todo+=("CI has failures → open the PR checks and fix") ;; esac
     case "$c_bdg" in *CR·*|*CR✓-*|*CR✓\?*) todo+=("/code-review (${c_bdg%% *})") ;; esac
-    case "$c_bdg" in *SMP·*|*SMP✓-*) todo+=("/simplify") ;; esac
+    case "$c_bdg" in *PT·*|*PT✓-*) todo+=("/ponytail-review") ;; esac
     case "$c_bdg" in *JT·*|*JT✓-*) todo+=("/just-test (JT stale or missing)") ;; esac
     case "$c_bdg" in *FE·*|*FE✓-*) todo+=("/just-fe if the FE needs this API") ;; esac
     case "$c_demo" in "✓/✓"*) ;; "✓/·"*) todo+=("preflight ✓ → Mike runs the try, then merge") ;; *) todo+=("try/preflight not done → jb2b <topic>-try") ;; esac
@@ -333,7 +333,7 @@ case "$cmd" in
       [ ${#todo[@]} -gt 0 ] && echo "   → ${todo[0]}${todo[1]:+ · ${todo[1]}}" || echo "   → nothing pending"
       exit 0
     fi
-    { printf '%s\n' "PR|LINEAR|CR SMP JT FE|BEHIND|CI|DEMO pre/mike|MERGEABLE"; printf '%s\n' "$c_pr|$c_lin|$c_bdg|$c_beh|$c_ci|$c_demo|$c_mrg"; } | column -t -s '|'
+    { printf '%s\n' "PR|LINEAR|CR PT JT FE|BEHIND|CI|DEMO pre/mike|MERGEABLE"; printf '%s\n' "$c_pr|$c_lin|$c_bdg|$c_beh|$c_ci|$c_demo|$c_mrg"; } | column -t -s '|'
     echo; echo "what to do:"
     if [ ${#todo[@]} -eq 0 ]; then echo "  • nothing pending — all gates fresh"; else
       for i in 0 1 2; do [ -n "${todo[$i]:-}" ] && echo "  • ${todo[$i]}"; done; fi

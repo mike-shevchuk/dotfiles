@@ -52,7 +52,7 @@ Mike 22.10: «мені не зручний такий формат (.lgtm …/pa
 ## 5. Рендер і перевірка
 ```bash
 python3 ~/.claude/fleet-board/bin/handover-html.py <N> [owner/repo]   # друкує шлях і «explained X/Y»
-xh -I -h HEAD http://192.168.50.85:8890/rescue-serverless/reviews/pr<N>-handover.html   # чекай 200
+xh -I -h HEAD http://mac.local:8890/rescue-serverless/reviews/pr<N>-handover.html   # чекай 200
 ```
 X < Y → допиши нотатки й перегенеруй. Відкрий у браузері (Playwright): діаграма намалювалась (є SVG, без «Syntax error»), таблиці входів/виходів є, diff підсвічений, розділ «🐴 Чому саме так» є, мова UA, без горизонтального скролу на 760 px.
 Онови сторінку статусу, якщо треба: `python3 ~/.claude/fleet-board/bin/status-html.py`.

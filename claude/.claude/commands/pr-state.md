@@ -12,7 +12,7 @@ per-branch state file the statusline reads.
 **Terminal language:** match Mike (Ukrainian or English).
 **No Mermaid in terminal** — use ASCII/Unicode boxes and tables (per project rule).
 
-The badge order shown on the statusline is **CR · SMP · RPR · JT · FE · DEMO**
+The badge order shown on the statusline is **CR · PT · RPR · JT · FE · DEMO** (SMP dropped 11.11 — PT covers it; CR = requesting-code-review + /code-review high)
 (code-review, simplify, review-pr, just-test, just-fe, demo). The detailed
 output below also covers the rest of the 12-step pipeline.
 
@@ -28,7 +28,7 @@ output below also covers the rest of the 12-step pipeline.
 - `all` mode: print a block «🌿 не на останньому main» BEFORE the table: one line per PR with `behind > 0` → owner window + fix.
   A PR with no live owner window: the lead merges `origin/main` into its worktree (clean tree, no local-only commits), checks
   ruff on the changed .py files, pushes; conflicts are reported, never force-resolved. Paused PRs (state.json) are listed, not touched.
-- Merging main adds only a merge commit: CR/SMP/JT/DEMO stamps stay valid (they count own non-merge commits).
+- Merging main adds only a merge commit: CR/PT/JT/DEMO stamps stay valid (they count own non-merge commits).
 
 ## Argument modes
 
@@ -51,9 +51,13 @@ output below also covers the rest of the 12-step pipeline.
 2. Eleven gates in this fixed order; ✅ only when all pass:
    `0 PLAN` Mike was GRILLED on the plan (`/pr-state grill`, 2026-10-22) and approved it BEFORE implementation (Mike 2026-10-21; `~/.claude/fleet-board/plan-approvals.tsv`,
    written only by `~/.claude/fleet-board/bin/plan-approve.sh PUN-x <plan-path>` after Mike says «план так»; PRs opened
-   before the rule — rescue ≤ #2379, engine ≤ WE#77 — show ·) · `1 CI` no ✗/⏳ · `2 MRG` MERGEABLE · `3 MAIN` behind 0 · `4 CR` ✓ with 0 own commits after · `5 SMP` same ·
+   before the rule — rescue ≤ #2379, engine ≤ WE#77 — show ·) · `1 CI` no ✗/⏳ · `2 MRG` MERGEABLE · `3 MAIN` behind 0 · `4 CR` ✓ with 0 own commits after · `5 PT` /ponytail-review, same rule (SMP dropped 11.11) ·
    `6 🐛` 0 unresolved Bugbot threads on the mirror (`<branch>-review`) · `7 TRY` try in preflight-map · `8 PRE` agent preflight ✓ ·
    `9 JT` JT comment/stamp fresh · `10 MIKE` Mike's DEMO approval ✓. Gates 7–10 are rescue-serverless only (· in engine rows).
+   Two info columns after the gates (never block the verdict): `FE` just-fe posted · `UI` browser demo (Mike 03.11) — a
+   `jb2b <topic>-ui` recipe that checks preconditions (dev sha, fixture, token), prints where to go / what to click and opens the
+   dev frontend on that page. Registry `~/.claude/fleet-board/ui-demos.tsv` (`pr<TAB>recipe|-<TAB>what it shows`): add a row when the
+   task has a visible UI change; `-` = needed, not written (✗); recipe present in justfile.v2 = ✓; no row = · (not a UI task).
 3. A gate that cannot be checked is ✗. Never call a PR «закритий/готовий» unless its row is ✅.
 4. no-arg mode starts with this PR's row: `~/.claude/pipeline-stamp.sh gates only=<PR>`, then the detail sections below.
 - **`grill [PUN-x]`** (Mike 2026-10-22: «добавити grill-me, щоб ти запитував мене відносно плану — бачу різнобіжжя») → before «план так»
@@ -78,7 +82,7 @@ Known steps: `brainstorm code-review simplify review-pr just-test just-fe demo p
 **Teammate one-liners** (run in the PR worktree, right after the step):
 ```bash
 ~/.claude/pipeline-stamp.sh stamp code-review commit:$(git rev-parse --short HEAD)   # after /code-review (+ its fixes)
-~/.claude/pipeline-stamp.sh stamp simplify    commit:$(git rev-parse --short HEAD)   # after /simplify
+~/.claude/pipeline-stamp.sh stamp ponytail    commit:$(git rev-parse --short HEAD)   # after /ponytail-review
 ```
 
 **DEMO is MANDATORY before merge (Mike, 2026-09-29).** Every PR has a guided demo recipe
@@ -89,6 +93,14 @@ must exit 0 (failed=0 AND no non-merge commits after the demoed build). A PR wit
 fresh DEMO is NOT merge-ready — say so in the merge-readiness line.
 
 `$ARGUMENTS`
+
+## 🎯 Grill checkpoints — the most important points (Mike 18.11: «добав на найважливіших точках grill скіл у /pr-state»)
+Run `/pr-state grill <PUN-x>` (the 5-part block, ≤4 questions per AskUserQuestion modal, context INSIDE the modal) at exactly these points — and print the checkpoint name in the no-arg output when it is due:
+1. **PLAN** — before «план так»: the lead first READS the card-plan and puts its context (what · how · what people see · risks · not done · card + VP links) into the modal, and asks «переглянув card-plan?» before «план так» (Mike 18.11 — never a blind «план так»). Questions asked BEFORE a card exists are labelled «питання для card-plan». Then: parity, what the user sees, reuse, edge cases, out of scope, prod impact. Also when the ticket ≠ the meeting, or the parent ticket / its comments change the scope.
+2. **Before Mike's try** — after PRE ✓ and the «⛔ Mike-ready gate» (_rules): 1–3 questions on what the try does NOT prove (🟡 limits, paths not run on dev), so Mike accepts the gap before he runs it, not after.
+3. **Before merge** — when the PR touches the emergency → notification path, 911/RapidSOS, prod infra (CDK, PC, env, migration), or its head changed after Mike's try (conflict rework): what ships to prod, PROD steps, rollback, who measures after release.
+4. **Divergence** — any time a teammate reports behaviour that differs from the approved plan.
+In no-arg mode add one line after the merge-readiness line: `🎯 grill: <checkpoint> due · /pr-state grill <PUN>` or `🎯 grill: — (nothing due)`.
 
 ## Workflow (no-arg mode)
 
@@ -244,7 +256,7 @@ For every step you positively detect, stamp it (idempotent):
 ~/.claude/pipeline-stamp.sh stamp just-test      pr-comment "$PR"
 ~/.claude/pipeline-stamp.sh stamp just-fe        pr-comment "$PR"
 ~/.claude/pipeline-stamp.sh stamp review-pr      pr-comment
-~/.claude/pipeline-stamp.sh stamp simplify       "commit:<sha>"
+~/.claude/pipeline-stamp.sh stamp ponytail       "commit:<sha>"
 # … only the ones with real evidence
 ```
 Do NOT stamp a step you can't back with evidence — pending is honest.
@@ -312,7 +324,7 @@ Lead with a one-line headline (branch · PR#N(+mirror) · state · X/Y steps don
    check-pr/bugbot, just-test, merge. Mark each with its evidence
    (commit sha, comment id, check bucket) or "—".
 3. **ASCII pipeline bar** mirroring the statusline badges, e.g.
-   `🧭  CR ✓   SMP ✓-2   RPR ·   JT ✓   DEMO ✓`
+   `🧭  CR ✓   PT ✓-2   RPR ·   JT ✓   DEMO ✓`
    (`✓-N` = done but N commits behind, rendered yellow on the statusline).
 4. **CI / merge readiness** line: checks summary + `mergeable`/`mergeStateStatus` + DEMO gate (`demo-result.sh check`) — no DEMO ✓ ⇒ not merge-ready.
    **Try (Mike 2026-10-16, always print for rescue-serverless):** the PR's justfile try + who ran it —
@@ -354,7 +366,7 @@ per the analysis-summary rule.
 ### Step 5 — confirm statusline refresh
 
 Step 3 refreshed BOTH halves the statusline reads:
-1. `~/.claude/pipeline-state/pipeline-<branch>.json` (+ `/tmp/claude` mirror) — the pipeline-step badges (`CR·SMP·RPR·JT·FE·DEMO`).
+1. `~/.claude/pipeline-state/pipeline-<branch>.json` (+ `/tmp/claude` mirror) — the pipeline-step badges (`CR·PT·RPR·JT·FE·DEMO`).
 2. `/tmp/claude/pr-cache-<cwd>.txt` — the `🔀 PR#N … 🐛<n>` badge (via `refresh-pr`).
 
 Tell Mike both are updated and show the pipeline file path
