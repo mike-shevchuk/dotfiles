@@ -11,9 +11,11 @@ _stow pkg:
     set -euo pipefail
     cd "{{justfile_directory()}}"
     ts=$(date +%Y%m%d-%H%M%S)
-    # dry run lists conflicts as "... over existing target <rel> since ..."
+    # dry run lists conflicts as "... over existing target <rel> since ..." (a file)
+    # or "existing target is not owned by stow: <rel>" (a symlink made by hand)
     conflicts=$(stow -n --no-folding --restow -t ~ "{{pkg}}" 2>&1 \
-        | sed -n 's/.* over existing target \(.*\) since .*/\1/p' || true)
+        | sed -n -e 's/.* over existing target \(.*\) since .*/\1/p' \
+                 -e 's/.* existing target is not owned by stow: //p' || true)
     while IFS= read -r rel; do
         [ -n "$rel" ] || continue
         mv "$HOME/$rel" "$HOME/$rel.pre-stow-$ts"
@@ -75,8 +77,10 @@ tmux:
     # Apply local patches
     for patch in "{{justfile_directory()}}"/tmux/patches/*.patch; do
         [ -f "$patch" ] || continue
-        if ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+        if git -C "$os_dir" apply -R --check "$patch" 2>/dev/null; then
             echo "  patch already applied: $(basename "$patch")"
+        elif ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+            echo "  WARN: patch does not fit this opensessions version, skipped: $(basename "$patch")" >&2
         else
             git -C "$os_dir" apply "$patch"
             echo "  applied: $(basename "$patch")"
@@ -124,14 +128,21 @@ hammerspoon:
 hyperland:
     @just --justfile "{{justfile()}}" _stow hyperland
 
-# mise global tools (node, bun, jq, gh) → ~/.config/mise/config.toml, then install them
-mise:
+# A machine's own global config becomes config.local.toml: mise merges it over
+# the repo's, so tools it had keep working. Also restores one an earlier run moved aside.
+
+# mise global tools (node, bun, jq, gh, just, python) → ~/.config/mise/config.toml, then install them
+mise: mise-install
+    @cd ~/.config/mise 2>/dev/null && [ ! -e config.local.toml ] || exit 0; \
+        if [ -f config.toml ] && [ ! -L config.toml ]; then mv config.toml config.local.toml; \
+        else old=$(ls -t config.toml.pre-stow-* 2>/dev/null | head -1); [ -n "$old" ] || exit 0; cp "$old" config.local.toml; fi; \
+        echo "  kept this machine's tools: ~/.config/mise/config.local.toml" >&2
     @just --justfile "{{justfile()}}" _stow mise
     mise install
 
 # Stow all packages
-all: mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
-    @echo "All packages stowed"
+all:
+    @just --justfile "{{justfile()}}" _steps mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
 
 # Unstow a package: just remove <pkg>
 remove pkg:

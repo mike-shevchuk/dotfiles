@@ -22,12 +22,10 @@ mise-install:
         exit 0
     fi
     echo "Встановлюю mise..."
-    if command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --noconfirm mise
-    elif command -v brew >/dev/null 2>&1; then
+    if command -v brew >/dev/null 2>&1; then
         brew install mise
     else
-        curl https://mise.run | sh
+        curl -fsSL https://mise.run | sh   # → ~/.local/bin/mise, no sudo
     fi
     echo "mise встановлено: $(mise --version)"
     echo ""

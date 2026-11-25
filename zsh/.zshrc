@@ -43,15 +43,15 @@ export EDITOR='nvim'
 typeset -U path PATH   # zsh: auto-dedupe PATH (login shells + tmux nesting double entries)
 export PATH="$HOME/.local/bin:$PATH"
 
-# mise — manages JS, Go, tools; activate BEFORE pyenv so pyenv shims win for python
+# mise — manages JS, Go, python, tools; activate BEFORE pyenv so pyenv shims win if installed
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
 fi
 
-# pyenv — manages Python + virtualenv; activate AFTER mise so its shims take priority
+# pyenv — optional, only where installed; activate AFTER mise so its shims take priority
 export PYENV_ROOT="$HOME/.pyenv"
 [ -d "$PYENV_ROOT/bin" ] && export PATH="$PYENV_ROOT/bin:$PATH"
-export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
+[ -x "$PYENV_ROOT/shims/python" ] && export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
 
 # ZPlug configuration
 # ZPLUGRC=$HOME/.zsh_zplug
@@ -145,7 +145,7 @@ fi
 # Initialize pyenv (after zinit to avoid conflicts).
 # virtualenv-init dropped: it added a per-prompt shell-out and project-env.zsh
 # already auto-activates .venv dirs; run `pyenv activate <env>` manually for named envs.
-eval "$(pyenv init -)" 2>/dev/null
+command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
 
 # =============================================================================
 # CLIPBOARD UTILITIES
