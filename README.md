@@ -7,8 +7,9 @@ macOS + Linux dotfiles managed with [GNU Stow](https://www.gnu.org/software/stow
 ```bash
 cd ~/dotfiles
 
-# Setup everything on a new machine
+# Setup everything on a new machine (asks how to install stow if it is missing)
 just setup
+VIA=mise just setup     # skip the question: no sudo (VIA=system → brew/apt/pacman)
 
 # Or stow individual packages
 just zsh
@@ -192,7 +193,8 @@ Disable entirely:     `git -C ~/dotfiles config --unset core.hooksPath`
 
 | Command | What |
 |---------|------|
-| `just mise-install` | Install mise |
+| `just mise` | Install mise + global tools, python included (part of `just setup`) |
+| `just mise-install` | Install mise only |
 | `just nvim-install` | Install Neovim 0.12 via mise |
 | `just nvim-install 0.11.3` | Install specific version |
 | `just nvim-versions` | Show available neovim versions |

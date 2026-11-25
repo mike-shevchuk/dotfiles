@@ -389,7 +389,7 @@ hooks-status:
     # Quick audit of the hooks layer:
     #   green  = file exists
     #   red    = file missing (hook will fail silently at runtime)
-    # Hook scripts are TypeScript files transpiled at runtime by npx tsx.
+    # Hook scripts are TypeScript files run directly by bun.
     # Sounds are .wav files played on Linux via paplay/aplay, macOS via afplay.
     green='\033[32m'; red='\033[31m'; cyan='\033[36m'; dim='\033[2m'; reset='\033[0m'
     hooks_dir="$HOME/.claude/hooks"

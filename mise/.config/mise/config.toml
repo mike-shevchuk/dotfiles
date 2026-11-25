@@ -1,0 +1,12 @@
+# Global mise tools — stowed to ~/.config/mise/config.toml (`just mise`).
+# New machine: `just mise` → installs everything below, no sudo needed.
+[tools]
+node = "lts"   # some plugins/MCP servers hardcode node/npx; bun is the default runner
+bun = "latest" # runs Claude hooks (*.ts) and bunx MCP servers
+jq = "latest"  # statusline JSON parsing (required)
+gh = "latest"  # statusline PR/CI badges, gh completion
+just = "latest" # runs this repo's recipes; `just` may itself come from mise
+python = "3.13" # default python; a pyenv install, if present, wins (see .zshrc)
+
+[settings]
+experimental = true

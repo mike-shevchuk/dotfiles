@@ -3,6 +3,18 @@
 # ZSH CONFIGURATION
 # =============================================================================
 
+# Fallback when the remote host lacks terminfo for $TERM (e.g. xterm-ghostty
+# over SSH) — otherwise zle echoes every keystroke twice and tput errors out.
+if ! infocmp "$TERM" >/dev/null 2>&1; then
+    export TERM=xterm-256color
+fi
+
+# Disable mouse-tracking modes before every prompt. A TUI (tmux, yazi, nvim,
+# lazygit) that crashes or loses its SSH link leaves them on, and every mouse
+# move then prints escape garbage like `5;45;12M` into the shell.
+_reset_mouse() { printf '\e[?1000l\e[?1002l\e[?1003l\e[?1006l' }
+precmd_functions+=(_reset_mouse)
+
 # =============================================================================
 # HISTORY CONFIGURATION
 # =============================================================================
@@ -31,15 +43,15 @@ export EDITOR='nvim'
 typeset -U path PATH   # zsh: auto-dedupe PATH (login shells + tmux nesting double entries)
 export PATH="$HOME/.local/bin:$PATH"
 
-# mise — manages JS, Go, tools; activate BEFORE pyenv so pyenv shims win for python
+# mise — manages JS, Go, python, tools; activate BEFORE pyenv so pyenv shims win if installed
 if command -v mise >/dev/null 2>&1; then
   eval "$(mise activate zsh)"
 fi
 
-# pyenv — manages Python + virtualenv; activate AFTER mise so its shims take priority
+# pyenv — optional, only where installed; activate AFTER mise so its shims take priority
 export PYENV_ROOT="$HOME/.pyenv"
 [ -d "$PYENV_ROOT/bin" ] && export PATH="$PYENV_ROOT/bin:$PATH"
-export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
+[ -x "$PYENV_ROOT/shims/python" ] && export PIPENV_PYTHON="$PYENV_ROOT/shims/python"
 
 # ZPlug configuration
 # ZPLUGRC=$HOME/.zsh_zplug
@@ -133,7 +145,7 @@ fi
 # Initialize pyenv (after zinit to avoid conflicts).
 # virtualenv-init dropped: it added a per-prompt shell-out and project-env.zsh
 # already auto-activates .venv dirs; run `pyenv activate <env>` manually for named envs.
-eval "$(pyenv init -)" 2>/dev/null
+command -v pyenv >/dev/null 2>&1 && eval "$(pyenv init -)"
 
 # =============================================================================
 # CLIPBOARD UTILITIES
@@ -289,6 +301,11 @@ omni-test() {
         print -r -- "  Provider setup is broken; hiding its models for this picker session." >&2
         return 2 ;;
     esac
+    return 1
+  fi
+  if ! print -r -- "$body" | jq -e '.choices[0].message.tool_calls[]? | select(.function.name == "diagnostic_ping") | .function.arguments | fromjson | select(.value == "OK")' >/dev/null 2>&1; then
+    print -r -- "  FAIL: HTTP succeeded, but the model did not return the expected tool call. Response:" >&2
+    print -r -- "$body" | jq . >&2 2>/dev/null || print -r -- "$body" >&2
     return 1
   fi
   if ! print -r -- "$body" | jq -e '.choices[0].message.tool_calls[]? | select(.function.name == "diagnostic_ping") | .function.arguments | fromjson | select(.value == "OK")' >/dev/null 2>&1; then
@@ -488,7 +505,7 @@ alias gb='git branch'
 alias git_dog="git log --all --decorate --oneline --graph"
 
 # forgit — interactive git via fzf. `gi` prefix = "git interactive"; none of these
-# collide with the g* aliases above. (plugin loads in .zsh_zinit; FORGIT_NO_ALIASES=1)
+# collide with the g* aliases above. (plugin loads in .zsh_zinit; export FORGIT_NO_ALIASES=1)
 alias gia='forgit::add'          # stage files (multi-select + diff preview)
 alias gid='forgit::diff'         # browse a diff
 alias gil='forgit::log'          # browse the log
@@ -1043,3 +1060,8 @@ if [[ -n $CARDPUTER ]]; then
   PROMPT='%F{cyan}%1~%f %(?..%F{red}%?%f )%# '
   RPROMPT=''
 fi
+
+[[ -r ~/.lan.env ]] && source ~/.lan.env
+# the Pi: the Mac's current IP, pushed by `just -g lan` on the Mac to a dir every user reads
+for f in ~/.mac_ip.env /opt/toolchains/lan/mac_ip.env; do [[ ! -r $f ]] || source $f; done; unset f
+[[ -z ${MAC_IP:-} ]] || export MAC_IP

@@ -10,3 +10,9 @@ if [[ -z "${LANG:-}" || "${LANG}" == "C" || "${LANG}" == "POSIX" ]]; then
 fi
 export LC_CTYPE='en_US.UTF-8'
 # Deliberately NOT setting LC_ALL — it's a sledgehammer that breaks per-category overrides.
+
+# Homebrew on PATH for every shell (ssh, scripts, cron), not just login shells.
+for _brew in /opt/homebrew/bin/brew /usr/local/bin/brew /home/linuxbrew/.linuxbrew/bin/brew; do
+    [[ -x $_brew ]] && { eval "$("$_brew" shellenv)"; break; }
+done
+unset _brew

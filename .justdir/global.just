@@ -27,6 +27,12 @@
 # bodies; awk $1 and shell-function args are unaffected.)
 set positional-arguments
 
+# Topic files live next to this one. Absolute (~) because this file is read
+# through the ~/.config/just/justfile symlink; `import?` so a machine without
+# one of them still loads, and a second import of the same file is harmless.
+import? '~/dotfiles/.justdir/lan.just'
+import? '~/dotfiles/.justdir/mem.just'
+
 # Browse every HTML report under ~/zettelkasten/claude_code and open one.
 # Serves the whole tree once (dir listing = "see all"), fzf-picks one to open.
 [group('reports')]

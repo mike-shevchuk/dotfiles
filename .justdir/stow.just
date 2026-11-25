@@ -1,30 +1,46 @@
 # --- Stow packages ---
 
+# Stow one package with the REPO as the source of truth. Never use --adopt:
+# it moves a pre-existing local file INTO the repo, overwriting the tracked
+# config (a fresh Claude Code install's 3-line settings.json once replaced the
+# real 158-line one that way). Instead, every real file sitting where a link
+# must go is moved aside to <file>.pre-stow-<timestamp>, then stow links in.
+[private]
+_stow pkg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "{{justfile_directory()}}"
+    ts=$(date +%Y%m%d-%H%M%S)
+    # dry run lists conflicts as "... over existing target <rel> since ..." (a file)
+    # or "existing target is not owned by stow: <rel>" (a symlink made by hand)
+    conflicts=$(stow -n --no-folding --restow -t ~ "{{pkg}}" 2>&1 \
+        | sed -n -e 's/.* over existing target \(.*\) since .*/\1/p' \
+                 -e 's/.* existing target is not owned by stow: //p' || true)
+    while IFS= read -r rel; do
+        [ -n "$rel" ] || continue
+        mv "$HOME/$rel" "$HOME/$rel.pre-stow-$ts"
+        echo "  backed up ~/$rel → ~/$rel.pre-stow-$ts" >&2
+    done <<< "$conflicts"
+    # any conflict the dry run didn't name makes this fail loudly — never adopts
+    stow --no-folding --restow -t ~ "{{pkg}}"
+
 # Claude Code settings, hooks, sounds, statusline, commands
 claude:
-    stow --no-folding --adopt --restow -t ~ claude
+    @just --justfile "{{justfile()}}" _stow claude
 
 # Stow Codex configuration into ~/.codex
 codex:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    config="$HOME/.codex/config.toml"
-    if [ -f "$config" ] && [ ! -L "$config" ]; then
-        backup="$config.pre-stow-$(date +%Y%m%d-%H%M%S)"
-        mv "$config" "$backup"
-        echo "Backed up existing Codex config to $backup"
-    fi
-    stow --no-folding --restow -t ~ codex
+    @just --justfile "{{justfile()}}" _stow codex
 
 # Zsh config, plugins, spaces
 zsh:
-    stow --no-folding --adopt --restow -t ~ zsh
+    @just --justfile "{{justfile()}}" _stow zsh
 
 # Tmux config + plugins (tpm can't auto-discover plugins from .tmux.conf.local)
 tmux:
     #!/usr/bin/env bash
     set -euo pipefail
-    stow --no-folding --adopt --restow -t ~ tmux
+    just --justfile "{{justfile()}}" _stow tmux
     plugins_dir="$HOME/.tmux/plugins"
     plugins="
         tpm=tmux-plugins/tpm
@@ -48,16 +64,23 @@ tmux:
         echo "  installing opensessions..."
         git clone "https://github.com/Ataraxy-Labs/opensessions.git" "$os_dir"
     fi
-    if command -v bun >/dev/null 2>&1 || [ -x "$HOME/.bun/bin/bun" ]; then
-        BUN="${HOME}/.bun/bin/bun"
-        (cd "$os_dir" && "$BUN" install --frozen-lockfile 2>/dev/null || "$BUN" install 2>/dev/null) >/dev/null
+    # bun from PATH (mise, pacman…) first; ~/.bun is only the curl installer's spot
+    BUN=$(command -v bun || { [ -x "$HOME/.bun/bin/bun" ] && echo "$HOME/.bun/bin/bun"; } || true)
+    if [ -n "$BUN" ]; then
+        echo "  opensessions deps: (cd $os_dir && $BUN install)" >&2
+        (cd "$os_dir" && { "$BUN" install --frozen-lockfile >/dev/null || "$BUN" install >/dev/null; }) \
+            || echo "  WARN: bun install failed (opensessions sidebar may not work)" >&2
+    else
+        echo "  WARN: no bun — skipped opensessions deps" >&2
     fi
     chmod +x "$os_dir"/integrations/tmux-plugin/scripts/*.sh 2>/dev/null || true
     # Apply local patches
     for patch in "{{justfile_directory()}}"/tmux/patches/*.patch; do
         [ -f "$patch" ] || continue
-        if ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+        if git -C "$os_dir" apply -R --check "$patch" 2>/dev/null; then
             echo "  patch already applied: $(basename "$patch")"
+        elif ! git -C "$os_dir" apply --check "$patch" 2>/dev/null; then
+            echo "  WARN: patch does not fit this opensessions version, skipped: $(basename "$patch")" >&2
         else
             git -C "$os_dir" apply "$patch"
             echo "  applied: $(basename "$patch")"
@@ -67,43 +90,59 @@ tmux:
 
 # Kitty terminal config
 kitty:
-    stow --no-folding --adopt --restow -t ~ kitty
+    @just --justfile "{{justfile()}}" _stow kitty
 
 # LazyVIM neovim config
 lz:
-    stow --no-folding --adopt --restow -t ~ lz
+    @just --justfile "{{justfile()}}" _stow lz
 
 # PWNVIM neovim config
 pnv:
-    stow --no-folding --adopt --restow -t ~ pnv
+    @just --justfile "{{justfile()}}" _stow pnv
 
 # TNVIM neovim config
 tnv:
-    stow --no-folding --adopt --restow -t ~ tnv
+    @just --justfile "{{justfile()}}" _stow tnv
 
 # Yazi file manager config
 yazi:
-    stow --no-folding --adopt --restow -t ~ yazi
+    @just --justfile "{{justfile()}}" _stow yazi
+
+# fastfetch: default look + LAN IP, Wi-Fi, hostname
+fastfetch:
+    @just --justfile "{{justfile()}}" _stow fastfetch
 
 # Todoist config
 todoist:
-    stow --no-folding --adopt --restow -t ~ todoist
+    @just --justfile "{{justfile()}}" _stow todoist
 
 # Nerd fonts
 fonts:
-    stow --no-folding --adopt --restow -t ~ fonts
+    @just --justfile "{{justfile()}}" _stow fonts
 
 # Hammerspoon system monitor (macOS only)
 hammerspoon:
-    stow --no-folding --adopt --restow -t ~ hammerspoon
+    @just --justfile "{{justfile()}}" _stow hammerspoon
 
 # Hyprland config (Linux only)
 hyperland:
-    stow --no-folding --adopt --restow -t ~ hyperland
+    @just --justfile "{{justfile()}}" _stow hyperland
+
+# A machine's own global config becomes config.local.toml: mise merges it over
+# the repo's, so tools it had keep working. Also restores one an earlier run moved aside.
+
+# mise global tools (node, bun, jq, gh, just, python) → ~/.config/mise/config.toml, then install them
+mise: mise-install
+    @cd ~/.config/mise 2>/dev/null && [ ! -e config.local.toml ] || exit 0; \
+        if [ -f config.toml ] && [ ! -L config.toml ]; then mv config.toml config.local.toml; \
+        else old=$(ls -t config.toml.pre-stow-* 2>/dev/null | head -1); [ -n "$old" ] || exit 0; cp "$old" config.local.toml; fi; \
+        echo "  kept this machine's tools: ~/.config/mise/config.local.toml" >&2
+    @just --justfile "{{justfile()}}" _stow mise
+    mise install
 
 # Stow all packages
-all: claude codex zsh tmux kitty lz pnv tnv yazi todoist fonts hammerspoon hyperland
-    @echo "All packages stowed"
+all:
+    @just --justfile "{{justfile()}}" _steps mise claude codex zsh tmux kitty lz pnv tnv yazi fastfetch todoist fonts hammerspoon hyperland
 
 # Unstow a package: just remove <pkg>
 remove pkg:
