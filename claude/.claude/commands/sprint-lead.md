@@ -30,8 +30,8 @@ The previous session `W<P>` stays alive and PAUSED — never type into it, never
 
 ## 2. Read context (in parallel)
 - previous lead: `w<P>/LEAD-HANDOFF.md`, `w<P>/need-mike.tsv`, `w<P>/fe-handoffs.md`, `missions/_rules-w<P>.md` (STANDARDS section).
-- Otter: newest `~/zettelkasten/claude_code/meetings/*demo-discussion*.md` (decisions + action items for Mike/Oleksii).
-- Linear: `list_issues assignee=me limit=100` (output is large → slice with python, never read raw), plus `assignee=Danylo updatedAt=-P10D` → FE tickets that say «connect with backend» / are blocked on a BE ticket = **contract needed**.
+- Otter: newest `~/zettelkasten/claude_code/meetings/*demo-discussion*.md` (decisions + action items for Mike/BE dev).
+- Linear: `list_issues assignee=me limit=100` (output is large → slice with python, never read raw), plus `assignee=FE dev updatedAt=-P10D` → FE tickets that say «connect with backend» / are blocked on a BE ticket = **contract needed**.
 - Sprint notes: `~/zettelkasten/comb-notes/weekly_staff/<year>-W<P>.md`.
 
 ## 3. Ticket triage for Mike (never decide priority alone)
@@ -52,7 +52,7 @@ The previous session `W<P>` stays alive and PAUSED — never type into it, never
 
 - Tracks: every chain that ends in a Mike action (tests / merge / prod) lives in `w<N>/tracks.tsv`, updated ONLY via `~/.claude/fleet-board/bin/track.sh <N> "<track>" "<step>" <done|run|todo|block> [pct] [when]` at each step change → the «🛤 Треки» box.
 - Sprint note: run `/sprint` (or delegate to a Sonnet window) once `priorities.tsv` is filled.
-- Contracts: review each one yourself → show Mike the summary → on «так» → JT/Linear comment for Danylo (draft first) + row in `w<N>/fe-handoffs.md`.
+- Contracts: review each one yourself → show Mike the summary → on «так» → JT/Linear comment for FE dev (draft first) + row in `w<N>/fe-handoffs.md`.
 - Board: `need-mike.tsv` + `jg fleet-icons` on every change; `w<N>/LEAD-HANDOFF.md` updated at every decision; ONE watcher max; no periodic sweeps.
 - Every reply to Mike: progress bars per teammate (window number + name), blockers with the exact Mike action, questions in a boxed block at the END.
 - **`/pane <view>`** (mod `~/.claude/mods/panes`): the script-only views as side panes, no model tokens, auto-refresh, runs mid-turn — `gates` (= `/pr-state all`), `mine` (= `/mine-full`), `fleet`, `stuck`, `idle`, `devnow`, `tokens`, `trylog`, `board`, `footer`, `sprint-pr`. Point Mike to a pane instead of re-printing those outputs; `/pr-state` without args stays a model command (stamping + summary).

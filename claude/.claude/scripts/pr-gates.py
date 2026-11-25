@@ -237,7 +237,7 @@ def gates_of(row, repo_short, bug, num, plans, fe_only=False, review="", head=""
     if repo_short == "rescue-serverless" and fe_only:
         for k in ("TRY", "PRE", "JT"):
             g[k] = (None, "FE-only PR — н/з")
-        g["MIKE"] = (review == "APPROVED", "рев'ю Danylo на GitHub (FE-only PR, не твоя проба)")
+        g["MIKE"] = (review == "APPROVED", "рев'ю FE dev на GitHub (FE-only PR, не твоя проба)")
     elif repo_short == "rescue-serverless":
         jt = badges.get("JT", "·")
         g["TRY"] = (recipe not in ("no-try", "-"), "немає проби → try + рядок preflight-map")

@@ -13,7 +13,7 @@ Prove and document, for PR #$ARGUMENTS, **only what the frontend needs** — in 
 
 | `/just-fe` | `/just-test` |
 |---|---|
-| audience: FE dev (Danylo) + Mike | audience: reviewer |
+| audience: FE dev (FE dev) + Mike | audience: reviewer |
 | every endpoint the UI calls, one by one | the end-to-end flow + proof in storage/logs |
 | full response bodies, field table, TS types, errors | ✅/❌ per step, key fields |
 | "which screen uses it, what to render" | "is the backend correct" |

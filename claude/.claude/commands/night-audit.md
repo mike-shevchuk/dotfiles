@@ -43,7 +43,7 @@ argument-hint: "[N днів назад, за замовчуванням — з �
 - Dev = main (усі змерджені PR) або train, що ⊇ main. Якщо ні — сам збери train від свіжого origin/main (+ відкриті PR-гілки, якщо треба перевірити й їх) і задеплой, дочекайся success. Якщо dev тримає вікно флоту (lock проби, свій PRE) — дочекайся «dev free» або повідом deputy (🚂 train keeper), не зривай чужий прогін.
 
 ## 1. Список (одна команда)
-`cd ~/code/b2b/rescue-serverless/backend/src/lambdas/api/fast && just --justfile justfile.v2 merged <N>` — N = днів з понеділка спринту (W<N>, див. глобальне правило тижнів), або аргумент. Беремо лише rescue-serverless + workflow-engine PR **автора Mike і флоту**; чужі merge (Oleksii, Danylo) — лише для кроку 3 (регресії), не аудитуємо їх код.
+`cd ~/code/b2b/rescue-serverless/backend/src/lambdas/api/fast && just --justfile justfile.v2 merged <N>` — N = днів з понеділка спринту (W<N>, див. глобальне правило тижнів), або аргумент. Беремо лише rescue-serverless + workflow-engine PR **автора Mike і флоту**; чужі merge (BE dev, FE dev) — лише для кроку 3 (регресії), не аудитуємо їх код.
 
 ## 2. Жорстке рев'ю кожного PR (субагенти, ПО ОДНОМУ — RAM)
 Для кожного PR — Agent `model: "sonnet"` з брифом (≤15 рядків звіту):

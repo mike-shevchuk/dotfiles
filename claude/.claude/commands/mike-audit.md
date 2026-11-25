@@ -56,7 +56,7 @@ For every not-done row:
 - **Що це** — what the ask means for the product / user (one sentence, no jargon without a gloss).
 - **Що вже зроблено** — concrete: commit, PR, test, preflight result with commit sha and who ran it (lead vs window agent).
 - **Що лишилось** — the remaining steps, in order.
-- **Блокер** — who/what blocks it right now (Mike decision · Mike try · lead OK · agent W<N>:<i> · deploy · fixture lock held by <who> · Oleksii/Danylo · GitHub) and since when.
+- **Блокер** — who/what blocks it right now (Mike decision · Mike try · lead OK · agent W<N>:<i> · deploy · fixture lock held by <who> · BE dev/FE dev · GitHub) and since when.
 - **Ризик** — one line, only if real.
 
 ### 4. ⛔ Блокери — box table
