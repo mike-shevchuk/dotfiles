@@ -83,7 +83,7 @@ local function updateChooser()
     local img = images[ii]
     if img and (not history[ti] or img.t > (times[ti] or 0)) then
       items[#items + 1] = {
-        text = string.format("🖼 %dx%d · %s", img.w, img.h, os.date("%H:%M", math.floor(img.t))),
+        text = string.format("🖼 %dx%d · %s", math.floor(img.w), math.floor(img.h), os.date("%H:%M", math.floor(img.t))), -- Retina sizes can be fractional
         subText = img.path,
         image = img.thumb,
         imagePath = img.path,
