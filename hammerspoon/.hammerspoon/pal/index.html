@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en" data-theme="night">
 <head>
 <meta charset="utf-8">
@@ -32,7 +32,7 @@ kbd{font:500 11px/1 var(--font);padding:3px 6px;border-radius:5px;background:col
 #tname{font-size:11px;color:var(--dim);cursor:pointer;white-space:nowrap}
 #tname:hover{color:var(--accent)}
 
-#hdr{display:flex;align-items:center;gap:6px;padding:0 14px;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;border-bottom:1px solid var(--border);background:var(--shade)}
+#hdr{cursor:pointer;display:flex;align-items:center;gap:6px;padding:0 14px;font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;border-bottom:1px solid var(--border);background:var(--shade)}
 #hdr .line{overflow:hidden;text-overflow:ellipsis}
 .chip{padding:2px 8px;border-radius:10px;background:color-mix(in srgb,var(--fg) 8%,transparent);color:var(--fg);font-size:11.5px;flex:none}
 
@@ -103,7 +103,7 @@ pre.mono{font:11.5px/1.45 var(--mono)}
     <div id="lw"><div id="list"></div><div id="acts" hidden></div></div>
     <div id="pv"></div>
   </div>
-  <div id="foot"><span><b>↑↓</b> move · <b>↵</b> open · <b>⇥</b> folders · <b>⌘K</b> actions</span><span id="ctx"></span></div>
+  <div id="foot"><span><b>↑↓</b> move · <b>↵</b> open · <b>⇥</b> folders · <b>⌫</b> back · <b>⌘↑↓</b> order · <b>⌘K</b> actions</span><span id="ctx"></span></div>
 </div>
 <script>
 'use strict';
@@ -444,12 +444,28 @@ function panelRun(i) {
 }
 
 // ---------- folders / settings ----------
-function setFolder(id) {
+function setFolder(id, back) {
   if (!S.folders.some(f => f.id === id)) return;
+  const h = S.hist ||= [];
+  if (!back && S.cur && S.cur !== id) { h.push(S.cur); if (h.length > 20) h.shift(); }
   S.cur = id;
   closePanel();
   send({type: 'folder', id});
   drawRail(); drawHeader(); render();
+}
+// up a level: the folder's `up` row (a level inside it), else the previous folder / Home. ⌫, header click, mouse back
+function goBack() {
+  const up = curItems().find(i => i.up);
+  if (up) { run('run', up); return true; }
+  if (S.cur !== S.home) { setFolder((S.hist || []).pop() || S.home, true); return true; }
+  return false;
+}
+function moveFolder(d) { // ⌘↑/⌘↓: the current folder up/down the rail (Home stays first); Lua keeps the order
+  const F = S.folders, i = F.findIndex(f => f.id === S.cur), j = i + d;
+  if (i < 1 || j < 1 || j >= F.length) return;
+  [F[i], F[j]] = [F[j], F[i]];
+  drawRail();
+  send({type: 'set', k: 'order', v: F.map(f => f.id).join(',')});
 }
 function cycleFolder(d) {
   const n = S.folders.length;
@@ -506,11 +522,13 @@ document.addEventListener('keydown', e => {
   }
   if (m) {
     if (lk === 'k') { stop(); openPanel(); return; }
+    if (k === 'ArrowUp' || k === 'ArrowDown') { stop(); moveFolder(k === 'ArrowUp' ? -1 : 1); return; }
     if (lk === 't') { stop(); cycleTheme(e.shiftKey ? -1 : 1); return; }
     if (lk === 'h') { stop(); toggleHeader(); return; }
     if (lk === 'f') { stop(); run('fav'); return; }
     if (lk === 'c' && input.selectionStart === input.selectionEnd && !window.getSelection().toString()) { stop(); run('copy'); return; }
     if (digit) { stop(); const f = S.folders[+digit - 1]; if (f) setFolder(f.id); return; }
+    if (c === 'Digit0') { stop(); setFolder('menubar'); return; } // past ⌘9: the bar's hidden widgets, one key away
     if (k === 'Enter') { stop(); const a = S.results[S.sel]?.acts?.[0]; a ? run(a.id) : run(); return; }
     return;
   }
@@ -522,6 +540,9 @@ document.addEventListener('keydown', e => {
     case 'ArrowRight': case 'ArrowLeft': if (tiles) { stop(); move(k === 'ArrowRight' ? 1 : -1); } return;
     case 'Enter': stop(); run(); return;
     case 'Tab': stop(); cycleFolder(e.shiftKey ? -1 : 1); return;
+    case 'Backspace': // ⌫ on an empty query: up a level
+      if (!input.value && goBack()) { stop(); return; }
+      break;
     case 'Escape':
       stop();
       if (S.q) { input.value = ''; input.dispatchEvent(new Event('input')); } else send({type: 'hide'});
@@ -536,6 +557,8 @@ list.addEventListener('mousemove', e => {
   const el = e.target.closest('[data-i]');
   if (el && +el.dataset.i !== S.sel) { S.sel = +el.dataset.i; markSel(false); }
 });
+hdr.addEventListener('click', () => goBack());
+document.addEventListener('mouseup', e => { if (e.button === 3) { e.preventDefault(); goBack(); } }); // mouse side "back" button
 list.addEventListener('click', e => {
   const el = e.target.closest('[data-i]');
   if (!el) return;

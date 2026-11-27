@@ -1178,6 +1178,25 @@ if [ -f "$mt_state" ]; then
   fi
 fi
 
+# ---- /deputy-monitor indicator (Mike 26.11): deputy W<N>:13 health-check, last tick ----
+dm_sess=$(tmux display -p '#S' 2>/dev/null | tr '[:upper:]' '[:lower:]')
+dm_dir="$HOME/.claude/fleet-board/${dm_sess}"
+dm_until=$(awk '{print $2}' "$dm_dir/deputy-monitor.on" 2>/dev/null)
+dm_end=$(date -j -f "%H:%M" "${dm_until:-00:00}" +%s 2>/dev/null || echo 0)
+if [ -n "$dm_sess" ] && [ -f "$dm_dir/deputy-monitor.on" ] && [ -n "$dm_until" ] && [ "$dm_end" -le "$(date +%s)" ]; then
+  dm_core="${dim}🫡 mon off (до ${dm_until} · /deputy-monitor on)${reset}"; dm_seg=" ${dim}·${reset} ${dm_core}"; line1+="$dm_seg"
+elif [ -n "$dm_sess" ] && [ -f "$dm_dir/deputy-monitor.on" ]; then
+  dm_last=$(head -1 "$dm_dir/deputy-monitor.last" 2>/dev/null)
+  dm_hm=${dm_last%% *}
+  dm_ts=$(date -j -f "%H:%M" "$dm_hm" +%s 2>/dev/null || echo 0)
+  if [ -z "$dm_last" ] || [ $(( $(date +%s) - dm_ts )) -gt 1500 ]; then
+    dm_core="${yellow}🫡 mon ⚠ мовчить з ${dm_hm:-?}${reset}"; dm_seg=" ${dim}·${reset} ${dm_core}"
+  else
+    dm_core="${green}🫡 mon${reset} ${cyan}${dm_last}${reset}${dm_until:+ ${dim}до ${dm_until}${reset}}"; dm_seg=" ${dim}·${reset} ${dm_core}"
+  fi
+  line1+="$dm_seg"
+fi
+
 # ---- fleet badge (Mike 17.11): teammates working / blocked / asking the lead — lead window only ----
 # the lead may run as a background session (claude agents) with no TMUX env → also match its session name
 fl_name=$(printf %s "$input" | jq -r '.session_name // empty' 2>/dev/null)
@@ -1209,6 +1228,8 @@ if [ -n "$role_lines" ]; then
     _dm=$(( ${_dur%.*} / 60000 ))
     if [ "$_dm" -ge 60 ]; then line4+=" ${dim}·${reset} ⏲ ${dim}$(( _dm / 60 ))г${reset}"; else line4+=" ${dim}·${reset} ⏲ ${dim}${_dm}хв${reset}"; fi
   fi
+  # deputy monitor badge on the lead window's last line (role lines replace line1)
+  if [ -n "${dm_seg:-}" ] && [ "$(tmux display -p -t "${TMUX_PANE:-}" '#I' 2>/dev/null)" = "1" ]; then line4="${dm_core} ${dim}·${reset} ${line4}"; fi
   printf '%s\n' "$role_lines"
   printf "%b" "$line4"
   exit 0

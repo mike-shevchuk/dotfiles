@@ -354,6 +354,18 @@ end
 -- Folder builders take a callback; the cheap file-only ones answer at once.
 local function now(fn) return function(done) done(fn()) end end
 
+-- the menu-bar widgets, one row each; Enter opens its own menu (the bar hides what doesn't fit beside the notch)
+local function menubarItems()
+  local out = {}
+  for i, w in ipairs(require("modules.allbars").widgets()) do
+    local glyph = w.title:match("^[\xF0-\xF4][\x80-\xBF]+") or w.title:match("^[\xE2-\xEF][\x80-\xBF]+") -- leading emoji
+    out[#out + 1] = item({ id = "bar:" .. i, t = w.title ~= "" and w.title or "•", s = "відкрити меню",
+                           ic = w.icon and w.icon:encodeAsURLString() or glyph or "▦", f = "menubar", k = "sys" },
+                         { run = w.open, preview = w.title })
+  end
+  return out
+end
+
 local SNIPPETS = hs.configdir .. "/pal/snippets.json"
 local function snippetItems()
   local f = io.open(SNIPPETS)
@@ -688,6 +700,64 @@ local function fetchPRs(done)
   end)
 end
 
+-- Notification Center's list (bin/notifs.py reads usernoted's db; needs Full Disk Access for Hammerspoon)
+local FDA_URL = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles"
+local function fetchNotifs(done)
+  sh("/usr/bin/python3 -I " .. q1(hs.configdir .. "/bin/notifs.py"), function(out, err)
+    local list = decode(out)
+    if type(list) ~= "table" or list.error then
+      return done({ item({ id = "notif:error", t = "Дай Hammerspoon доступ: Full Disk Access",
+                           s = (type(list) == "table" and list.error) or trim(err):sub(1, 200), ic = "⚠️", f = "notifications", k = "sys" },
+                         { run = function() hs.urlevent.openURL(FDA_URL) end,
+                           preview = "macOS тримає базу сповіщень за Full Disk Access.\nSettings → Privacy & Security → Full Disk Access → увімкни Hammerspoon, потім reload." }) })
+    end
+    -- two levels: the apps (newest first), Enter opens one; inside it an `up` row (⌫ runs it) back to the apps.
+    -- The open app shows in the header crumb. Claude's hook notifications arrive as Script Editor (osascript)
+    local groups, order = {}, {}
+    for _, n in ipairs(list) do
+      if not groups[n.app] then groups[n.app], order[#order + 1] = {}, n.app end
+      table.insert(groups[n.app], n)
+    end
+    local function info(id)
+      local claude = id == "com.apple.scripteditor2" -- osascript from the terminal = Claude Code's hooks
+      local web = id:match("^_web_center_:web%.app%.(.+)$") -- a site added to the Dock / web push: show the site
+      local app = claude and "Claude Code" or web or hs.application.nameForBundleID(id)
+        or (id:gsub("^_%w+_center_:", "")) -- _system_center_:com.apple.x → com.apple.x, not just "x"
+      local path = not (claude or web) and hs.application.pathForBundleID(id)
+      if path and not iconURL[path] then encodeIcon({ path = path }) end
+      return app, claude and "🤖" or web and "🌐" or (path and iconURL[path]) or "💬"
+    end
+    local function go(id) return function() M.notifOpen = id; M.folder("notifications") end end
+    local open, out2 = M.notifOpen and groups[M.notifOpen] and M.notifOpen, {}
+    for _, f in ipairs(M.FOLDERS) do if f.id == "notifications" then f.crumb = open and (info(open)) or nil end end
+    if not open then
+      for _, id in ipairs(order) do
+        local app, ic = info(id)
+        local ns = groups[id]
+        out2[#out2 + 1] = item({ id = "notifapp:" .. id, t = app .. " · " .. #ns, s = ago(ns[1].t) .. " · " .. (ns[1].title ~= "" and ns[1].title or ns[1].body),
+                                 ic = ic, f = "notifications", k = "sys" }, { stay = true, run = go(id), preview = app .. ": " .. #ns .. " сповіщень. Enter — відкрити." })
+      end
+      return done(out2)
+    end
+    local app, ic = info(open)
+    out2[1] = item({ id = "notifup", t = "← Усі програми", s = "⌫", ic = "↩️", f = "notifications", k = "sys", up = true },
+                   { stay = true, run = go(nil), preview = "Назад до списку програм (⌫)." })
+    for i, n in ipairs(groups[open]) do
+      local text = table.concat({ n.title, n.sub, n.body }, "\n"):gsub("\n+", "\n")
+      out2[#out2 + 1] = item({ id = "notif:" .. open .. ":" .. i .. ":" .. n.t, t = n.title ~= "" and n.title or n.body,
+                               s = ago(n.t) .. (n.title ~= "" and (" · " .. n.body) or ""), ic = ic, f = "notifications", k = "sys" }, {
+        copy = text,
+        run = function()
+          local site = open:match("^_web_center_:web%.app%.(.+)$")
+          if site then hs.urlevent.openURL("https://" .. site) else hs.application.launchOrFocusByBundleID(open) end
+        end,
+        preview = app .. " · " .. os.date("%d.%m %H:%M", n.t) .. "\n\n" .. text,
+      })
+    end
+    done(out2)
+  end)
+end
+
 -- ─── Folders ────────────────────────────────────────────────────
 
 M.FOLDERS = {
@@ -701,6 +771,8 @@ M.FOLDERS = {
   { id = "todoist",   name = "todoist",   icon = "☑️", build = fetchTodoist, net = true },
   { id = "prs",       name = "PRs",       icon = "🔀", build = fetchPRs, net = true },
   { id = "system",    name = "system",    icon = "🖥", build = systemItems },
+  { id = "menubar",   name = "menubar",   icon = "📊", build = now(menubarItems) },
+  { id = "notifications", name = "notifications", icon = "💬", build = fetchNotifs, net = true },
   { id = "shell",     name = "shell",     icon = "💻", build = now(zshItems) },
   { id = "clipboard", name = "clipboard", icon = "📋", build = now(clipItems) },
   { id = "snippets",  name = "snippets",  icon = "✂️", build = now(snippetItems) },
@@ -754,7 +826,7 @@ end
 -- The line (a folder without a path counts its items), also cut into chips for
 -- the header's chip mode.
 local function status(f, n, line)
-  line = line or ("%s %s  ·  %d items"):format(f.icon, f.name, n)
+  line = line or ("%s %s%s  ·  %d items"):format(f.icon, f.name, f.crumb and ("  › " .. f.crumb) or "", n) -- crumb: a level inside
   local chips = {}
   for part in (line .. "  "):gmatch("(.-)%s%s+") do
     local c = trim(part)
@@ -784,7 +856,8 @@ function M.homeItems()
   add("themes", themeItems())
   add("snippets", snippetItems())
   for _, f in ipairs(M.FOLDERS) do
-    if f.id ~= "home" and f.id ~= "clipboard" and M._cache[f.id] then add(f.id, M._cache[f.id]) end
+    -- menubar is live state: a cached "start meeting" must not run mid-recording from Home
+    if f.id ~= "home" and f.id ~= "clipboard" and f.id ~= "menubar" and M._cache[f.id] then add(f.id, M._cache[f.id]) end
   end
   M._cache.home = out
   return out, parts
@@ -1028,8 +1101,15 @@ local function init()
   local sigs = partSigs(parts)
   -- a (re)loaded page has nothing but this Home, so the open that follows sends nothing
   sent, homeDirty, M._homeKey = { home = folderSig(status(byId.home, #items), sigs) }, false, homeKey()
-  local folders = {}
-  for _, f in ipairs(M.FOLDERS) do folders[#folders + 1] = { id = f.id, name = f.name, icon = f.icon, view = f.view } end
+  -- the rail in Mike's order (⌘↑/⌘↓ on the page, kv folderOrder); Home first, folders new since then at the end
+  local rank, folders = {}, {}
+  for i, id in ipairs(hs.fnutils.split(kvGet("folderOrder", ""), ",")) do rank[id] = i end
+  for i, f in ipairs(M.FOLDERS) do
+    folders[#folders + 1] = { id = f.id, name = f.name, icon = f.icon, view = f.view,
+                              _r = f.id == "home" and 0 or rank[f.id] or 1000 + i }
+  end
+  table.sort(folders, function(a, b) return a._r < b._r end)
+  for _, f in ipairs(folders) do f._r = nil end
   local payload = { type = "init", folders = folders, usage = M.usage(), abbrev = M.abbrev(),
                     keywords = M.KEYWORDS, themes = M.THEMES }
   local s = settings()
@@ -1103,6 +1183,7 @@ function M.handle(m)
   elseif t == "query" then M.query(m.q or "")
   elseif t == "set" then
     if m.k == "theme" or m.k == "header" then kvSet(m.k, tostring(m.v)) end
+    if m.k == "order" then kvSet("folderOrder", tostring(m.v)) end
     send(settings())
   elseif t == "hide" then M.hide(true)
   elseif t == "copy" then hs.pasteboard.setContents(m.text or ""); M.hide(true)

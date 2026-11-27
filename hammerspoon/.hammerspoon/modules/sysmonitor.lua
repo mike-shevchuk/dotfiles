@@ -122,6 +122,44 @@ local function quitApp(name)
     end)
 end
 
+-- ── battery: energy hogs (top POWER column), sleep blockers, battery power mode — refreshed with the 60 s tick
+local POWER_CMDS = { "top -l 2 -s 1 -o power -n 6 -stats pid,command,power", "pmset -g assertions", "pmset -g custom" }
+local cachedBatt
+
+local function battTitle()
+    local pct = hs.battery.percentage()
+    if not pct then return nil end
+    if hs.battery.powerSource() == "AC Power" then return string.format("⚡%d%%", pct) end
+    return string.format("🔋%d%% %.0fW", pct, math.abs(hs.battery.watts() or 0))
+end
+
+local function getEnergyTop()
+    -- the first top sample has no deltas: parse only the block after the LAST header
+    local block = (cached[POWER_CMDS[1]] or ""):match(".*\nPID[^\n]*\n(.*)$") or ""
+    local rows = {}
+    for line in block:gmatch("[^\n]+") do
+        local pid, name, power = line:match("^(%d+)%s+(.-)%s+([%d.]+)%+?%s*$")
+        if pid then table.insert(rows, { pid = tonumber(pid), name = name, power = tonumber(power) }) end
+    end
+    return rows
+end
+
+local function getSleepBlockers()
+    local rows = {}
+    for pid, name, kind, what in (cached[POWER_CMDS[2]] or ""):gmatch("pid (%d+)%(([^)]+)%):[^\n]-(Prevent%w-Sleep) named: \"([^\"]*)\"") do
+        if name ~= "powerd" then -- powerd always holds "Prevent sleep while display is on"
+            table.insert(rows, { pid = tonumber(pid), name = name, display = kind:find("Display") ~= nil, what = what })
+        end
+    end
+    return rows
+end
+
+-- pmset -b powermode: 0 auto, 1 low power, 2 high power (only the battery profile; AC stays as is)
+local function battPowerMode()
+    local sect = (cached[POWER_CMDS[3]] or ""):match("Battery Power:(.-)AC Power:") or ""
+    return tonumber(sect:match("powermode%s+(%d)"))
+end
+
 local function killProcess(pid, name)
     local btn = hs.dialog.blockAlert(
         string.format("Kill process: %s (PID %d)?", name, pid),
@@ -157,6 +195,7 @@ local function updateTitle()
 
     local parts = { guard.enabled and "🔨" or "⛔" }
     table.insert(parts, string.format("RAM: %d%%", cachedRamPct))
+    if cachedBatt then table.insert(parts, cachedBatt) end
 
     local pomoTitle = pomodoro.getTitle()
     if pomoTitle then
@@ -177,7 +216,10 @@ local refreshTask
 function M.refresh()
     if not menubar or (refreshTask and refreshTask:isRunning()) then return end
     local cmds = { table.unpack(REFRESH_CMDS) }
-    if tick % TOP_EVERY == 0 or not cached[TOPMEM_CMD] then table.insert(cmds, TOPMEM_CMD) end
+    if tick % TOP_EVERY == 0 or not cached[TOPMEM_CMD] then
+        table.insert(cmds, TOPMEM_CMD)
+        for _, c in ipairs(POWER_CMDS) do table.insert(cmds, c) end
+    end
     tick = tick + 1
     refreshTask = hs.task.new("/bin/sh", function(_, out)
         local i = 0
@@ -187,6 +229,7 @@ function M.refresh()
         end
         local used, total = getMemoryUsage()
         cachedRamPct = total > 0 and math.floor(used / total * 100) or 0
+        cachedBatt = battTitle()
         updateTitle()
     end, { "-c", "export PATH='" .. PATH .. "'; " .. table.concat(cmds, "; printf '\\1\\n'; ") })
     refreshTask:start()
@@ -203,6 +246,45 @@ buildMenu = function()
     cachedRamPct = pct
 
     local menu = {}
+
+    -- Battery: status, who drains it (click → kill), who keeps the Mac awake, battery power mode
+    local pct, w, left = hs.battery.percentage(), hs.battery.watts() or 0, hs.battery.timeRemaining() or -1
+    if pct then
+        local onAC = hs.battery.powerSource() == "AC Power"
+        table.insert(menu, { title = styled(onAC
+            and string.format("⚡ %d%%  від мережі  %+.0f Вт у батарею", pct, w)
+            or string.format("🔋 %d%%  від батареї  −%.0f Вт%s", pct, math.abs(w),
+                left > 0 and string.format("  ≈ %dг %02dхв", left // 60, left % 60) or "")), disabled = true })
+        local hogs = {}
+        for _, r in ipairs(getEnergyTop()) do
+            -- WindowServer / launchd (pid 1) / kernel_task (pid 0): a kill logs out or panics — show, don't offer
+            table.insert(hogs, { title = styled(string.format("%-28s %6.1f", utf8sub(r.name, 28), r.power)),
+                disabled = r.pid <= 1 or KEEP_APPS[r.name] or false,
+                fn = function() killProcess(r.pid, r.name) end })
+        end
+        if #hogs > 0 then
+            table.insert(menu, { title = styled("  Хто їсть енергію (клік — kill) →"), menu = hogs })
+        end
+        local blockers = {}
+        for _, b in ipairs(getSleepBlockers()) do
+            -- only a bare `caffeinate` is safe to kill; system daemons (coreaudiod, runningboardd…) just show who asked
+            table.insert(blockers, { title = styled(string.format("%s %-16s %s", b.display and "🖥" or "💻",
+                utf8sub(b.name, 16), utf8sub(b.what, 50))), disabled = b.name ~= "caffeinate",
+                fn = function() killProcess(b.pid, b.name) end })
+        end
+        table.insert(menu, { title = styled(string.format("  Не дають спати: %d →", #blockers)),
+            menu = #blockers > 0 and blockers or nil, disabled = #blockers == 0 })
+        local mode = battPowerMode()
+        table.insert(menu, {
+            title = mode == 1 and "🐢 Low Power від батареї: ON (клік — вимкнути)" or "🐇 Low Power від батареї: OFF (клік — увімкнути)",
+            fn = function()
+                -- pmset needs root: macOS asks for the admin password once per click
+                hs.osascript.applescript(string.format('do shell script "pmset -b powermode %d" with administrator privileges', mode == 1 and 0 or 1))
+                tick = 0; M.refresh()
+            end,
+        })
+        table.insert(menu, { title = "-" })
+    end
 
     -- Memory overview
     table.insert(menu, {
@@ -339,13 +421,14 @@ end
 function M.ramPct() return cachedRamPct end
 M.menu = function() return buildMenu() end -- debug / test: the items the menubar shows when it opens
 
--- caffeine on a schedule: on at CAFF_FROM, off at CAFF_TO; it flips only at those boundaries, so a manual
--- toggle in between holds until the next one (the board has the same 10–19 window for its screen)
+-- caffeine on a schedule: on at CAFF_FROM, off at CAFF_TO, and only on AC power — on battery a screen that never
+-- dims was the biggest drain. It flips only at those boundaries (hour or plug/unplug), so a manual toggle in
+-- between holds until the next one (the board has the same 10–19 window for its screen)
 local CAFF_FROM, CAFF_TO = 10, 19
 local caffInWindow
 local function caffeineSchedule()
     local h = tonumber(os.date("%H"))
-    local inWin = h >= CAFF_FROM and h < CAFF_TO
+    local inWin = h >= CAFF_FROM and h < CAFF_TO and hs.battery.powerSource() == "AC Power"
     if inWin ~= caffInWindow then
         caffInWindow = inWin
         hs.caffeinate.set("displayIdle", inWin)
@@ -370,6 +453,7 @@ function M.start()
     timer = hs.timer.doEvery(REFRESH_INTERVAL, M.refresh)
     caffeineSchedule()
     M.caffTimer = hs.timer.doEvery(60, caffeineSchedule)
+    M.battWatcher = hs.battery.watcher.new(caffeineSchedule):start() -- plug/unplug flips caffeine at once
 end
 
 return M

@@ -78,7 +78,7 @@ frecency.
 ## Keys (JS)
 
 ↑↓ move · ↵ run · ⌘↵ secondary (first of acts) · Esc closes panel → clears
-query → hides · ⇥/⇧⇥ next/prev folder · ⌘1–9 folder · ⌘K actions ·
+query → hides · ⇥/⇧⇥ next/prev folder · ⌫ on empty query → runs the folder's `up:true` item (a level inside a folder), else previous folder (Home) · ⌘↑/⌘↓ move the current folder on the rail (`set{k:"order", v:"id,id,…"}`, Home stays first) · ⌘1–9 folder · ⌘K actions ·
 ⌘T next theme · ⌘H header line/chips. Mouse: click row runs, click rail switches.
 
 ## Additions (lead, after UI v1)

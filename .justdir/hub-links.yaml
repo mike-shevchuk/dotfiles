@@ -1,5 +1,5 @@
-# Hub links — the page at http://mac.local:8890/_links (served by `just -g hub`). Edit here; the page re-reads on refresh.
-# Placeholders: {IP} = mac.local (the name, not the IP: it changes) · {HUB} = http://{IP}:8890 · {W} = current week (W1 = week of Jan's first Monday)
+# Hub links — the page at http://macbook.local:8890/_links (served by `just -g hub`). Edit here; the page re-reads on refresh.
+# Placeholders: {IP} = macbook.local (the name, not the IP: it changes) · {HUB} = http://{IP}:8890 · {W} = current week (W1 = week of Jan's first Monday)
 # Project: id (= registry.conf name, if any), name, icon, group, about, url (main link), check (port | path that must exist),
 #          links: list of [title, url] ("quote" a title with { } in it) — the project's important links (boards, notes, reports, dashboards).
 # Projects in ~/code/projctl/registry.conf that are not listed here appear by themselves (group «projctl», check = their port).
