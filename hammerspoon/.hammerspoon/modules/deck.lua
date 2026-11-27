@@ -87,7 +87,8 @@ local function cut(s, n) local o = utf8.offset(s, n + 1); return o and s:sub(1, 
 
 local function task(cmd, args, cb)
   local t = hs.task.new(cmd, function(code, out) if cb then cb(out or "", code) end end, args)
-  t:setEnvironment({ PATH = PATH, HOME = HOME, LANG = "en_US.UTF-8" })
+  -- USER: claude -p finds its login in the Keychain by it; without it the summary is "Not logged in"
+  t:setEnvironment({ PATH = PATH, HOME = HOME, USER = os.getenv("USER") or hs.execute("/usr/bin/id -un"):gsub("%s+$", ""), LANG = "en_US.UTF-8" })
   t:start()
   return t
 end
@@ -1618,6 +1619,7 @@ end
 -- ── Garmin (helper/garmin.py, unofficial garminconnect): once logged in (`just garmin-login` in esp-deck),
 -- every 15 min → /state.garmin for the board's Здоров'я tab ──
 local GARMIN_PY, UV = HOME .. "/code/esp-deck/helper/garmin.py", HOME .. "/.local/bin/uv"
+if not hs.fs.attributes(UV) then UV = "/opt/homebrew/bin/uv" end -- a Mac where uv came from brew, not the installer
 local garmin
 local function refreshGarmin()
   if not hs.fs.attributes(HOME .. "/.garminconnect") then return end -- not logged in yet
@@ -1657,6 +1659,7 @@ end
 -- 🎙 meetings (Plaud-style): the board streams the room's PCM (/meet/pcm), on stop helper/meeting.py runs whisper
 -- + a Claude summary → ~/.local/share/esp-deck/meetings/<id>.md; /state.meet = {state, note, last[3]}
 local MEET_DIR, MEET_PY = HOME .. "/.local/share/esp-deck/meetings", HOME .. "/code/esp-deck/helper/meeting.py"
+hs.fs.mkdir(HOME .. "/.local/share/esp-deck"); hs.fs.mkdir(MEET_DIR) -- mkdir isn't recursive: a new Mac with no board yet has neither
 local meet = { state = "idle", last = {} }
 local meetId, meetCmd = nil, { n = 0 } -- meetCmd: the Mac's 🎙 menu asks the board to start / stop (it polls /state)
 -- a board 📷 by where the board said: front = its path typed into the tmux pane in focus (the Claude window you're in),
@@ -1941,6 +1944,10 @@ local function meetMenu()
     table.insert(items, { title = "   розшифровка → мовці → самері → папка", disabled = true })
     table.insert(items, { title = "-" })
   end
+  if meet.state == "rec" then
+    local t = meet.t0 and os.time() - meet.t0 or 0
+    table.insert(items, { title = string.format("🔴 Запис іде · %d:%02d · %s", t // 60, t % 60, meetMac and "Mac" or "плата"), disabled = true })
+  end
   if meet.state == "rec" and meetMac then
     table.insert(items, { title = "■ Зупинити запис на Mac", fn = function() meetMac:interrupt() end }) -- ffmpeg closes the file
   elseif meet.state == "rec" then
@@ -2049,11 +2056,9 @@ local function meetBar()
   meet.note = meet.state == "rec" and meet.lastPcm and os.time() - meet.lastPcm > 90
     and "плата поза зв'язком — пише в пам'ять і дошле" or (meet.state ~= "rec" and meet.note or nil)
   if not M.meetBar then return end
-  local t = meet.state == "rec" and meet.t0 and os.time() - meet.t0 or 0
-  local pct = meet.progress()
-  M.meetBar:setTitle(meet.state == "rec" and string.format("🔴 %d:%02d", t // 60, t % 60)
-    or pct and string.format("🎙 %s %d%%", meet.bar(pct), pct)
-    or (meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "🎙…" or "🎙")
+  -- one glyph wide: a wider title doesn't fit beside the notch on a full bar and macOS hides it; time / % live in the menu
+  M.meetBar:setTitle(meet.state == "rec" and "🔴"
+    or (meet.progress() or meet.state == "stt" or meet.state == "spk" or meet.state == "sum") and "⏳" or "🎙")
 end
 
 -- the teammate's composite metrics (helper/health_metrics.py, docs/health-metrics.md): only what the board draws
