@@ -5,6 +5,7 @@
 --
 
 require("modules.stallprof") -- first: times every callback / sync call the modules below set up (>500 ms → deck-slow.log)
+require("modules.allbars") -- before any widget: records each menubar for pal's menubar folder
 local guard       = require("modules.guard")
 local windows     = require("modules.windows")
 local apps        = require("modules.apps")
