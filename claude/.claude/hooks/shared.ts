@@ -1,11 +1,12 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { readFileSync } from "fs";
 import { platform } from "os";
 import { homedir } from "os";
 import { join } from "path";
 
+// text goes as argv (no shell), so only control chars need dropping: Cyrillic, quotes and emoji stay
 export function sanitize(str: string): string {
-  return str.replace(/[^a-zA-Z0-9 _\-.,!?:()]/g, "");
+  return str.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
 }
 
 export function readInput<T>(): T {
@@ -18,10 +19,11 @@ export function notify(title: string, message: string, soundFile: string): void 
   const sound = join(homedir(), ".claude", "sounds", `${soundFile}.wav`);
 
   if (platform() === "darwin") {
-    exec(`osascript -e 'display notification "${safe_message}" with title "${safe_title}"'`);
-    exec(`afplay "${sound}"`);
+    execFile("osascript", ["-e", "on run argv", "-e", "display notification (item 1 of argv) with title (item 2 of argv)",
+      "-e", "end run", safe_message, safe_title]);
+    execFile("afplay", [sound]);
   } else {
-    exec(`notify-send "${safe_title}" "${safe_message}"`);
-    exec(`paplay "${sound}" 2>/dev/null || aplay "${sound}" 2>/dev/null`);
+    execFile("notify-send", [safe_title, safe_message]);
+    execFile("paplay", [sound], (err) => { if (err) execFile("aplay", [sound], () => {}); });
   }
 }
