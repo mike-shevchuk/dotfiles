@@ -108,14 +108,14 @@ hub port="8890" root="~/zettelkasten/claude_code":
     // every page links back to the hub index by LAN IP (Mike 16.10), so a link opened on the phone/another machine still works
     // LAN IP re-read per request: DHCP moves it (.15 → .182 → .85), a value cached at start went stale
     const curIP = () => Object.values(networkInterfaces()).flat().find(i => i && i.family === "IPv4" && !i.internal)?.address ?? "127.0.0.1";
-    const HOME_LINK = () => `<a href="http://mac.local:${PORT}/" title="hub" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:18px;padding:5px 12px;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 2px 8px #0006">🏠 Hub</a>`;
+    const HOME_LINK = () => `<a href="http://macbook.local:${PORT}/" title="hub" style="position:fixed;left:12px;bottom:12px;z-index:2147483647;background:#161b22;color:#58a6ff;border:1px solid #30363d;border-radius:18px;padding:5px 12px;font:600 13px system-ui,sans-serif;text-decoration:none;box-shadow:0 2px 8px #0006">🏠 Hub</a>`;
     const DARK = `<style>body{background:#0d1117;color:#c9d1d9;font:15px/1.6 system-ui,-apple-system,sans-serif;max-width:900px;margin:2rem auto;padding:0 1rem}a{color:#58a6ff;text-decoration:none}a:hover{text-decoration:underline}h1,h2,h3{border-bottom:1px solid #21262d;padding-bottom:.3em}pre{background:#161b22;border-radius:6px;padding:12px;overflow:auto}code{background:#161b22;border-radius:6px;padding:2px 5px}li{margin:.2em 0}.d{color:#8b949e;font-size:.85em}</style>`;
     const html = (s: string) => new Response(s, { headers: { "content-type": "text/html; charset=utf-8" } });
 
     // /_links ▶ ■ ↻: projects with a running `just -g proj …` (one action per project at a time)
     const ctlBusy = new Map<string, string>();
     // who may press them: this Mac, or a LAN browser that sends the deck's own token (Mike 22.11: he sits at the MacBook).
-    // The page keeps it in localStorage (per port, unlike a cookie, which every service on mac.local would receive).
+    // The page keeps it in localStorage (per port, unlike a cookie, which every service on macbook.local would receive).
     const isSelf = (ip: string) => /^(127\.|::1$|::ffff:127\.)/.test(ip) || ip.replace(/^::ffff:/, "") === curIP();
     const deckTok = async () => ((await readFile(join(HOME, ".hammerspoon/.env"), "utf8").catch(() => "")).match(/^DECK_TOKEN=([0-9a-f]{16,})\s*$/im) ?? [])[1] ?? "";
     const keyOk = async (req: Request) => { const a = Buffer.from(req.headers.get("x-hub-key") ?? ""), b = Buffer.from(await deckTok()); return b.length > 0 && a.length === b.length && timingSafeEqual(a, b); };
@@ -432,7 +432,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
           const ip = server.requestIP(req)?.address ?? "", u = new URL(req.url);
           if (!isLan(ip) || !(isSelf(ip) || await keyOk(req))) return json({ error: "потрібен ключ: відкрий /_links#k=… ще раз" }, 403);
           if (req.method !== "POST") return new Response("method not allowed", { status: 405 });
-          if (!["mac.local", "localhost", "127.0.0.1", curIP()].includes(u.hostname) || req.headers.get("origin") !== u.origin) return json({ error: "чужий Host або Origin" }, 403);
+          if (!["macbook.local", "localhost", "127.0.0.1", curIP()].includes(u.hostname) || req.headers.get("origin") !== u.origin) return json({ error: "чужий Host або Origin" }, 403);
           const body = await req.text(); if (body.length > 1024) return new Response("too large", { status: 413 });
           let q: any; try { q = JSON.parse(body); } catch { return bad("invalid JSON"); }
           const id = q?.id, act = q?.action;
@@ -454,14 +454,14 @@ hub port="8890" root="~/zettelkasten/claude_code":
           } catch (e) { return json({ ok: false, error: String(e) }, 500);
           } finally { ctlBusy.delete(id); }
         }
-        // GET /_links/phone[/next/] → the phone app (:8072). The app keeps its token per address, so a plain link to mac.local opens
+        // GET /_links/phone[/next/] → the phone app (:8072). The app keeps its token per address, so a plain link to macbook.local opens
         // «невірний токен» (Mike 22.11). On this Mac the redirect carries #token (a fragment: never sent to a server, not in
         // /_links/data); any other device gets the plain address.
         if (p === "/_links/phone" || p === "/_links/phone/next/") {
           const ip = server.requestIP(req)?.address ?? "", h = new URL(req.url).hostname;
           if (!isLan(ip)) return new Response("LAN only", { status: 403 });
-          const tok = isSelf(ip) && ["mac.local", "localhost", "127.0.0.1", curIP()].includes(h) ? await deckTok() : "";
-          return new Response(null, { status: 302, headers: { location: `https://mac.local:8072/${p.endsWith("/next/") ? "next/" : ""}${tok ? "#token=" + tok : ""}`, "cache-control": "no-store" } });
+          const tok = isSelf(ip) && ["macbook.local", "localhost", "127.0.0.1", curIP()].includes(h) ? await deckTok() : "";
+          return new Response(null, { status: 302, headers: { location: `https://macbook.local:8072/${p.endsWith("/next/") ? "next/" : ""}${tok ? "#token=" + tok : ""}`, "cache-control": "no-store" } });
         }
         if (p === "/_links" || p === "/_links/data" || p === "/_esp" || p.startsWith("/_esp/")) {
           const ip = server.requestIP(req)?.address ?? "";
@@ -469,7 +469,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
           if (p === "/_links") return html(await readFile(join(HOME, "dotfiles/.justdir/hub-links.html"), "utf8"));
           if (p === "/_links/data") {
             // links by name, not IP: the Mac's IP changes (Mike 18.11)
-            const h0 = new URL(req.url).hostname, IP = /^(127\.|localhost$|\d+\.\d+\.\d+\.\d+$)/.test(h0) ? "mac.local" : h0, now = new Date(), jan = new Date(now.getFullYear(), 0, 1);
+            const h0 = new URL(req.url).hostname, IP = /^(127\.|localhost$|\d+\.\d+\.\d+\.\d+$)/.test(h0) ? "macbook.local" : h0, now = new Date(), jan = new Date(now.getFullYear(), 0, 1);
             const fm = new Date(now.getFullYear(), 0, 1 + (8 - jan.getDay()) % 7);   // W1 = week of the first Monday (not ISO)
             const W = Math.floor((+now - +fm) / 864e5 / 7) + 1;
             const fill = (s: unknown) => String(s ?? "").replaceAll("{HUB}", `http://${IP}:${PORT}`).replaceAll("{IP}", IP).replaceAll("{W}", String(W));
@@ -502,7 +502,7 @@ hub port="8890" root="~/zettelkasten/claude_code":
             const host = (u: string) => { try { return new URL(u); } catch { return null; } };
             const local = (u: string) => /^(127\.0\.0\.1|localhost)$/.test(host(u)?.hostname ?? "");
             const probes = new Map<number, Promise<boolean | null>>();   // one TCP probe per port per request
-            const off = async (u: string) => { const h = host(u); if (!h || ![IP, curIP(), "mac.local", "127.0.0.1", "localhost"].includes(h.hostname)) return false;
+            const off = async (u: string) => { const h = host(u); if (!h || ![IP, curIP(), "macbook.local", "127.0.0.1", "localhost"].includes(h.hostname)) return false;
               const port = Number(h.port || (h.protocol === "https:" ? 443 : 80)); if (port === PORT) return false;
               if (!probes.has(port)) probes.set(port, alive(port)); return !(await probes.get(port)); };
             const phone = (s: string) => self ? s.replace(/^https:\/\/[^/]+:8072\/(next\/)?$/, (_, n) => "/_links/phone" + (n ? "/next/" : "")) : s;
